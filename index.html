@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#113a34" />
+  <meta name="description" content="ALSHANTAF INVEST - منصة الشنتف للعقار والاستثمار" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <title>ALSHANTAF INVEST | الشنتف للعقار والاستثمار</title>
+  <style>
+    :root{
+      --bg:#f6f3ed;
+      --surface:#ffffff;
+      --surface-2:#fbfaf7;
+      --ink:#182228;
+      --ink-soft:#61707a;
+      --green:#113a34;
+      --green-2:#1e4f47;
+      --gold:#caa064;
+      --gold-2:#d7b27f;
+      --line:rgba(24,34,40,.08);
+      --shadow:0 18px 60px rgba(16,31,37,.09);
+      --radius:26px;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;background:linear-gradient(180deg,#f8f5ef 0%,#f2eee7 100%);font-family:"Alexandria",Arial,sans-serif;color:var(--ink);overflow-x:hidden}
+    html[dir='ltr'] body{font-family:"Manrope",Arial,sans-serif}
+    a{text-decoration:none;color:inherit}
+    img{display:block;max-width:100%}
+    button,input,textarea,select{font:inherit}
+    button{cursor:pointer}
+    .container{width:min(1240px,calc(100% - 32px));margin-inline:auto}
+    .section{padding:88px 0}
+    .eyebrow{display:inline-flex;align-items:center;gap:10px;color:var(--gold);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+    .eyebrow:before{content:'';width:26px;height:1px;background:currentColor}
+    .section-head{display:flex;align-items:end;justify-content:space-between;gap:24px;margin-bottom:30px}
+    .section-title{margin:12px 0 0;font-size:clamp(30px,3.5vw,50px);line-height:1.22;font-weight:700;letter-spacing:-.02em}
+    .section-sub{margin:10px 0 0;color:var(--ink-soft);font-size:15px;line-height:1.9;max-width:660px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:52px;padding:0 22px;border-radius:999px;border:0;transition:.22s ease;font-weight:700}
+    .btn:hover{transform:translateY(-2px)}
+    .btn.primary{background:var(--green);color:#fff;box-shadow:0 14px 30px rgba(17,58,52,.2)}
+    .btn.secondary{background:#fff;color:var(--ink);border:1px solid var(--line)}
+    .btn.gold{background:linear-gradient(135deg,var(--gold-2),var(--gold));color:#152126}
+    .arrow{font-size:18px;line-height:1}
+    html[dir='rtl'] .arrow{transform:rotate(180deg)}
+
+    /* top utility */
+    .utility-bar{background:#0d2723;color:#f7efe3}
+    .utility-inner{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:44px}
+    .utility-group{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+    .utility-item{display:flex;align-items:center;gap:9px;font-size:12px;color:rgba(255,247,233,.92)}
+    .utility-icon{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;color:var(--gold)}
+    .utility-actions{display:flex;align-items:center;gap:14px}
+    .utility-link{font-size:12px;color:rgba(255,247,233,.92)}
+    .utility-lang,.utility-market{display:flex;align-items:center;gap:8px;font-size:12px}
+    .divider{width:1px;height:14px;background:rgba(255,255,255,.16)}
+
+    /* nav */
+    .site-header{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.92);backdrop-filter:blur(14px);border-bottom:1px solid rgba(24,34,40,.06)}
+    .nav-inner{min-height:86px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+    .brand{display:flex;align-items:center;gap:14px;min-width:max-content}
+    .logo-wrap{display:grid;place-items:center;width:126px}
+    .logo-wrap img{width:100%;height:auto;object-fit:contain;filter:drop-shadow(0 4px 14px rgba(0,0,0,.08))}
+    .brand-copy strong{display:block;font-size:14px;letter-spacing:.18em;font-family:"Manrope",Arial,sans-serif}
+    .brand-copy small{display:block;margin-top:4px;color:#73818a;font-size:11px}
+    .main-nav{display:flex;align-items:center;gap:28px}
+    .main-nav a{font-size:14px;font-weight:600;color:#415059;position:relative;padding:8px 0}
+    .main-nav a:hover{color:var(--green)}
+    .main-nav a:hover:after,.main-nav a.active:after{content:'';position:absolute;inset-inline:0;bottom:0;height:2px;border-radius:3px;background:var(--gold)}
+    .nav-actions{display:flex;align-items:center;gap:10px}
+    .nav-pill{height:42px;border-radius:999px;border:1px solid var(--line);background:#fff;padding:0 16px;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#374750}
+    .nav-cta{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 20px;border-radius:999px;background:var(--green);color:#fff;font-weight:700;border:0}
+    .menu-btn{display:none;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:#fff}
+
+    /* hero */
+    .hero{padding:28px 0 22px}
+    .hero-stage{position:relative;border-radius:32px;overflow:hidden;min-height:640px;background:#d9dedf;box-shadow:var(--shadow)}
+    .hero-bg{position:absolute;inset:0;background-image:linear-gradient(90deg,rgba(248,245,239,.96) 0%,rgba(248,245,239,.88) 26%,rgba(248,245,239,.56) 36%,rgba(248,245,239,.08) 52%,rgba(12,18,20,.08) 100%),url('assets/hero-office-factory.png');background-size:cover;background-position:center center}
+    html[dir='ltr'] .hero-bg{background-image:linear-gradient(270deg,rgba(248,245,239,.96) 0%,rgba(248,245,239,.88) 26%,rgba(248,245,239,.56) 36%,rgba(248,245,239,.08) 52%,rgba(12,18,20,.08) 100%),url('assets/hero-office-factory.png')}
+    .hero-content{position:relative;z-index:2;max-width:480px;padding:82px 0 40px 0}
+    .hero-card{padding:0 0 0 6px}
+    .hero h1{margin:0 0 16px;font-size:clamp(42px,5vw,70px);line-height:1.18;font-weight:800;letter-spacing:-.02em;color:#ffffff}
+    .hero h1 em{font-style:normal;color:#E6C27A}
+    .hero p{margin:0;font-size:16px;line-height:1.95;color:#ffffff;max-width:430px}
+    .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+    .hero-metrics{position:absolute;inset-inline:28px;bottom:20px;z-index:3;background:linear-gradient(135deg,rgba(16,48,43,.92),rgba(29,63,57,.92));border:1px solid rgba(215,178,127,.16);box-shadow:0 20px 44px rgba(8,16,18,.18);border-radius:22px;display:grid;grid-template-columns:repeat(4,1fr);overflow:hidden}
+    .metric{padding:24px 18px;display:flex;align-items:center;gap:14px;position:relative}
+    .metric:not(:last-child):after{content:'';position:absolute;top:22px;bottom:22px;inset-inline-end:0;width:1px;background:rgba(255,255,255,.12)}
+    .metric-icon{width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.08);display:grid;place-items:center;color:var(--gold);font-size:18px}
+    .metric b{display:block;font-size:30px;line-height:1;font-family:"Manrope",Arial,sans-serif;color:#fff}
+    .metric span{display:block;margin-top:6px;font-size:12px;line-height:1.6;color:rgba(255,255,255,.78)}
+
+    /* language strip */
+    .language-switch{padding:22px 0 12px;text-align:center}
+    .lang-toggle{display:inline-flex;align-items:center;background:#f0ece5;border:1px solid rgba(24,34,40,.06);border-radius:999px;padding:6px;gap:6px}
+    .lang-toggle button{min-width:104px;height:40px;border-radius:999px;border:0;background:transparent;color:#485760;font-weight:700}
+    .lang-toggle button.active{background:var(--green);color:#fff;box-shadow:0 8px 18px rgba(17,58,52,.16)}
+
+    /* cards */
+    .journey-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+    .journey-card{position:relative;min-height:255px;border-radius:24px;overflow:hidden;box-shadow:var(--shadow);padding:24px;background:#203533;color:#fff;display:flex;flex-direction:column;justify-content:flex-end}
+    .journey-card::before{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(13,18,20,.06),rgba(13,18,20,.72));z-index:1}
+    .journey-card img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+    .journey-card .content{position:relative;z-index:2}
+    .journey-card .icon-badge{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;background:rgba(17,58,52,.9);border:2px solid rgba(255,255,255,.24);margin-bottom:16px;font-size:22px;color:#fff;box-shadow:0 10px 24px rgba(0,0,0,.12)}
+    .journey-card.gold .icon-badge{background:rgba(202,160,100,.95)}
+    .journey-card h3{margin:0 0 10px;font-size:26px;line-height:1.34}
+    .journey-card p{margin:0;color:rgba(255,255,255,.88);font-size:14px;line-height:1.9;max-width:280px}
+    .journey-card .link-row{display:flex;align-items:center;justify-content:space-between;margin-top:16px}
+    .journey-card .round-arrow{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.16);display:grid;place-items:center}
+
+    /* about */
+    .split-grid{display:grid;grid-template-columns:.82fr 1.18fr;gap:28px;align-items:stretch}
+    .info-panel,.media-panel{background:#fff;border-radius:28px;box-shadow:var(--shadow)}
+    .info-panel{padding:34px 34px 28px}
+    .info-panel h2{margin:6px 0 14px;font-size:clamp(28px,3vw,42px);line-height:1.3}
+    .info-panel p{margin:0;color:var(--ink-soft);font-size:15px;line-height:2}
+    .mini-features{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:26px 0 24px}
+    .mini-feature{display:grid;justify-items:center;text-align:center;gap:10px;padding:8px}
+    .mini-feature i{font-style:normal;color:var(--gold);font-size:26px}
+    .mini-feature b{font-size:14px;line-height:1.6}
+    .media-panel{position:relative;overflow:hidden;min-height:420px}
+    .media-panel img{width:100%;height:100%;object-fit:cover}
+    .media-overlay{position:absolute;inset-inline-end:28px;bottom:28px;background:rgba(17,58,52,.72);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.18);padding:26px 24px;border-radius:26px;color:#fff;min-width:220px}
+    .media-overlay b{display:block;font-size:56px;line-height:1;font-family:"Manrope",Arial,sans-serif}
+    .media-overlay span{display:block;margin-top:10px;font-size:16px;line-height:1.7}
+
+    /* opportunities */
+    .opps-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:22px}
+    .opp-main,.opp-side{background:#fff;border-radius:28px;box-shadow:var(--shadow);overflow:hidden}
+    .opp-main{display:grid;grid-template-columns:1.02fr .98fr;min-height:360px}
+    .opp-copy{padding:34px}
+    .opp-copy h3{margin:10px 0 12px;font-size:34px;line-height:1.28}
+    .opp-copy p{margin:0;color:var(--ink-soft);font-size:14px;line-height:1.95}
+    .opp-tags{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 22px}
+    .opp-tag{padding:10px 14px;border-radius:999px;background:#f4efe7;border:1px solid rgba(202,160,100,.18);font-size:12px;font-weight:700;color:#4b5a61}
+    .opp-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:20px}
+    .opp-stat{padding:14px;border-radius:18px;background:#fbf9f4;border:1px solid rgba(24,34,40,.05)}
+    .opp-stat small{display:block;color:#89939b;font-size:10px}
+    .opp-stat b{display:block;margin-top:6px;font-size:14px;line-height:1.6}
+    .opp-main img{width:100%;height:100%;object-fit:cover}
+    .opp-side{display:grid;gap:14px;padding:16px;background:transparent;box-shadow:none}
+    .opp-card{display:grid;grid-template-columns:128px 1fr;background:#fff;border-radius:24px;overflow:hidden;box-shadow:var(--shadow)}
+    .opp-card img{width:100%;height:100%;object-fit:cover}
+    .opp-card .body{padding:18px}
+    .opp-card h4{margin:0 0 8px;font-size:18px}
+    .opp-card p{margin:0;color:var(--ink-soft);font-size:13px;line-height:1.8}
+
+    /* owner / professionals */
+    .owner-wrap{display:grid;grid-template-columns:.95fr 1.05fr;gap:24px;background:#fff;border-radius:30px;box-shadow:var(--shadow);overflow:hidden}
+    .owner-copy{padding:38px;background:linear-gradient(135deg,#123833,#1f5048);color:#fff}
+    .owner-copy h2{margin:10px 0 14px;font-size:42px;line-height:1.25}
+    .owner-copy p{margin:0;color:rgba(255,255,255,.84);font-size:15px;line-height:2}
+    .owner-points{display:grid;gap:12px;margin-top:24px}
+    .owner-point{display:flex;align-items:center;gap:10px;font-size:14px;color:#fff}
+    .owner-point i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.14);color:var(--gold)}
+    .owner-form{padding:36px;background:#fff}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    .field{display:grid;gap:8px}
+    .field.full{grid-column:1/-1}
+    .field label{font-size:12px;font-weight:700;color:#4c5b63}
+    .field input,.field textarea,.field select{border:1px solid rgba(24,34,40,.1);border-radius:16px;padding:15px 16px;background:#fbfaf7;outline:none}
+    .field textarea{min-height:110px;resize:vertical}
+    .field input:focus,.field textarea:focus,.field select:focus{border-color:var(--gold);box-shadow:0 0 0 4px rgba(202,160,100,.08)}
+    .owner-note{margin-top:12px;color:#738089;font-size:12px;line-height:1.8}
+
+    /* partners */
+    .partners-wrap{padding-top:10px}
+    .partners-row{display:grid;grid-template-columns:1fr 1.2fr 1.2fr 1.2fr 1.2fr 1fr;gap:12px;align-items:stretch}
+    .partner-card{background:#fff;border:1px solid rgba(24,34,40,.06);border-radius:20px;padding:20px 16px;display:grid;align-items:center;justify-items:center;min-height:112px;box-shadow:0 10px 24px rgba(16,31,37,.04);text-align:center}
+    .partner-card strong{display:block;font-size:18px;line-height:1.4}
+    .partner-card small{display:block;margin-top:8px;color:#738089;font-size:11px;line-height:1.6}
+    .partner-logo{background:linear-gradient(135deg,#0f342f,#173e39);color:#fff;border-color:rgba(202,160,100,.18)}
+    .partner-logo.jac strong,.partner-logo.abdeen strong{font-family:"Manrope",Arial,sans-serif;letter-spacing:.08em}
+    .partner-logo .logo-mark{font-size:34px;font-weight:800;color:var(--gold)}
+    .partner-logo.jac .logo-mark{letter-spacing:.12em}
+    .partner-logo.abdeen .logo-mark{letter-spacing:.06em}
+    .partner-logo small{color:rgba(255,255,255,.76)}
+
+    /* footer */
+    .cta-band{margin-top:36px;background:linear-gradient(135deg,#103730,#173e39);color:#fff;border-radius:32px;box-shadow:var(--shadow);overflow:hidden}
+    .cta-inner{display:grid;grid-template-columns:1.1fr .9fr;gap:20px;padding:36px 40px;align-items:center}
+    .cta-inner h3{margin:0 0 10px;font-size:38px;line-height:1.25}
+    .cta-inner p{margin:0;color:rgba(255,255,255,.82);font-size:15px;line-height:1.9}
+    .cta-phones{display:flex;gap:14px;flex-wrap:wrap;margin-top:22px}
+    .phone-chip{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 18px;border-radius:999px;background:#fff;color:var(--green);font-weight:800}
+    .phone-chip.gold{background:linear-gradient(135deg,var(--gold-2),var(--gold));color:#162227}
+    footer{background:linear-gradient(180deg,#0b2420,#0a1d1a);color:#fff;margin-top:22px;padding:46px 0 22px}
+    .footer-grid{display:grid;grid-template-columns:1.2fr .8fr .8fr .9fr;gap:28px;align-items:start}
+    .footer-logo img{width:180px;filter:brightness(1.05)}
+    .footer-logo p{margin:18px 0 0;color:rgba(255,255,255,.72);font-size:13px;line-height:1.9;max-width:360px}
+    .footer-col h4{margin:0 0 16px;color:var(--gold-2);font-size:13px}
+    .footer-col a,.footer-col span{display:block;margin:9px 0;color:rgba(255,255,255,.78);font-size:13px;line-height:1.8}
+    .footer-bottom{border-top:1px solid rgba(255,255,255,.09);margin-top:26px;padding-top:20px;display:flex;justify-content:space-between;gap:16px;color:rgba(255,255,255,.56);font-size:11px}
+
+    /* mobile */
+    @media (max-width: 1100px){
+      .main-nav{display:none}
+      .menu-btn{display:block}
+      .hero-content{max-width:430px;padding-top:56px}
+      .hero-metrics{grid-template-columns:1fr 1fr;bottom:18px}
+      .journey-grid,.mini-features,.partners-row,.footer-grid,.cta-inner,.split-grid,.opps-grid,.owner-wrap,.opp-main,.opp-stats{grid-template-columns:1fr !important}
+      .opp-card{grid-template-columns:120px 1fr}
+      .footer-grid{gap:20px}
+    }
+    @media (max-width: 780px){
+      .utility-inner,.nav-inner{gap:10px}
+      .utility-group{gap:12px}
+      .utility-item,.utility-link,.utility-market,.utility-lang{font-size:11px}
+      .nav-actions .nav-cta{display:none}
+      .logo-wrap{width:106px}
+      .hero{padding-top:18px}
+      .hero-stage{min-height:auto}
+      .hero-bg{background-image:linear-gradient(180deg,rgba(248,245,239,.95) 0%,rgba(248,245,239,.88) 28%,rgba(248,245,239,.68) 42%,rgba(248,245,239,.18) 64%,rgba(248,245,239,.08) 100%),url('assets/hero-office-factory.png');background-position:center}
+      .hero-content{max-width:none;padding:44px 0 158px}
+      .hero h1{font-size:44px;line-height:1.2}
+      .hero p{font-size:14px}
+      .hero-metrics{position:relative;inset:auto;margin:18px 18px 18px;grid-template-columns:1fr 1fr}
+      .metric{padding:18px 12px}
+      .metric b{font-size:22px}
+      .lang-toggle button{min-width:92px}
+      .journey-card{min-height:230px}
+      .info-panel,.owner-copy,.owner-form{padding:24px}
+      .media-panel{min-height:310px}
+      .section{padding:74px 0}
+      .section-title{font-size:32px}
+      .cta-inner{padding:28px 24px}
+      .cta-inner h3{font-size:30px}
+      .footer-bottom{display:block;line-height:1.8}
+      .form-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="utility-bar">
+    <div class="container utility-inner">
+      <div class="utility-group">
+        <a class="utility-item" href="tel:+962799996660"><span class="utility-icon">✆</span><span>00962 79 999 666 0</span></a>
+        <a class="utility-item" href="tel:+962799996668"><span class="utility-icon">✆</span><span>00962 79 999 666 8</span></a>
+        <a class="utility-item" href="mailto:info@alshantaf.com"><span class="utility-icon">✉</span><span>info@alshantaf.com</span></a>
+      </div>
+      <div class="utility-actions">
+        <div class="utility-market"><span>🌐</span><span id="countryLabelTop" data-ar="الأردن" data-en="Jordan">الأردن</span></div>
+        <div class="divider"></div>
+        <button class="utility-link" id="langTopBtn" onclick="toggleLanguage()">EN</button>
+      </div>
+    </div>
+  </div>
+
+  <header class="site-header">
+    <div class="container nav-inner">
+      <a class="brand" href="#top">
+        <span class="logo-wrap"><img src="assets/logo-premium.png" alt="ALSHANTAF logo"></span>
+        <span class="brand-copy">
+          <strong>ALSHANTAF INVEST</strong>
+          <small data-ar="الشنتف للعقار والاستثمار" data-en="Real Estate & Investment">الشنتف للعقار والاستثمار</small>
+        </span>
+      </a>
+      <nav class="main-nav">
+        <a href="#top" class="active" data-ar="الرئيسية" data-en="Home">الرئيسية</a>
+        <a href="#opportunities" data-ar="الفرص" data-en="Opportunities">الفرص</a>
+        <a href="#areas" data-ar="دليل المناطق" data-en="Areas Guide">دليل المناطق</a>
+        <a href="#services" data-ar="خدماتنا" data-en="Services">خدماتنا</a>
+        <a href="#expertise" data-ar="خبرتنا" data-en="Expertise">خبرتنا</a>
+        <a href="#contact" data-ar="اتصل بنا" data-en="Contact">اتصل بنا</a>
+      </nav>
+      <div class="nav-actions">
+        <button class="nav-pill" onclick="toggleLanguage()" id="langBtn">EN</button>
+        <button class="nav-pill" onclick="alertMarket()"><span>🌍</span><span id="countryLabel" data-ar="الأردن" data-en="Jordan">الأردن</span></button>
+        <button class="nav-cta" onclick="scrollToSection('owners')" data-ar="اعرض أرضك" data-en="List Your Asset">اعرض أرضك</button>
+        <button class="menu-btn" onclick="toggleMobileMenu()">☰</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="container">
+        <div class="hero-stage">
+          <div class="hero-bg"></div>
+          <div class="hero-content">
+            <div class="hero-card">
+              <h1 data-ar="استثمر في <em>مستقبلك</em><br>بعوائد حقيقية" data-en="Invest in your <em>future</em><br>with real returns">استثمر في <em>مستقبلك</em><br>بعوائد حقيقية</h1>
+              <p data-ar="منصة متكاملة لعرض وشراء وتطوير الأراضي والاستثمارات الصناعية، مع ربط الخبرة بالأنظمة والترخيص ودراسة العائد الاستثماري." data-en="A complete platform for offering, acquiring and developing industrial and investment assets, linked to expertise, regulations, licensing and return analysis.">منصة متكاملة لعرض وشراء وتطوير الأراضي والاستثمارات الصناعية، مع ربط الخبرة بالأنظمة والترخيص ودراسة العائد الاستثماري.</p>
+              <div class="hero-actions">
+                <button class="btn primary" onclick="scrollToSection('opportunities')"><span data-ar="استكشف الفرص الاستثمارية" data-en="Explore Opportunities">استكشف الفرص الاستثمارية</span><span class="arrow">→</span></button>
+                <button class="btn secondary" onclick="scrollToSection('contact')"><span data-ar="تحدث مع مستشار" data-en="Speak to an Advisor">تحدث مع مستشار</span></button>
+              </div>
+            </div>
+          </div>
+          <div class="hero-metrics">
+            <div class="metric"><div class="metric-icon">★</div><div><b>98%</b><span data-ar="رضا العملاء" data-en="Client satisfaction">رضا العملاء</span></div></div>
+            <div class="metric"><div class="metric-icon">▥</div><div><b>20+</b><span data-ar="سنة خبرة" data-en="Years of experience">سنة خبرة</span></div></div>
+            <div class="metric"><div class="metric-icon">▣</div><div><b>1,000,000</b><span data-ar="متر مربع مطور" data-en="Developed square meters">متر مربع مطور</span></div></div>
+            <div class="metric"><div class="metric-icon">⌖</div><div><b>+350</b><span data-ar="فرصة استثمارية" data-en="Investment opportunities">فرصة استثمارية</span></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="language-switch">
+      <div class="container">
+        <div class="lang-toggle">
+          <button class="active" id="arToggle" onclick="setLanguage('ar')">العربية</button>
+          <button id="enToggle" onclick="setLanguage('en')">English</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="services" style="padding-top:28px">
+      <div class="container">
+        <div class="journey-grid">
+          <article class="journey-card">
+            <img src="assets/industrial-yard.jpg" alt="Industrial project">
+            <div class="content">
+              <div class="icon-badge">⌂</div>
+              <h3 data-ar="أريد إنشاء مشروع صناعي" data-en="I want to build an industrial project">أريد إنشاء مشروع صناعي</h3>
+              <p data-ar="نساعدك في اختيار الموقع المناسب ثم التصميم والترخيص والتنفيذ." data-en="We guide you through site selection, design, licensing and execution.">نساعدك في اختيار الموقع المناسب ثم التصميم والترخيص والتنفيذ.</p>
+              <div class="link-row"><span data-ar="ابدأ الآن" data-en="Start now">ابدأ الآن</span><span class="round-arrow">←</span></div>
+            </div>
+          </article>
+          <article class="journey-card gold">
+            <img src="assets/industrial-clean-wide.jpg" alt="Investment land">
+            <div class="content">
+              <div class="icon-badge">⌖</div>
+              <h3 data-ar="أبحث عن فرصة استثمارية" data-en="I am looking for an investment">أبحث عن فرصة استثمارية</h3>
+              <p data-ar="لاستكشاف أفضل الأراضي والمستودعات والمواقع الملائمة للاستثمار." data-en="Discover the best land, warehouses and locations suited for investment.">لاستكشاف أفضل الأراضي والمستودعات والمواقع الملائمة للاستثمار.</p>
+              <div class="link-row"><span data-ar="استكشف" data-en="Explore">استكشف</span><span class="round-arrow">←</span></div>
+            </div>
+          </article>
+          <article class="journey-card">
+            <img src="assets/hero-warehouse.jpg" alt="List your land">
+            <div class="content">
+              <div class="icon-badge">▤</div>
+              <h3 data-ar="أملك أرضًا وأريد عرضها" data-en="I own land and want to list it">أملك أرضًا وأريد عرضها</h3>
+              <p data-ar="اعرض أرضك على قاعدة مستثمرين جادين بسرية واحترافية تامة." data-en="List your asset to a serious investor base with full privacy and professionalism.">اعرض أرضك على قاعدة مستثمرين جادين بسرية واحترافية تامة.</p>
+              <div class="link-row"><span data-ar="اعرض الآن" data-en="List now">اعرض الآن</span><span class="round-arrow">←</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="expertise">
+      <div class="container split-grid">
+        <div class="info-panel">
+          <h2 data-ar="عن الشنتف للعقار والاستثمار" data-en="About Alshantaf Real Estate & Investment">عن الشنتف للعقار والاستثمار</h2>
+          <p data-ar="نحن شركة رائدة في مجال التطوير العقاري الصناعي والاستثمار، تمتلك خبرة تتجاوز 20 عامًا في تطوير وإدارة المشاريع الصناعية والاستثمارية في أفضل المواقع الاستراتيجية." data-en="We are a leading company in industrial real estate development and investment, with more than 20 years of experience in developing and managing industrial and investment projects in strategic locations.">نحن شركة رائدة في مجال التطوير العقاري الصناعي والاستثمار، تمتلك خبرة تتجاوز 20 عامًا في تطوير وإدارة المشاريع الصناعية والاستثمارية في أفضل المواقع الاستراتيجية.</p>
+          <div class="mini-features">
+            <div class="mini-feature"><i>👥</i><b data-ar="فريق متخصص" data-en="Specialized team">فريق متخصص</b></div>
+            <div class="mini-feature"><i>◎</i><b data-ar="جودة مضمونة" data-en="Assured quality">جودة مضمونة</b></div>
+            <div class="mini-feature"><i>🤝</i><b data-ar="شراكات موثوقة" data-en="Trusted partnerships">شراكات موثوقة</b></div>
+          </div>
+          <button class="btn primary" onclick="scrollToSection('areas')" data-ar="تعرّف على المزيد" data-en="Learn more">تعرّف على المزيد</button>
+        </div>
+        <div class="media-panel">
+          <img src="assets/industrial-clean-wide.jpg" alt="Industrial estates">
+          <div class="media-overlay">
+            <b>1,000,000</b>
+            <span data-ar="متر مربع<br>مساحة مطورة" data-en="sq m<br>developed area">متر مربع<br>مساحة مطورة</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="opportunities" style="padding-top:40px">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow" data-ar="فرص مختارة" data-en="Featured Opportunities">فرص مختارة</span>
+            <h2 class="section-title" data-ar="فرص استثمارية مدروسة" data-en="Curated investment opportunities">فرص استثمارية مدروسة</h2>
+            <p class="section-sub" data-ar="نعرض فرصًا حقيقية ذات قابلية للتطوير أو التشغيل أو التأجير، مع قراءة أولية للسعر والأنظمة والعائد المتوقع." data-en="We present real opportunities suitable for development, operation or leasing, with an initial reading of pricing, regulations and expected return.">نعرض فرصًا حقيقية ذات قابلية للتطوير أو التشغيل أو التأجير، مع قراءة أولية للسعر والأنظمة والعائد المتوقع.</p>
+          </div>
+          <button class="btn secondary" onclick="scrollToSection('owners')" data-ar="أضف فرصتك" data-en="Submit your asset">أضف فرصتك</button>
+        </div>
+        <div class="opps-grid">
+          <article class="opp-main">
+            <div class="opp-copy">
+              <span class="eyebrow" data-ar="القسطل" data-en="Qastal">القسطل</span>
+              <h3 data-ar="أرض صناعية قابلة للتطوير بعائد تشغيلي واستثماري" data-en="Industrial land ready for development with operating and investment return">أرض صناعية قابلة للتطوير بعائد تشغيلي واستثماري</h3>
+              <p data-ar="قرب لوجستي من طريق المطار ومحاور الحركة الرئيسية، مع بيئة صناعية قائمة ترفع من قيمة الأصل وسهولة تشغيله أو تأجيره." data-en="Logistically close to Airport Road and major mobility corridors, with an active industrial environment that enhances asset value and leasing/operational potential.">قرب لوجستي من طريق المطار ومحاور الحركة الرئيسية، مع بيئة صناعية قائمة ترفع من قيمة الأصل وسهولة تشغيله أو تأجيره.</p>
+              <div class="opp-tags">
+                <span class="opp-tag" data-ar="شراء + تطوير" data-en="Acquire + Develop">شراء + تطوير</span>
+                <span class="opp-tag" data-ar="مستودعات / هنجر" data-en="Warehouses / Hangar">مستودعات / هنجر</span>
+                <span class="opp-tag" data-ar="تحليل عائد أولي" data-en="Preliminary ROI analysis">تحليل عائد أولي</span>
+              </div>
+              <div class="opp-stats">
+                <div class="opp-stat"><small data-ar="فئة الاستثمار" data-en="Investment type">فئة الاستثمار</small><b data-ar="صناعي مدر للدخل" data-en="Industrial income asset">صناعي مدر للدخل</b></div>
+                <div class="opp-stat"><small data-ar="المنطقة" data-en="Area">المنطقة</small><b data-ar="القسطل — عمّان" data-en="Qastal — Amman">القسطل — عمّان</b></div>
+                <div class="opp-stat"><small data-ar="العائد التقديري" data-en="Indicative return">العائد التقديري</small><b>8% – 10%</b></div>
+              </div>
+            </div>
+            <img src="assets/hero-warehouse-wide.jpg" alt="Featured opportunity">
+          </article>
+          <div class="opp-side">
+            <article class="opp-card">
+              <img src="assets/logistics-truck.jpg" alt="logistics zone">
+              <div class="body">
+                <h4 data-ar="فرصة لوجستية" data-en="Logistics opportunity">فرصة لوجستية</h4>
+                <p data-ar="أصل مناسب للنقل والتخزين مع سهولة الوصول ونمو الطلب التشغيلي." data-en="An asset suited for transport and storage with easy access and growing operational demand.">أصل مناسب للنقل والتخزين مع سهولة الوصول ونمو الطلب التشغيلي.</p>
+              </div>
+            </article>
+            <article class="opp-card">
+              <img src="assets/industrial-clean.jpg" alt="industrial land">
+              <div class="body">
+                <h4 data-ar="تطوير أرض صناعية" data-en="Industrial land development">تطوير أرض صناعية</h4>
+                <p data-ar="دراسة مسار الشراء ثم البناء والتأجير ضمن أرقام أولية واقعية." data-en="Assess the acquisition, construction and leasing pathway through realistic preliminary numbers.">دراسة مسار الشراء ثم البناء والتأجير ضمن أرقام أولية واقعية.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="areas" style="padding-top:40px">
+      <div class="container">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow" data-ar="دليل المناطق" data-en="Areas Guide">دليل المناطق</span>
+            <h2 class="section-title" data-ar="الموقع، الأنظمة، والميزة الاستثمارية" data-en="Location, regulations and investment advantage">الموقع، الأنظمة، والميزة الاستثمارية</h2>
+            <p class="section-sub" data-ar="المنصة مبنية لتربط المستثمر بين المنطقة المناسبة وطبيعة النشاط ومتطلبات الترخيص والعائد المتوقع — ابتداءً من الأردن وقابلة للتوسع لدول أخرى لاحقًا." data-en="The platform is built to connect the investor with the right area, activity type, licensing requirements and expected return — starting with Jordan and ready to expand to other countries later.">المنصة مبنية لتربط المستثمر بين المنطقة المناسبة وطبيعة النشاط ومتطلبات الترخيص والعائد المتوقع — ابتداءً من الأردن وقابلة للتوسع لدول أخرى لاحقًا.</p>
+          </div>
+        </div>
+        <div class="split-grid">
+          <div class="info-panel">
+            <h2 data-ar="القسطل: وجهة صناعية ولوجستية" data-en="Qastal: an industrial and logistics destination">القسطل: وجهة صناعية ولوجستية</h2>
+            <p data-ar="قرب من طريق المطار، سهولة الوصول إلى المحاور الرئيسية، نشاط صناعي متصاعد، وقابلية تشغيلية مريحة للمستثمرين والمصنعين. كما تساعد المنصة على توجيه النشاط الغذائي والدوائي والخطوط الإنتاجية وفق التصنيف الأنسب." data-en="Close to Airport Road, easy access to primary corridors, growing industrial activity and convenient operational stability for investors and manufacturers. The platform also guides food, pharma and production-line activities toward the most suitable zoning path.">قرب من طريق المطار، سهولة الوصول إلى المحاور الرئيسية، نشاط صناعي متصاعد، وقابلية تشغيلية مريحة للمستثمرين والمصنعين. كما تساعد المنصة على توجيه النشاط الغذائي والدوائي والخطوط الإنتاجية وفق التصنيف الأنسب.</p>
+            <div class="mini-features">
+              <div class="mini-feature"><i>➜</i><b data-ar="قرب لوجستي" data-en="Logistics proximity">قرب لوجستي</b></div>
+              <div class="mini-feature"><i>▦</i><b data-ar="بيئة صناعية" data-en="Industrial ecosystem">بيئة صناعية</b></div>
+              <div class="mini-feature"><i>⚖</i><b data-ar="ربط بالأنظمة" data-en="Rules-linked">ربط بالأنظمة</b></div>
+            </div>
+          </div>
+          <div class="info-panel">
+            <h2 data-ar="منصة واضحة لمالك الأرض أيضًا" data-en="A clear platform for land owners too">منصة واضحة لمالك الأرض أيضًا</h2>
+            <p data-ar="يدخل مالك الأرض، يرفع بياناته ووثائقه داخليًا، ثم تتم مراجعة العرض والتسعير قبل التسويق. تبقى المرجعية عند الشنتف، وتظهر الفرصة للمستثمر بصورة أنيقة ومحمية." data-en="A land owner can submit data and internal documents, then the opportunity is reviewed and priced before marketing. The listing remains managed by Alshantaf and appears to investors in a refined, protected format.">يدخل مالك الأرض، يرفع بياناته ووثائقه داخليًا، ثم تتم مراجعة العرض والتسعير قبل التسويق. تبقى المرجعية عند الشنتف، وتظهر الفرصة للمستثمر بصورة أنيقة ومحمية.</p>
+            <button class="btn primary" onclick="scrollToSection('owners')" data-ar="افتح ملف عرض" data-en="Open listing file">افتح ملف عرض</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="owners" style="padding-top:40px">
+      <div class="container owner-wrap">
+        <div class="owner-copy">
+          <span class="eyebrow" style="color:#f2cf9c" data-ar="اعرض فرصتك معنا" data-en="List with us">اعرض فرصتك معنا</span>
+          <h2 data-ar="منصة تسويق راقية لعرض الأراضي والفرص" data-en="A premium platform to market land and opportunities">منصة تسويق راقية لعرض الأراضي والفرص</h2>
+          <p data-ar="سجّل بيانات الأصل، ارفع المعلومات الأساسية والوثائق، وسيتولى فريق الشنتف مراجعة الفرصة وربطها بالسعر المناسب قبل عرضها على المستثمرين." data-en="Register your asset, upload the key details and documents, and the Alshantaf team will review and price the opportunity before presenting it to investors.">سجّل بيانات الأصل، ارفع المعلومات الأساسية والوثائق، وسيتولى فريق الشنتف مراجعة الفرصة وربطها بالسعر المناسب قبل عرضها على المستثمرين.</p>
+          <div class="owner-points">
+            <div class="owner-point"><i>✓</i><span data-ar="مراجعة أولية للوثائق" data-en="Preliminary document review">مراجعة أولية للوثائق</span></div>
+            <div class="owner-point"><i>✓</i><span data-ar="قراءة تسويقية للسعر" data-en="Marketing price assessment">قراءة تسويقية للسعر</span></div>
+            <div class="owner-point"><i>✓</i><span data-ar="حماية بيانات المالك" data-en="Owner data protection">حماية بيانات المالك</span></div>
+          </div>
+        </div>
+        <div class="owner-form">
+          <form onsubmit="submitOwner(event)">
+            <div class="form-grid">
+              <div class="field"><label data-ar="الاسم" data-en="Name">الاسم</label><input required></div>
+              <div class="field"><label data-ar="رقم الهاتف" data-en="Phone">رقم الهاتف</label><input required inputmode="tel"></div>
+              <div class="field"><label data-ar="نوع الأصل" data-en="Asset type">نوع الأصل</label><select><option data-ar="أرض صناعية" data-en="Industrial land">أرض صناعية</option><option data-ar="أرض استثمارية" data-en="Investment land">أرض استثمارية</option><option data-ar="مستودعات / هنجر" data-en="Warehouse / Hangar">مستودعات / هنجر</option></select></div>
+              <div class="field"><label data-ar="المنطقة" data-en="Area">المنطقة</label><input></div>
+              <div class="field full"><label data-ar="نبذة مختصرة عن الفرصة" data-en="Brief opportunity summary">نبذة مختصرة عن الفرصة</label><textarea></textarea></div>
+            </div>
+            <div class="owner-note" data-ar="ستتم المتابعة معك لاستكمال البيانات، والموقع الدقيق والوثائق يظلان ضمن الملف الداخلي فقط." data-en="We will follow up with you to complete the details. Exact location and documents remain in the internal file only.">ستتم المتابعة معك لاستكمال البيانات، والموقع الدقيق والوثائق يظلان ضمن الملف الداخلي فقط.</div>
+            <div style="margin-top:18px;display:flex;gap:12px;flex-wrap:wrap">
+              <button class="btn primary" type="submit" data-ar="إرسال الطلب" data-en="Submit">إرسال الطلب</button>
+              <button class="btn secondary" type="button" onclick="scrollToSection('contact')" data-ar="التحدث مع الفريق" data-en="Talk to the team">التحدث مع الفريق</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="section partners-wrap" id="partners" style="padding-top:40px">
+      <div class="container">
+        <div class="section-head" style="justify-content:center;text-align:center;margin-bottom:22px">
+          <div>
+            <h2 class="section-title" data-ar="شركاؤنا" data-en="Our Partners">شركاؤنا</h2>
+          </div>
+        </div>
+        <div class="partners-row">
+          <div class="partner-card partner-logo jac">
+            <div class="logo-mark">JAC</div>
+            <strong data-ar="الأردنية للطيران" data-en="Jordan Aviation Company">الأردنية للطيران</strong>
+            <small data-ar="شريك مشاريع" data-en="Project partner">شريك مشاريع</small>
+          </div>
+          <div class="partner-card"><strong data-ar="براد الزوراء" data-en="Barad Al Zawraa">براد الزوراء</strong></div>
+          <div class="partner-card"><strong data-ar="Rotolix – شركة نصر الدليمي" data-en="Rotolix – Nassar Al Dulaimi">Rotolix – شركة نصر الدليمي</strong></div>
+          <div class="partner-card"><strong data-ar="مطبعة النور – العباسي" data-en="Al Noor Press – Al Abbasi">مطبعة النور – العباسي</strong></div>
+          <div class="partner-card"><strong data-ar="Mosully Shawarma" data-en="Mosully Shawarma">Mosully Shawarma</strong></div>
+          <div class="partner-card partner-logo abdeen">
+            <div class="logo-mark">ABDEEN</div>
+            <strong data-ar="Elite Home – عابدين" data-en="Elite Home – Abdeen">Elite Home – عابدين</strong>
+            <small data-ar="شريك مشاريع" data-en="Project partner">شريك مشاريع</small>
+          </div>
+        </div>
+        <div class="partners-row" style="grid-template-columns:1fr 1fr;max-width:420px;margin:12px auto 0">
+          <div class="partner-card"><strong data-ar="شركة ياسر شحرور للإسكان" data-en="Yasser Shahrour Housing Company">شركة ياسر شحرور للإسكان</strong></div>
+          <div class="partner-card"><strong data-ar="مدينتي المهندس" data-en="Madinaty Al Muhandis">مدينتي المهندس</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="contact" style="padding-top:24px;padding-bottom:32px">
+      <div class="container">
+        <div class="cta-band">
+          <div class="cta-inner">
+            <div>
+              <h3 data-ar="جاهز لتبدأ استثمارك القادم؟" data-en="Ready to begin your next investment?">جاهز لتبدأ استثمارك القادم؟</h3>
+              <p data-ar="تواصل معنا اليوم للحصول على استشارة مبدئية، دراسة فرصة، أو فتح ملف عرض لأرضك أو مشروعك." data-en="Contact us today for an initial consultation, opportunity study, or to open a listing file for your land or project.">تواصل معنا اليوم للحصول على استشارة مبدئية، دراسة فرصة، أو فتح ملف عرض لأرضك أو مشروعك.</p>
+              <div class="cta-phones">
+                <a class="phone-chip" href="tel:+962799996660">+962 79 999 666 0</a>
+                <a class="phone-chip gold" href="tel:+962799996668">+962 79 999 666 8</a>
+              </div>
+            </div>
+            <div>
+              <div class="info-panel" style="background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.1);box-shadow:none">
+                <h2 style="font-size:26px;margin-top:0;color:#fff" data-ar="ما الذي نقدمه؟" data-en="What do we offer?">ما الذي نقدمه؟</h2>
+                <p style="color:rgba(255,255,255,.78)" data-ar="اختيار الأرض المناسبة، ربط النشاط بالأنظمة، دراسة الكلف والعائد، التصميم والتنفيذ، ثم التسويق أو التأجير عند الحاجة." data-en="Choosing the right land, connecting the activity to regulations, studying cost and return, design and execution, then marketing or leasing when needed.">اختيار الأرض المناسبة، ربط النشاط بالأنظمة، دراسة الكلف والعائد، التصميم والتنفيذ، ثم التسويق أو التأجير عند الحاجة.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-logo">
+          <img src="assets/logo-premium.png" alt="ALSHANTAF footer logo">
+          <p data-ar="منصة الشنتف للعقار والاستثمار — خبرة في التطوير، فهم للأنظمة، وقدرة على تحويل الفرصة إلى أصل مدروس وقابل للنمو." data-en="Alshantaf real estate and investment platform — development expertise, understanding of regulations, and the ability to turn an opportunity into a studied, growing asset.">منصة الشنتف للعقار والاستثمار — خبرة في التطوير، فهم للأنظمة، وقدرة على تحويل الفرصة إلى أصل مدروس وقابل للنمو.</p>
+        </div>
+        <div class="footer-col">
+          <h4 data-ar="روابط سريعة" data-en="Quick Links">روابط سريعة</h4>
+          <a href="#top" data-ar="الرئيسية" data-en="Home">الرئيسية</a>
+          <a href="#opportunities" data-ar="الفرص" data-en="Opportunities">الفرص</a>
+          <a href="#areas" data-ar="دليل المناطق" data-en="Areas Guide">دليل المناطق</a>
+          <a href="#owners" data-ar="اعرض أرضك" data-en="List Your Asset">اعرض أرضك</a>
+        </div>
+        <div class="footer-col">
+          <h4 data-ar="خدماتنا" data-en="Services">خدماتنا</h4>
+          <span data-ar="بيع الأراضي" data-en="Land sales">بيع الأراضي</span>
+          <span data-ar="تطوير المستودعات والمشاريع" data-en="Warehouse and project development">تطوير المستودعات والمشاريع</span>
+          <span data-ar="تحليل الفرص" data-en="Opportunity analysis">تحليل الفرص</span>
+          <span data-ar="دراسات الجدوى" data-en="Feasibility studies">دراسات الجدوى</span>
+        </div>
+        <div class="footer-col">
+          <h4 data-ar="تواصل معنا" data-en="Contact Us">تواصل معنا</h4>
+          <a href="tel:+962799996660">00962 79 999 666 0</a>
+          <a href="tel:+962799996668">00962 79 999 666 8</a>
+          <a href="mailto:info@alshantaf.com">info@alshantaf.com</a>
+          <span data-ar="الأردن — عمّان" data-en="Jordan — Amman">الأردن — عمّان</span>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span data-ar="© الشنتف للعقار والاستثمار — جميع الحقوق محفوظة" data-en="© ALSHANTAF Real Estate & Investment — All rights reserved">© الشنتف للعقار والاستثمار — جميع الحقوق محفوظة</span>
+        <span data-ar="نسخة ثنائية اللغة وجاهزة للتوسع لاحقًا حسب الدولة والأنظمة" data-en="Bilingual version ready for future expansion by country and regulations">نسخة ثنائية اللغة وجاهزة للتوسع لاحقًا حسب الدولة والأنظمة</span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    let currentLang = 'ar';
+    function applyLanguage(lang){
+      currentLang = lang;
+      document.documentElement.lang = lang === 'ar' ? 'ar' : 'en';
+      document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+      document.querySelectorAll('[data-ar]').forEach(el => {
+        el.innerHTML = el.getAttribute(lang === 'ar' ? 'data-ar' : 'data-en');
+      });
+      const langBtn = document.getElementById('langBtn');
+      const langTopBtn = document.getElementById('langTopBtn');
+      if(langBtn) langBtn.textContent = lang === 'ar' ? 'EN' : 'AR';
+      if(langTopBtn) langTopBtn.textContent = lang === 'ar' ? 'EN' : 'AR';
+      document.getElementById('arToggle').classList.toggle('active', lang === 'ar');
+      document.getElementById('enToggle').classList.toggle('active', lang === 'en');
+    }
+    function toggleLanguage(){ applyLanguage(currentLang === 'ar' ? 'en' : 'ar'); }
+    function setLanguage(lang){ applyLanguage(lang); }
+    function scrollToSection(id){ const el = document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }
+    function submitOwner(e){ e.preventDefault(); alert(currentLang==='ar' ? 'تم استلام طلبك مبدئيًا. سيتم التواصل معك لاستكمال الملف.' : 'Your request has been received. We will contact you to complete the listing file.'); e.target.reset(); }
+    function alertMarket(){ alert(currentLang==='ar' ? 'السوق الفعّال حاليًا: الأردن. المنصة جاهزة لإضافة دول أخرى وربطها بأنظمتها.' : 'The active market is currently Jordan. The platform is ready to add more countries and their regulations later.'); }
+    function toggleMobileMenu(){
+      const nav = document.querySelector('.main-nav');
+      if(window.innerWidth > 1100) return;
+      const shown = getComputedStyle(nav).display !== 'none';
+      nav.style.display = shown ? 'none' : 'flex';
+      nav.style.position = 'absolute';
+      nav.style.top = '100%';
+      nav.style.insetInline = '16px';
+      nav.style.flexDirection = 'column';
+      nav.style.alignItems = 'stretch';
+      nav.style.gap = '0';
+      nav.style.background = '#fff';
+      nav.style.border = '1px solid rgba(24,34,40,.08)';
+      nav.style.borderRadius = '20px';
+      nav.style.boxShadow = '0 20px 55px rgba(16,31,37,.12)';
+      nav.style.padding = '10px';
+      nav.querySelectorAll('a').forEach(a=>{a.style.padding='14px 12px'; a.style.borderBottom='1px solid rgba(24,34,40,.05)';});
+      nav.querySelectorAll('a:last-child').forEach(a=>a.style.borderBottom='0');
+    }
+    applyLanguage('ar');
+  </script>
+</body>
+</html>
