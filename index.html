@@ -339,52 +339,55 @@ background-repeat: no-repeat !important;
     align-items: center !important;
     margin: 0 !important;
   }
-}/* Premium mobile header v2 */
+}/* Mobile home structure v1 */
+.mobile-drawer,
+.mobile-zones {
+  display: none;
+}
+
 @media (max-width: 768px) {
+
+  /* ===== Mobile header ===== */
+
   .site-header {
     width: 100% !important;
     padding: 0 !important;
     background: #ffffff !important;
-    border-bottom: 1px solid rgba(16, 37, 43, 0.06) !important;
-    overflow: hidden !important;
+    border-bottom: 1px solid rgba(16, 47, 42, 0.08) !important;
+    overflow: visible !important;
   }
 
   .site-header .nav-inner {
+    position: relative !important;
     width: 100% !important;
     max-width: 100% !important;
-    min-height: 108px !important;
+    min-height: 100px !important;
     margin: 0 !important;
     padding: 10px 14px !important;
     box-sizing: border-box !important;
 
-    display: grid !important;
-    grid-template-columns: 52px minmax(0, 1fr) 52px !important;
-    align-items: center !important;
-    gap: 0 !important;
-  }
-
-  /* Brand group */
-  .site-header .brand {
-    grid-column: 2 !important;
-    grid-row: 1 !important;
-    justify-self: center !important;
-
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    gap: 9px !important;
+  }
 
-    width: 100% !important;
-    max-width: 290px !important;
+  .site-header .brand {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 11px !important;
+
+    width: auto !important;
+    max-width: 285px !important;
     margin: 0 !important;
     direction: ltr !important;
   }
 
   .site-header .logo-wrap {
     order: 2 !important;
-    width: 82px !important;
+    width: 80px !important;
     height: 70px !important;
-    flex: 0 0 82px !important;
+    flex: 0 0 80px !important;
 
     display: flex !important;
     align-items: center !important;
@@ -400,7 +403,6 @@ background-repeat: no-repeat !important;
 
   .site-header .brand-copy {
     order: 1 !important;
-    flex: 1 1 auto !important;
     min-width: 0 !important;
     text-align: center !important;
   }
@@ -412,7 +414,7 @@ background-repeat: no-repeat !important;
     font-family: "Manrope", Arial, sans-serif !important;
     font-size: clamp(18px, 4.8vw, 21px) !important;
     font-weight: 800 !important;
-    letter-spacing: 0.065em !important;
+    letter-spacing: 0.055em !important;
     line-height: 1.08 !important;
     white-space: nowrap !important;
   }
@@ -428,18 +430,23 @@ background-repeat: no-repeat !important;
     direction: rtl !important;
   }
 
-  /* Clear mobile menu button */
+  .site-header .main-nav,
+  .site-header .nav-pill,
+  .site-header .nav-cta {
+    display: none !important;
+  }
+
   .site-header .nav-actions {
-    grid-column: 1 !important;
-    grid-row: 1 !important;
+    position: absolute !important;
+    left: 14px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
 
     display: flex !important;
     width: 50px !important;
     height: 50px !important;
     margin: 0 !important;
     padding: 0 !important;
-    align-items: center !important;
-    justify-content: center !important;
   }
 
   .site-header .menu-btn {
@@ -452,20 +459,20 @@ background-repeat: no-repeat !important;
     margin: 0 !important;
     padding: 0 !important;
 
-    border: 1px solid rgba(198, 160, 100, 0.55) !important;
-    border-radius: 16px !important;
+    border: 1px solid rgba(198, 160, 100, 0.8) !important;
+    border-radius: 15px !important;
     background: #103f37 !important;
-    box-shadow: 0 8px 20px rgba(16, 63, 55, 0.18) !important;
+    box-shadow: 0 8px 20px rgba(16, 63, 55, 0.2) !important;
 
-    font-size: 0 !important;
     color: transparent !important;
+    font-size: 0 !important;
     cursor: pointer !important;
   }
 
   .site-header .menu-btn::before {
     content: "" !important;
     display: block !important;
-    width: 22px !important;
+    width: 23px !important;
     height: 2.5px !important;
     border-radius: 999px !important;
     background: #ffffff !important;
@@ -474,14 +481,307 @@ background-repeat: no-repeat !important;
       0 7px 0 #ffffff !important;
   }
 
-  .site-header .main-nav {
-  display: none;
-}
 
-.site-header .nav-pill,
-.site-header .nav-cta {
-  display: none !important;
-}
+  /* ===== Side menu ===== */
+
+  .mobile-drawer {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    pointer-events: none;
+  }
+
+  .mobile-drawer.open {
+    pointer-events: auto;
+  }
+
+  .drawer-backdrop {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: rgba(5, 22, 19, 0.58);
+    opacity: 0;
+    transition: opacity 0.28s ease;
+  }
+
+  .mobile-drawer.open .drawer-backdrop {
+    opacity: 1;
+  }
+
+  .drawer-panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+
+    width: min(84vw, 330px);
+    height: 100%;
+    padding: 22px 18px;
+    box-sizing: border-box;
+
+    background:
+      linear-gradient(160deg, #0b3c34 0%, #062a25 100%);
+    box-shadow: 22px 0 60px rgba(0, 0, 0, 0.3);
+
+    transform: translateX(-105%);
+    transition: transform 0.3s ease;
+
+    overflow-y: auto;
+  }
+
+  .mobile-drawer.open .drawer-panel {
+    transform: translateX(0);
+  }
+
+  .drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  .drawer-brand {
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+  }
+
+  .drawer-close {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+
+    border: 1px solid rgba(198, 160, 100, 0.7);
+    border-radius: 13px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+
+    font-size: 25px;
+    cursor: pointer;
+  }
+
+  .drawer-nav {
+    display: grid;
+    gap: 8px;
+  }
+
+  .drawer-link {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+
+    min-height: 52px;
+    padding: 10px 12px;
+    box-sizing: border-box;
+
+    border-radius: 14px;
+    color: #ffffff;
+    text-decoration: none;
+
+    font-size: 15px;
+    font-weight: 700;
+    transition:
+      background 0.2s ease,
+      transform 0.2s ease;
+  }
+
+  .drawer-link:active {
+    transform: scale(0.98);
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .drawer-icon {
+    display: grid;
+    place-items: center;
+
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+
+    border: 1px solid rgba(198, 160, 100, 0.55);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #e7c16f;
+
+    font-size: 18px;
+  }
+
+
+  /* ===== First hero only ===== */
+
+  .hero {
+    padding: 14px 12px 20px !important;
+  }
+
+  .hero-stage {
+    min-height: 760px !important;
+    border-radius: 26px !important;
+    overflow: hidden !important;
+  }
+
+  .hero-bg {
+    background-size: cover !important;
+    background-position: center center !important;
+    background-repeat: no-repeat !important;
+  }
+
+  .hero-stage::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+
+    background:
+      linear-gradient(
+        180deg,
+        rgba(6, 32, 28, 0.28) 0%,
+        rgba(6, 32, 28, 0.08) 34%,
+        rgba(6, 32, 28, 0.32) 67%,
+        rgba(6, 32, 28, 0.72) 100%
+      );
+  }
+
+  .hero-content {
+    position: relative !important;
+    z-index: 2 !important;
+
+    width: 100% !important;
+    max-width: none !important;
+    padding: 48px 20px 255px !important;
+    box-sizing: border-box !important;
+  }
+
+  .hero-card {
+    width: 100% !important;
+    padding: 22px 16px !important;
+    box-sizing: border-box !important;
+
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 22px !important;
+    background: rgba(8, 47, 41, 0.25) !important;
+    backdrop-filter: blur(3px) !important;
+  }
+
+  .hero h1 {
+    margin: 0 0 16px !important;
+    color: #ffffff !important;
+    font-size: clamp(38px, 10vw, 49px) !important;
+    line-height: 1.14 !important;
+    letter-spacing: 0 !important;
+    text-shadow: 0 3px 16px rgba(0, 0, 0, 0.28) !important;
+  }
+
+  .hero h1 em {
+    color: #e7bd67 !important;
+  }
+
+  .hero p {
+    max-width: none !important;
+    margin: 0 !important;
+    color: rgba(255, 255, 255, 0.96) !important;
+    font-size: 15px !important;
+    font-weight: 500 !important;
+    line-height: 1.85 !important;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.28) !important;
+  }
+
+  .hero-actions {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+    margin-top: 22px !important;
+  }
+
+  .hero-actions .btn {
+    width: 100% !important;
+    min-height: 56px !important;
+    box-sizing: border-box !important;
+    justify-content: center !important;
+    border-radius: 18px !important;
+    font-size: 16px !important;
+    font-weight: 800 !important;
+  }
+
+  .hero-actions .btn.primary {
+    background: #c9a257 !important;
+    color: #102f2a !important;
+  }
+
+  .hero-actions .btn.secondary {
+    background: #ffffff !important;
+    color: #17272b !important;
+  }
+
+  .hero-metrics {
+    z-index: 3 !important;
+    inset-inline: 18px !important;
+    bottom: 18px !important;
+  }
+
+
+  /* ===== Industrial zones strip ===== */
+
+  .mobile-zones {
+    display: block;
+    padding: 8px 14px 22px;
+    background: #ffffff;
+  }
+
+  .mobile-zones-title {
+    margin: 0 0 13px;
+    color: #102f2a;
+    text-align: center;
+    font-size: 17px;
+    font-weight: 800;
+  }
+
+  .mobile-zone-track {
+    display: flex;
+    gap: 9px;
+    overflow-x: auto;
+    padding: 2px 1px 8px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .mobile-zone-track::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-zone {
+    flex: 0 0 auto;
+    min-width: 92px;
+    height: 44px;
+    padding: 0 15px;
+
+    border: 1px solid rgba(198, 160, 100, 0.45);
+    border-radius: 999px;
+    background: #ffffff;
+    color: #173b35;
+
+    font-size: 14px;
+    font-weight: 800;
+    white-space: nowrap;
+    scroll-snap-align: center;
+  }
+
+  .mobile-zone.active {
+    border-color: #103f37;
+    background: #103f37;
+    color: #ffffff;
+    box-shadow: 0 8px 18px rgba(16, 63, 55, 0.18);
+  }
+
+  body.menu-open {
+    overflow: hidden !important;
+  }
 
   html,
   body {
@@ -533,7 +833,85 @@ background-repeat: no-repeat !important;
       </div>
     </div>
   </header>
+<!-- Mobile side drawer -->
+<aside class="mobile-drawer" id="mobileDrawer" aria-hidden="true">
 
+  <button
+    class="drawer-backdrop"
+    type="button"
+    onclick="closeMobileMenu()"
+    aria-label="إغلاق القائمة">
+  </button>
+
+  <div
+    class="drawer-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-label="القائمة الرئيسية">
+
+    <div class="drawer-head">
+      <span class="drawer-brand">ALSHANTAF INVEST</span>
+
+      <button
+        class="drawer-close"
+        type="button"
+        onclick="closeMobileMenu()"
+        aria-label="إغلاق القائمة">
+        ×
+      </button>
+    </div>
+
+    <nav class="drawer-nav">
+
+      <a class="drawer-link" href="#top"
+         onclick="goFromMobileMenu('top'); return false;">
+        <span class="drawer-icon">⌂</span>
+        <span data-ar="الرئيسية" data-en="Home">الرئيسية</span>
+      </a>
+
+      <a class="drawer-link" href="#opportunities"
+         onclick="goFromMobileMenu('opportunities'); return false;">
+        <span class="drawer-icon">◆</span>
+        <span data-ar="الفرص والعروض" data-en="Opportunities">
+          الفرص والعروض
+        </span>
+      </a>
+
+      <a class="drawer-link" href="#areas"
+         onclick="goFromMobileMenu('areas'); return false;">
+        <span class="drawer-icon">⌖</span>
+        <span data-ar="المناطق الصناعية" data-en="Industrial Areas">
+          المناطق الصناعية
+        </span>
+      </a>
+
+      <a class="drawer-link" href="#owners"
+         onclick="goFromMobileMenu('owners'); return false;">
+        <span class="drawer-icon">◇</span>
+        <span data-ar="اعرض أرضك" data-en="List Your Land">
+          اعرض أرضك
+        </span>
+      </a>
+
+      <a class="drawer-link" href="#services"
+         onclick="goFromMobileMenu('services'); return false;">
+        <span class="drawer-icon">⚙</span>
+        <span data-ar="خدمات المستثمر" data-en="Investor Services">
+          خدمات المستثمر
+        </span>
+      </a>
+
+      <a class="drawer-link" href="#contact"
+         onclick="goFromMobileMenu('contact'); return false;">
+        <span class="drawer-icon">☎</span>
+        <span data-ar="تواصل معنا" data-en="Contact Us">
+          تواصل معنا
+        </span>
+      </a>
+
+    </nav>
+  </div>
+</aside>
   <main id="top">
     <section class="hero">
       <div class="container">
@@ -557,7 +935,68 @@ background-repeat: no-repeat !important;
           </div>
         </div>
       </div>
-    </section>
+    </section><!-- Mobile industrial zones -->
+<section class="mobile-zones" aria-label="المناطق الصناعية">
+
+  <h2
+    class="mobile-zones-title"
+    data-ar="اختر المنطقة الصناعية"
+    data-en="Choose an Industrial Area">
+    اختر المنطقة الصناعية
+  </h2>
+
+  <div class="mobile-zone-track">
+
+    <button
+      class="mobile-zone"
+      type="button"
+      data-zone="sahab"
+      onclick="selectMobileZone(this)">
+      سحاب
+    </button>
+
+    <button
+      class="mobile-zone"
+      type="button"
+      data-zone="muwaqqar"
+      onclick="selectMobileZone(this)">
+      الموقر
+    </button>
+
+    <button
+      class="mobile-zone active"
+      type="button"
+      data-zone="qastal"
+      onclick="selectMobileZone(this)">
+      القسطل
+    </button>
+
+    <button
+      class="mobile-zone"
+      type="button"
+      data-zone="abu-alanda"
+      onclick="selectMobileZone(this)">
+      أبو علندا
+    </button>
+
+    <button
+      class="mobile-zone"
+      type="button"
+      data-zone="marka"
+      onclick="selectMobileZone(this)">
+      ماركا
+    </button>
+
+    <button
+      class="mobile-zone"
+      type="button"
+      data-zone="jiza"
+      onclick="selectMobileZone(this)">
+      الجيزة
+    </button>
+
+  </div>
+</section>
 
     <section class="language-switch">
       <div class="container">
@@ -902,25 +1341,91 @@ background-repeat: no-repeat !important;
 
   button.setAttribute('aria-expanded', 'true');
 }
-      const nav = document.querySelector('.main-nav');
-      if(window.innerWidth > 1100) return;
-      const shown = getComputedStyle(nav).display !== 'none';
-      nav.style.display = shown ? 'none' : 'flex';
-      nav.style.position = 'absolute';
-      nav.style.top = '100%';
-      nav.style.insetInline = '16px';
-      nav.style.flexDirection = 'column';
-      nav.style.alignItems = 'stretch';
-      nav.style.gap = '0';
-      nav.style.background = '#fff';
-      nav.style.border = '1px solid rgba(24,34,40,.08)';
-      nav.style.borderRadius = '20px';
-      nav.style.boxShadow = '0 20px 55px rgba(16,31,37,.12)';
-      nav.style.padding = '10px';
-      nav.querySelectorAll('a').forEach(a=>{a.style.padding='14px 12px'; a.style.borderBottom='1px solid rgba(24,34,40,.05)';});
-      nav.querySelectorAll('a:last-child').forEach(a=>a.style.borderBottom='0');
-    }
+     
     applyLanguage('ar');
+    /* Mobile home interactions v1 */
+
+window.closeMobileMenu = function () {
+  const drawer = document.getElementById("mobileDrawer");
+  const button = document.querySelector(".menu-btn");
+
+  if (!drawer) return;
+
+  drawer.classList.remove("open");
+  drawer.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("menu-open");
+
+  if (button) {
+    button.setAttribute("aria-expanded", "false");
+  }
+};
+
+window.toggleMobileMenu = function () {
+  if (window.innerWidth > 768) return;
+
+  const drawer = document.getElementById("mobileDrawer");
+  const button = document.querySelector(".menu-btn");
+
+  if (!drawer) return;
+
+  const shouldOpen = !drawer.classList.contains("open");
+
+  drawer.classList.toggle("open", shouldOpen);
+  drawer.setAttribute("aria-hidden", shouldOpen ? "false" : "true");
+  document.body.classList.toggle("menu-open", shouldOpen);
+
+  if (button) {
+    button.setAttribute(
+      "aria-expanded",
+      shouldOpen ? "true" : "false"
+    );
+  }
+};
+
+window.goFromMobileMenu = function (sectionId) {
+  window.closeMobileMenu();
+
+  window.setTimeout(function () {
+    const section = document.getElementById(sectionId);
+
+    if (section) {
+      section.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }
+  }, 300);
+};
+
+window.selectMobileZone = function (selectedButton) {
+  document
+    .querySelectorAll(".mobile-zone")
+    .forEach(function (button) {
+      button.classList.remove("active");
+      button.setAttribute("aria-pressed", "false");
+    });
+
+  selectedButton.classList.add("active");
+  selectedButton.setAttribute("aria-pressed", "true");
+
+  selectedButton.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest",
+    inline: "center"
+  });
+};
+
+document.addEventListener("keydown", function (event) {
+  if (event.key === "Escape") {
+    window.closeMobileMenu();
+  }
+});
+
+window.addEventListener("resize", function () {
+  if (window.innerWidth > 768) {
+    window.closeMobileMenu();
+  }
+});
   </script>
 </body>
 </html>
