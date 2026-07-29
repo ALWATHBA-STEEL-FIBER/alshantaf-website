@@ -287,6 +287,58 @@ background-repeat: no-repeat !important;
     box-sizing: border-box;
     justify-content: center;
   }
+}/* Mobile utility bar and phone numbers */
+@media (max-width: 768px) {
+  .utility-bar {
+    height: auto !important;
+  }
+
+  .utility-inner {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 10px 14px !important;
+    box-sizing: border-box !important;
+  }
+
+  .utility-group {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    justify-items: center !important;
+    align-items: center !important;
+  }
+
+  .utility-group .utility-item {
+    width: 100% !important;
+    justify-content: center !important;
+    text-align: center !important;
+    margin: 0 !important;
+    white-space: nowrap !important;
+    font-size: 14px !important;
+  }
+
+  .utility-group .utility-item[href^="tel:"] {
+    direction: ltr !important;
+    unicode-bidi: isolate !important;
+  }
+
+  .utility-group .utility-item[href^="mailto:"] {
+    grid-column: 1 / -1 !important;
+    direction: ltr !important;
+    unicode-bidi: isolate !important;
+  }
+
+  .utility-actions {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    margin: 0 !important;
+  }
 }
   </style>
 </head>
@@ -294,8 +346,8 @@ background-repeat: no-repeat !important;
   <div class="utility-bar">
     <div class="container utility-inner">
       <div class="utility-group">
-        <a class="utility-item" href="tel:+962799996660"><span class="utility-icon">✆</span><span>00962 79 999 666 0</span></a>
-        <a class="utility-item" href="tel:+962799996668"><span class="utility-icon">✆</span><span>00962 79 999 666 8</span></a>
+        <a class="utility-item" href="tel:+962799996660"><span class="utility-icon">✆</span><span>+962 79 999 6660</span></a>
+        <a class="utility-item" href="tel:+962799996668"><span class="utility-icon">✆</span><span>+962 79 999 6668</span></a>
         <a class="utility-item" href="mailto:info@alshantaf.com"><span class="utility-icon">✉</span><span>info@alshantaf.com</span></a>
       </div>
       <div class="utility-actions">
