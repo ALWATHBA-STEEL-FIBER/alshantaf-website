@@ -341,9 +341,10 @@ background-repeat: no-repeat !important;
   }
 }/* Final mobile header alignment */
 @media (max-width: 768px) {
-  .nav-actions > *:not(.menu-btn) {
-    display: none !important;
-  }
+  header .nav-pill,
+header .nav-cta {
+  display: none !important;
+}
 
   .nav-actions {
     display: flex !important;
