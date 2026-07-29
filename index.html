@@ -339,6 +339,45 @@ background-repeat: no-repeat !important;
     align-items: center !important;
     margin: 0 !important;
   }
+}/* Final mobile header alignment */
+@media (max-width: 768px) {
+  .nav-actions > *:not(.menu-btn) {
+    display: none !important;
+  }
+
+  .nav-actions {
+    display: flex !important;
+    flex: 0 0 44px !important;
+    width: 44px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .menu-btn {
+    display: grid !important;
+    place-items: center !important;
+    width: 44px !important;
+    height: 44px !important;
+    flex: 0 0 44px !important;
+    margin: 0 !important;
+  }
+
+  .nav-inner {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 14px !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    justify-content: space-between !important;
+    overflow: hidden !important;
+  }
+
+  html,
+  body {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
 }
   </style>
 </head>
