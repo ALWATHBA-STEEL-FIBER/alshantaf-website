@@ -789,6 +789,356 @@ background-repeat: no-repeat !important;
     max-width: 100% !important;
     overflow-x: hidden !important;
   }
+}/* Opportunities */
+
+.opportunities-grid{
+display:grid;
+grid-template-columns:1fr;
+gap:24px;
+margin-top:40px;
+}
+
+.opportunity-card{
+background:#fff;
+border-radius:20px;
+overflow:hidden;
+box-shadow:0 12px 35px rgba(0,0,0,.08);
+transition:.3s;
+}
+
+.opportunity-card:hover{
+transform:translateY(-6px);
+box-shadow:0 18px 45px rgba(0,0,0,.12);
+}
+
+.opportunity-image{
+height:220px;
+background:linear-gradient(135deg,#0b4f8a,#123d63);
+position:relative;
+}
+
+.opportunity-badge{
+position:absolute;
+top:16px;
+right:16px;
+background:#d4af37;
+color:#fff;
+padding:8px 14px;
+border-radius:30px;
+font-size:13px;
+font-weight:700;
+}
+
+.opportunity-content{
+padding:24px;
+}
+
+.opportunity-location{
+color:#0b4f8a;
+font-weight:700;
+margin-bottom:10px;
+}
+
+.opportunity-content h3{
+margin:0 0 15px;
+font-size:24px;
+}
+
+.opportunity-details{
+display:flex;
+gap:18px;
+flex-wrap:wrap;
+margin-bottom:18px;
+font-weight:600;
+color:#555;
+}
+
+.opportunity-content p{
+line-height:1.8;
+color:#666;
+margin-bottom:20px;
+}
+
+.opportunity-link{
+display:inline-block;
+padding:12px 24px;
+background:#0b4f8a;
+color:#fff;
+text-decoration:none;
+border-radius:10px;
+font-weight:700;
+transition:.3s;
+}
+
+.opportunity-link:hover{
+background:#08375f;
+}
+
+@media(min-width:768px){
+.opportunities-grid{
+grid-template-columns:repeat(2,1fr);
+}
+}
+
+@media(min-width:1200px){
+.opportunities-grid{
+grid-template-columns:repeat(3,1fr);
+}
+}
+/* ===== Industrial Areas Section ===== */
+
+.industrial-areas {
+  padding: 70px 0;
+  background: #f7f4ee;
+}
+
+.industrial-areas .container {
+  width: min(1180px, calc(100% - 32px));
+  margin: auto;
+}
+
+.areas-heading {
+  max-width: 720px;
+  margin: 0 auto 42px;
+  text-align: center;
+}
+
+.areas-label {
+  display: inline-block;
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #b88a4a;
+  letter-spacing: 0.4px;
+}
+
+.areas-heading h2 {
+  margin: 0 0 14px;
+  color: #123f39;
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1.25;
+}
+
+.areas-heading p {
+  margin: 0;
+  color: #6f706d;
+  font-size: 17px;
+  line-height: 1.9;
+}
+
+.main-areas-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.area-card {
+  background: #ffffff;
+  border: 1px solid rgba(18, 63, 57, 0.12);
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(28, 45, 41, 0.07);
+  transition: transform 0.25s ease, box-shadow 0.25s ease,
+    border-color 0.25s ease;
+}
+
+.area-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 18px 42px rgba(28, 45, 41, 0.11);
+  border-color: rgba(184, 138, 74, 0.35);
+}
+
+.area-card summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 150px;
+  padding: 24px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.area-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.area-number {
+  flex: 0 0 auto;
+  color: #b88a4a;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.area-summary-text {
+  flex: 1;
+}
+
+.area-summary-text h3 {
+  margin: 0 0 8px;
+  color: #123f39;
+  font-size: 22px;
+  line-height: 1.35;
+}
+
+.area-summary-text p {
+  margin: 0;
+  color: #777873;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.area-plus {
+  display: grid;
+  place-items: center;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #edf3f1;
+  color: #123f39;
+  font-size: 25px;
+  line-height: 1;
+  transition: transform 0.25s ease, background 0.25s ease,
+    color 0.25s ease;
+}
+
+.area-card[open] .area-plus {
+  transform: rotate(45deg);
+  background: #123f39;
+  color: #ffffff;
+}
+
+.area-details {
+  padding: 0 24px 24px;
+  border-top: 1px solid rgba(18, 63, 57, 0.09);
+}
+
+.area-details p {
+  margin: 20px 0;
+  color: #62635f;
+  font-size: 15px;
+  line-height: 1.9;
+}
+
+.area-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 45px;
+  padding: 11px 20px;
+  border-radius: 12px;
+  background: #123f39;
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 800;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.area-button:hover {
+  background: #b88a4a;
+  transform: translateY(-2px);
+}
+
+.other-areas {
+  margin-top: 34px;
+  padding: 30px;
+  border-radius: 24px;
+  background:
+    linear-gradient(rgba(18, 63, 57, 0.96), rgba(18, 63, 57, 0.96)),
+    url("assets/industrial-clean-wide.jpg") center / cover;
+  color: #ffffff;
+  box-shadow: 0 18px 42px rgba(18, 63, 57, 0.14);
+}
+
+.other-areas-heading h3 {
+  margin: 0 0 8px;
+  font-size: 25px;
+}
+
+.other-areas-heading p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.76);
+  line-height: 1.8;
+}
+
+.other-areas-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.other-areas-list span {
+  padding: 9px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 14px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+
+/* Tablet */
+@media (max-width: 980px) {
+  .main-areas-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .industrial-areas {
+    padding: 52px 0;
+  }
+
+  .industrial-areas .container {
+    width: min(100% - 24px, 1180px);
+  }
+
+  .areas-heading {
+    margin-bottom: 28px;
+  }
+
+  .areas-heading h2 {
+    font-size: 30px;
+  }
+
+  .areas-heading p {
+    font-size: 15px;
+  }
+
+  .main-areas-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .area-card summary {
+    min-height: auto;
+    padding: 20px 17px;
+    gap: 12px;
+  }
+
+  .area-summary-text h3 {
+    font-size: 19px;
+  }
+
+  .area-summary-text p {
+    font-size: 13px;
+  }
+
+  .area-details {
+    padding: 0 17px 20px;
+  }
+
+  .other-areas {
+    padding: 23px 18px;
+    border-radius: 20px;
+  }
+
+  .other-areas-heading h3 {
+    font-size: 22px;
+  }
 }
   </style>
 </head>
@@ -936,64 +1286,293 @@ background-repeat: no-repeat !important;
         </div>
       </div>
     </section><!-- Mobile industrial zones -->
-<section class="mobile-zones" aria-label="المناطق الصناعية">
+<!-- Industrial Areas -->
+<section class="industrial-areas" id="areas">
+  <div class="container">
 
-  <h2
-    class="mobile-zones-title"
-    data-ar="اختر المنطقة الصناعية"
-    data-en="Choose an Industrial Area">
-    اختر المنطقة الصناعية
-  </h2>
+    <div class="areas-heading">
+      <span
+        class="areas-label"
+        data-ar="دليل المناطق الصناعية"
+        data-en="Industrial Areas Guide">
+        دليل المناطق الصناعية
+      </span>
 
-  <div class="mobile-zone-track">
+      <h2
+        data-ar="استكشف أهم المناطق الصناعية"
+        data-en="Explore Key Industrial Areas">
+        استكشف أهم المناطق الصناعية
+      </h2>
 
-    <button
-      class="mobile-zone"
-      type="button"
-      data-zone="sahab"
-      onclick="selectMobileZone(this)">
-      سحاب
-    </button>
+      <p
+        data-ar="اضغط على المنطقة لعرض معلوماتها والفرص الاستثمارية المناسبة."
+        data-en="Select an area to view its information and available investment opportunities.">
+        اضغط على المنطقة لعرض معلوماتها والفرص الاستثمارية المناسبة.
+      </p>
+    </div>
 
-    <button
-      class="mobile-zone"
-      type="button"
-      data-zone="muwaqqar"
-      onclick="selectMobileZone(this)">
-      الموقر
-    </button>
+    <div class="main-areas-grid">
 
-    <button
-      class="mobile-zone active"
-      type="button"
-      data-zone="qastal"
-      onclick="selectMobileZone(this)">
-      القسطل
-    </button>
+      <!-- القسطل والمشتى -->
+      <details class="area-card">
+        <summary>
+          <span class="area-number">01</span>
 
-    <button
-      class="mobile-zone"
-      type="button"
-      data-zone="abu-alanda"
-      onclick="selectMobileZone(this)">
-      أبو علندا
-    </button>
+          <div class="area-summary-text">
+            <h3
+              data-ar="القسطل والمشتى"
+              data-en="Al-Qastal & Al-Mushta">
+              القسطل والمشتى
+            </h3>
 
-    <button
-      class="mobile-zone"
-      type="button"
-      data-zone="marka"
-      onclick="selectMobileZone(this)">
-      ماركا
-    </button>
+            <p
+              data-ar="موقع صناعي استراتيجي قريب من أهم طرق النقل."
+              data-en="A strategic industrial location near major transportation routes.">
+              موقع صناعي استراتيجي قريب من أهم طرق النقل.
+            </p>
+          </div>
 
-    <button
-      class="mobile-zone"
-      type="button"
-      data-zone="jiza"
-      onclick="selectMobileZone(this)">
-      الجيزة
-    </button>
+          <span class="area-plus">+</span>
+        </summary>
+
+        <div class="area-details">
+          <p
+            data-ar="منطقة مناسبة للأراضي الصناعية والمصانع والمستودعات والمجمعات الاستثمارية، وتتميز بسهولة الوصول إلى الطريق الصحراوي والمطار."
+            data-en="An ideal location for industrial land, factories, warehouses and investment complexes, with convenient access to the Desert Highway and the airport.">
+            منطقة مناسبة للأراضي الصناعية والمصانع والمستودعات والمجمعات
+            الاستثمارية، وتتميز بسهولة الوصول إلى الطريق الصحراوي والمطار.
+          </p>
+
+          <a
+            href="#opportunities"
+            class="area-button"
+            data-ar="استعرض الفرص المتاحة"
+            data-en="View Available Opportunities">
+            استعرض الفرص المتاحة
+          </a>
+        </div>
+      </details>
+
+      <!-- سحاب -->
+      <details class="area-card">
+        <summary>
+          <span class="area-number">02</span>
+
+          <div class="area-summary-text">
+            <h3 data-ar="سحاب الصناعية" data-en="Sahab Industrial Area">
+              سحاب الصناعية
+            </h3>
+
+            <p
+              data-ar="واحدة من أكبر وأكثر المناطق الصناعية نشاطًا."
+              data-en="One of Jordan's largest and most active industrial areas.">
+              واحدة من أكبر وأكثر المناطق الصناعية نشاطًا.
+            </p>
+          </div>
+
+          <span class="area-plus">+</span>
+        </summary>
+
+        <div class="area-details">
+          <p
+            data-ar="تضم مجموعة واسعة من المصانع والمستودعات والخدمات الصناعية، وتتميز بقربها من العاصمة عمّان."
+            data-en="Home to a wide range of factories, warehouses and industrial services, with close proximity to Amman.">
+            تضم مجموعة واسعة من المصانع والمستودعات والخدمات الصناعية،
+            وتتميز بقربها من العاصمة عمّان.
+          </p>
+
+          <a
+            href="#opportunities"
+            class="area-button"
+            data-ar="استعرض الفرص المتاحة"
+            data-en="View Available Opportunities">
+            استعرض الفرص المتاحة
+          </a>
+        </div>
+      </details>
+
+      <!-- الموقر -->
+      <details class="area-card">
+        <summary>
+          <span class="area-number">03</span>
+
+          <div class="area-summary-text">
+            <h3 data-ar="الموقر الصناعية" data-en="Al-Muwaqqar Industrial Area">
+              الموقر الصناعية
+            </h3>
+
+            <p
+              data-ar="مساحات واسعة مناسبة للمشاريع الصناعية الكبرى."
+              data-en="Large spaces suitable for major industrial projects.">
+              مساحات واسعة مناسبة للمشاريع الصناعية الكبرى.
+            </p>
+          </div>
+
+          <span class="area-plus">+</span>
+        </summary>
+
+        <div class="area-details">
+          <p
+            data-ar="منطقة مناسبة للمصانع الكبيرة والمشاريع اللوجستية والاستثمارات التي تحتاج إلى مساحات واسعة."
+            data-en="Suitable for large factories, logistics projects and investments that require extensive land areas.">
+            منطقة مناسبة للمصانع الكبيرة والمشاريع اللوجستية والاستثمارات
+            التي تحتاج إلى مساحات واسعة.
+          </p>
+
+          <a
+            href="#opportunities"
+            class="area-button"
+            data-ar="استعرض الفرص المتاحة"
+            data-en="View Available Opportunities">
+            استعرض الفرص المتاحة
+          </a>
+        </div>
+      </details>
+
+      <!-- البيادر -->
+      <details class="area-card">
+        <summary>
+          <span class="area-number">04</span>
+
+          <div class="area-summary-text">
+            <h3 data-ar="البيادر الصناعية" data-en="Al-Bayader Industrial Area">
+              البيادر الصناعية
+            </h3>
+
+            <p
+              data-ar="موقع صناعي وتجاري حيوي داخل العاصمة."
+              data-en="A vibrant industrial and commercial location in Amman.">
+              موقع صناعي وتجاري حيوي داخل العاصمة.
+            </p>
+          </div>
+
+          <span class="area-plus">+</span>
+        </summary>
+
+        <div class="area-details">
+          <p
+            data-ar="مناسبة للصناعات الخفيفة والمستودعات والمشاريع التجارية والخدمية المرتبطة بالقطاع الصناعي."
+            data-en="Suitable for light industries, warehouses and commercial services connected to the industrial sector.">
+            مناسبة للصناعات الخفيفة والمستودعات والمشاريع التجارية والخدمية
+            المرتبطة بالقطاع الصناعي.
+          </p>
+
+          <a
+            href="#opportunities"
+            class="area-button"
+            data-ar="استعرض الفرص المتاحة"
+            data-en="View Available Opportunities">
+            استعرض الفرص المتاحة
+          </a>
+        </div>
+      </details>
+
+      <!-- رجم الشامي -->
+      <details class="area-card">
+        <summary>
+          <span class="area-number">05</span>
+
+          <div class="area-summary-text">
+            <h3 data-ar="رجم الشامي" data-en="Rujm Al-Shami">
+              رجم الشامي
+            </h3>
+
+            <p
+              data-ar="منطقة واعدة للاستثمار الصناعي واللوجستي."
+              data-en="A promising area for industrial and logistics investment.">
+              منطقة واعدة للاستثمار الصناعي واللوجستي.
+            </p>
+          </div>
+
+          <span class="area-plus">+</span>
+        </summary>
+
+        <div class="area-details">
+          <p
+            data-ar="توفر فرصًا مناسبة للأراضي الصناعية والمستودعات والمشاريع التي تعتمد على سهولة النقل والحركة."
+            data-en="Offers suitable opportunities for industrial land, warehouses and projects requiring efficient transportation access.">
+            توفر فرصًا مناسبة للأراضي الصناعية والمستودعات والمشاريع التي
+            تعتمد على سهولة النقل والحركة.
+          </p>
+
+          <a
+            href="#opportunities"
+            class="area-button"
+            data-ar="استعرض الفرص المتاحة"
+            data-en="View Available Opportunities">
+            استعرض الفرص المتاحة
+          </a>
+        </div>
+      </details>
+
+      <!-- الجيزة -->
+      <details class="area-card">
+        <summary>
+          <span class="area-number">06</span>
+
+          <div class="area-summary-text">
+            <h3 data-ar="الجيزة" data-en="Al-Jizah">
+              الجيزة
+            </h3>
+
+            <p
+              data-ar="موقع استراتيجي قريب من المطار والطريق الصحراوي."
+              data-en="A strategic location near the airport and Desert Highway.">
+              موقع استراتيجي قريب من المطار والطريق الصحراوي.
+            </p>
+          </div>
+
+          <span class="area-plus">+</span>
+        </summary>
+
+        <div class="area-details">
+          <p
+            data-ar="مناسبة للمشاريع الصناعية والمستودعات والخدمات اللوجستية والاستثمارات المرتبطة بالنقل والتصدير."
+            data-en="Suitable for industrial projects, warehouses, logistics and investments related to transportation and export.">
+            مناسبة للمشاريع الصناعية والمستودعات والخدمات اللوجستية
+            والاستثمارات المرتبطة بالنقل والتصدير.
+          </p>
+
+          <a
+            href="#opportunities"
+            class="area-button"
+            data-ar="استعرض الفرص المتاحة"
+            data-en="View Available Opportunities">
+            استعرض الفرص المتاحة
+          </a>
+        </div>
+      </details>
+
+    </div>
+
+    <!-- مناطق صناعية أخرى -->
+    <div class="other-areas">
+      <div class="other-areas-heading">
+        <h3
+          data-ar="مناطق صناعية أخرى"
+          data-en="Other Industrial Areas">
+          مناطق صناعية أخرى
+        </h3>
+
+        <p
+          data-ar="نغطي أيضًا فرصًا استثمارية في مناطق صناعية متعددة داخل الأردن."
+          data-en="We also cover investment opportunities across additional industrial areas in Jordan.">
+          نغطي أيضًا فرصًا استثمارية في مناطق صناعية متعددة داخل الأردن.
+        </p>
+      </div>
+
+      <div class="other-areas-list">
+        <span data-ar="الزرقاء" data-en="Zarqa">الزرقاء</span>
+        <span data-ar="الضليل" data-en="Al-Dulail">الضليل</span>
+        <span data-ar="الرجيب" data-en="Al-Rajeeb">الرجيب</span>
+        <span data-ar="العقبة" data-en="Aqaba">العقبة</span>
+        <span data-ar="السلط" data-en="Al-Salt">السلط</span>
+        <span data-ar="إربد" data-en="Irbid">إربد</span>
+        <span data-ar="المفرق" data-en="Mafraq">المفرق</span>
+        <span data-ar="الكرك" data-en="Karak">الكرك</span>
+        <span data-ar="معان" data-en="Ma'an">معان</span>
+      </div>
+    </div>
 
   </div>
 </section>
@@ -1112,45 +1691,177 @@ background-repeat: no-repeat !important;
       </div>
     </section>
 
-    <section class="section" id="areas" style="padding-top:40px">
-      <div class="container">
-        <div class="section-head">
-          <div>
-            <span class="eyebrow" data-ar="دليل المناطق" data-en="Areas Guide">دليل المناطق</span>
-            <h2 class="section-title" data-ar="الموقع، الأنظمة، والميزة الاستثمارية" data-en="Location, regulations and investment advantage">الموقع، الأنظمة، والميزة الاستثمارية</h2>
-            <p class="section-sub" data-ar="المنصة مبنية لتربط المستثمر بين المنطقة المناسبة وطبيعة النشاط ومتطلبات الترخيص والعائد المتوقع — ابتداءً من الأردن وقابلة للتوسع لدول أخرى لاحقًا." data-en="The platform is built to connect the investor with the right area, activity type, licensing requirements and expected return — starting with Jordan and ready to expand to other countries later.">المنصة مبنية لتربط المستثمر بين المنطقة المناسبة وطبيعة النشاط ومتطلبات الترخيص والعائد المتوقع — ابتداءً من الأردن وقابلة للتوسع لدول أخرى لاحقًا.</p>
-          </div>
-        </div>
-        <div class="split-grid">
-          <div class="info-panel">
-            <h2 data-ar="القسطل: وجهة صناعية ولوجستية" data-en="Qastal: an industrial and logistics destination">القسطل: وجهة صناعية ولوجستية</h2>
-            <p data-ar="قرب من طريق المطار، سهولة الوصول إلى المحاور الرئيسية، نشاط صناعي متصاعد، وقابلية تشغيلية مريحة للمستثمرين والمصنعين. كما تساعد المنصة على توجيه النشاط الغذائي والدوائي والخطوط الإنتاجية وفق التصنيف الأنسب." data-en="Close to Airport Road, easy access to primary corridors, growing industrial activity and convenient operational stability for investors and manufacturers. The platform also guides food, pharma and production-line activities toward the most suitable zoning path.">قرب من طريق المطار، سهولة الوصول إلى المحاور الرئيسية، نشاط صناعي متصاعد، وقابلية تشغيلية مريحة للمستثمرين والمصنعين. كما تساعد المنصة على توجيه النشاط الغذائي والدوائي والخطوط الإنتاجية وفق التصنيف الأنسب.</p>
-            <div class="mini-features">
-              <div class="mini-feature"><i>➜</i><b data-ar="قرب لوجستي" data-en="Logistics proximity">قرب لوجستي</b></div>
-              <div class="mini-feature"><i>▦</i><b data-ar="بيئة صناعية" data-en="Industrial ecosystem">بيئة صناعية</b></div>
-              <div class="mini-feature"><i>⚖</i><b data-ar="ربط بالأنظمة" data-en="Rules-linked">ربط بالأنظمة</b></div>
-            </div>
-          </div>
-          <div class="info-panel">
-            <h2 data-ar="منصة واضحة لمالك الأرض أيضًا" data-en="A clear platform for land owners too">منصة واضحة لمالك الأرض أيضًا</h2>
-            <p data-ar="يدخل مالك الأرض، يرفع بياناته ووثائقه داخليًا، ثم تتم مراجعة العرض والتسعير قبل التسويق. تبقى المرجعية عند الشنتف، وتظهر الفرصة للمستثمر بصورة أنيقة ومحمية." data-en="A land owner can submit data and internal documents, then the opportunity is reviewed and priced before marketing. The listing remains managed by Alshantaf and appears to investors in a refined, protected format.">يدخل مالك الأرض، يرفع بياناته ووثائقه داخليًا، ثم تتم مراجعة العرض والتسعير قبل التسويق. تبقى المرجعية عند الشنتف، وتظهر الفرصة للمستثمر بصورة أنيقة ومحمية.</p>
-            <button class="btn primary" onclick="scrollToSection('owners')" data-ar="افتح ملف عرض" data-en="Open listing file">افتح ملف عرض</button>
-          </div>
-        </div>
-      </div>
-    </section>
-<section class="section" id="opportunities">
-  <div class="container">
+    /* Industrial Areas */
 
-    <div class="section-head">
-      <span>فرص مختارة</span>
-      <h2>فرص استثمارية مميزة</h2>
-      <p>
-        مجموعة مختارة من الأراضي والفرص الصناعية المناسبة للاستثمار والتطوير.
-      </p>
-    </div>
+.industrial-areas{
+background:#f6f7f9;
+}
 
-  </div>
+.main-areas-grid{
+display:grid;
+grid-template-columns:1fr;
+gap:18px;
+margin-top:40px;
+}
+
+.area-card{
+background:#fff;
+border:1px solid rgba(11,79,138,.10);
+border-radius:18px;
+overflow:hidden;
+box-shadow:0 10px 30px rgba(0,0,0,.05);
+transition:.3s;
+}
+
+.area-card:hover{
+transform:translateY(-3px);
+box-shadow:0 15px 38px rgba(0,0,0,.09);
+}
+
+.area-card summary{
+list-style:none;
+cursor:pointer;
+padding:0;
+}
+
+.area-card summary::-webkit-details-marker{
+display:none;
+}
+
+.area-card-content{
+display:flex;
+align-items:center;
+gap:16px;
+padding:24px;
+}
+
+.area-number{
+font-size:14px;
+font-weight:800;
+color:#d4af37;
+}
+
+.area-card-content div{
+flex:1;
+}
+
+.area-card-content h3{
+margin:0 0 7px;
+font-size:21px;
+color:#102f4d;
+}
+
+.area-card-content p{
+margin:0;
+font-size:14px;
+line-height:1.7;
+color:#6b7280;
+}
+
+.area-arrow{
+width:34px;
+height:34px;
+display:flex;
+align-items:center;
+justify-content:center;
+border-radius:50%;
+background:#eef4f9;
+color:#0b4f8a;
+font-size:22px;
+font-weight:400;
+transition:.3s;
+}
+
+.area-card[open] .area-arrow{
+transform:rotate(45deg);
+background:#0b4f8a;
+color:#fff;
+}
+
+.area-details{
+padding:0 24px 24px;
+border-top:1px solid #edf0f3;
+}
+
+.area-details > p{
+margin:20px 0;
+line-height:1.9;
+color:#5f6670;
+}
+
+.area-features{
+display:flex;
+flex-wrap:wrap;
+gap:10px;
+margin-bottom:20px;
+}
+
+.area-features span{
+padding:8px 13px;
+background:#eef4f9;
+color:#0b4f8a;
+border-radius:30px;
+font-size:13px;
+font-weight:700;
+}
+
+.area-button{
+display:inline-block;
+padding:11px 20px;
+background:#0b4f8a;
+color:#fff;
+text-decoration:none;
+border-radius:9px;
+font-weight:700;
+}
+
+.other-areas{
+margin-top:35px;
+padding:28px;
+background:#102f4d;
+border-radius:20px;
+color:#fff;
+}
+
+.other-areas-title span{
+display:block;
+font-size:22px;
+font-weight:800;
+margin-bottom:7px;
+}
+
+.other-areas-title p{
+margin:0;
+color:rgba(255,255,255,.72);
+line-height:1.7;
+}
+
+.other-areas-list{
+display:flex;
+flex-wrap:wrap;
+gap:10px;
+margin-top:22px;
+}
+
+.other-areas-list span{
+padding:9px 15px;
+background:rgba(255,255,255,.10);
+border:1px solid rgba(255,255,255,.15);
+border-radius:30px;
+font-size:14px;
+}
+
+@media(min-width:768px){
+.main-areas-grid{
+grid-template-columns:repeat(2,1fr);
+}
+}
+
+@media(min-width:1200px){
+.main-areas-grid{
+grid-template-columns:repeat(3,1fr);
+}
+}
 </section>
     <section class="section" id="owners" style="padding-top:40px">
       <div class="container owner-wrap">
