@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 280" role="img" aria-labelledby="title desc">
+  <title id="title">ALSHANTAF</title>
+  <desc id="desc">الشنتف للعقار والاستثمار</desc>
+  <g fill="none" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M118 105V52l49-35 49 35v53M151 28v-15h18v26M276 105V25l65-48 65 48v80M376 4v-22h23v38M463 105V58l46-32 46 32v47" stroke="#c49a61" stroke-width="6"/>
+    <path d="M99 122c115-37 404-37 560 0" stroke="#163f3a" stroke-width="8"/>
+    <path d="M603 83v34M591 88c6-18 28-18 34 0-8-3-10 8-17 4-7 6-12-5-17-4Z" fill="#163f3a" stroke="#163f3a" stroke-width="3"/>
+  </g>
+  <text x="380" y="190" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="76" letter-spacing="7" fill="#163f3a">ALSHANTAF</text>
+  <text x="380" y="225" text-anchor="middle" font-family="Arial, sans-serif" font-size="19" letter-spacing="6" fill="#6a5133">REAL ESTATE AND INVESTMENTS</text>
+  <line x1="166" y1="252" x2="285" y2="252" stroke="#c49a61" stroke-width="3"/>
+  <line x1="475" y1="252" x2="594" y2="252" stroke="#c49a61" stroke-width="3"/>
+  <text x="380" y="263" text-anchor="middle" font-family="Alexandria, Arial, sans-serif" font-size="25" fill="#163f3a">للعقار والاستثمار</text>
+</svg>

@@ -1,0 +1,11 @@
+{
+  "name":"ALSHANTAF INVEST",
+  "short_name":"ALSHANTAF",
+  "start_url":"./index.html",
+  "display":"standalone",
+  "background_color":"#0b0d0f",
+  "theme_color":"#0b0d0f",
+  "lang":"ar",
+  "dir":"rtl",
+  "description":"منصة الشنتف للاستثمار والتطوير"
+}
