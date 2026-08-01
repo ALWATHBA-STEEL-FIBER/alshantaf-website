@@ -1,0 +1,9 @@
+ALSHANTAF INVEST WEBSITE
+Version: V6 - Phase 2.1
+Date: 2026-07-30
+
+Update:
+- Added Al-Qunaytirah and Al-Dhahabiyah as two new main industrial-area cards.
+- Existing six main cards and all other-area links remain unchanged.
+- Added both areas to the admin area selector and automatic listing-number codes.
+- All Phase 2 functions remain unchanged.

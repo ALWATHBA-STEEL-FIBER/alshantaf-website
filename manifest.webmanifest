@@ -1,11 +1,18 @@
 {
-  "name":"ALSHANTAF INVEST",
-  "short_name":"ALSHANTAF",
-  "start_url":"./index.html",
-  "display":"standalone",
-  "background_color":"#0b0d0f",
-  "theme_color":"#0b0d0f",
-  "lang":"ar",
-  "dir":"rtl",
-  "description":"منصة الشنتف للاستثمار والتطوير"
+  "name": "ALSHANTAF INVEST",
+  "short_name": "ALSHANTAF",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f4f1ea",
+  "theme_color": "#123d36",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "assets/logo-original.webp",
+      "sizes": "900x260",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ]
 }
