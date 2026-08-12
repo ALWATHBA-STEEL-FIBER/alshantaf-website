@@ -348,7 +348,28 @@
   function removeImage(index){const all=allWorkingImages();all.splice(index,1);replaceWorkingImages(all)}
   function moveImage(index,delta){const all=allWorkingImages(),target=index+delta;if(target<0||target>=all.length)return;[all[index],all[target]]=[all[target],all[index]];replaceWorkingImages(all)}
   function setCover(index){const all=allWorkingImages();if(index<=0||index>=all.length)return;all.unshift(all.splice(index,1)[0]);replaceWorkingImages(all)}
+async function uploadDocumentToDrive(file){
+  const dataUrl = await readFileData(file, 1.5 * 1024 * 1024);
+  const base64 = dataUrl.split(',')[1];
 
+  const body = new URLSearchParams();
+  body.append('fileName', file.name);
+  body.append('mimeType', file.type || 'application/octet-stream');
+  body.append('fileData', base64);
+
+  const response = await fetch('https://script.google.com/macros/s/AKfycbykreTnP_5S103v1YNPSVPa7NCuT9pnag5jUwPxahhD0S3rVHc1QTCLLhmp2S9kYTPl4g/exec', {
+    method: 'POST',
+    body: body
+  });
+
+  const fileUrl = (await response.text()).trim();
+
+  if (!fileUrl.startsWith('http')) {
+    throw new Error('فشل رفع المستند إلى Google Drive');
+  }
+
+  return fileUrl;
+}
   async function saveOffer(event){
     event.preventDefault();
     const data=rows(),editId=value('editId'),old=data.find(o=>o.id===editId)||{};
@@ -361,7 +382,7 @@
     try{
       const videoFile=document.getElementById('video').files[0],documentInput=document.getElementById('document').files[0];
       if(videoFile)video=await readFileData(videoFile,2*1024*1024);
-      if(documentInput)documentFile=await readFileData(documentInput,1.5*1024*1024);
+     if(documentInput)documentFile=await uploadDocumentToDrive(documentInput);
     }catch(e){alert(e.message);return}
     const images=[...existingImages,...pendingImages];
     Object.assign(draft,{images,mainImage:images[0]||old.mainImage||'assets/industrial-clean-wide.webp',video,document:documentFile});
