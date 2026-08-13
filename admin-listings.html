@@ -357,7 +357,7 @@ async function uploadDocumentToDrive(file){
   body.append('mimeType', file.type || 'application/octet-stream');
   body.append('fileData', base64);
 
-  const response = await fetch('https://script.google.com/macros/s/AKfycbykreTnP_5S103v1YNPSVPa7NCuT9pnag5jUwPxahhD0S3rVHc1QTCLLhmp2S9kYTPl4g/exec', {
+  const response = await fetch('https://script.google.com/macros/s/AKfycbyLQPyTPkegqPpR7klVULGIww7TNSaj98mkF3bUXyJA0nNO8V3jDsUmQtzHxI94z_QQ/exec', {
     method: 'POST',
     body: body
   });
