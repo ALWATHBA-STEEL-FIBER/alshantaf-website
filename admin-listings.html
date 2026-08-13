@@ -123,8 +123,21 @@
     }
     @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
   </style>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
+ <div id="g_id_onload"
+     data-client_id="866630424903-k3aucbvfikvmosktcm25161kte02mt0j.apps.googleusercontent.com"
+     data-callback="handleGoogleLogin">
+</div>
+
+<div class="g_id_signin"
+     data-type="standard"
+     data-size="large"
+     data-theme="outline"
+     data-text="signin_with"
+     data-shape="rectangular">
+</div> 
 <header class="top">
   <div class="wrap top-in">
     <a class="brand" href="index.html" aria-label="العودة إلى الموقع"><img src="assets/logo-original.webp" alt="ALSHANTAF INVEST"></a>
@@ -477,6 +490,45 @@ document.addEventListener('DOMContentLoaded',()=>{
   area.addEventListener('change',t);t();
  }
 });
+</script>
+  <script>
+  let googleIdToken = null;
+let googleAccessToken = null;
+let googleTokenClient = null;
+
+window.addEventListener('load', function () {
+  googleTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: 'ضع_هنا_نفس_Client_ID_الذي_نسخته',
+    scope: 'https://www.googleapis.com/auth/drive',
+    callback: function (response) {
+      if (!response || response.error || !response.access_token) {
+        alert('تعذر تفويض الوصول الآمن.');
+        return;
+      }
+
+      googleAccessToken = response.access_token;
+      alert('تم تفعيل الوصول الآمن بنجاح.');
+    }
+  });
+});
+
+function authorizeSecureAdmin() {
+  if (!googleTokenClient) {
+    alert('Google Security لم يجهز بعد. حاول مرة أخرى.');
+    return;
+  }
+
+  googleTokenClient.requestAccessToken();
+}
+  function handleGoogleLogin(response) {
+    if (!response || !response.credential) {
+      alert('تعذر تسجيل الدخول بواسطة Google.');
+      return;
+    }
+
+    googleIdToken = response.credential;
+    alert('تم تسجيل الدخول بنجاح.');
+  }
 </script>
 </body>
 </html>
