@@ -47,6 +47,8 @@ type Props = {
   lang: "ar" | "en";
   blueprintMeta?: BlueprintMeta;
   onReadyChange?: (ready: boolean) => void;
+  /** When true, omit outer card chrome (parent section already provides it). */
+  embedded?: boolean;
 };
 
 type ElevGrid = ElevGridSnapshot & {
@@ -157,6 +159,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     lang,
     blueprintMeta,
     onReadyChange,
+    embedded = false,
   },
   ref
 ) {
@@ -640,22 +643,6 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         fs ? "bg-[#0f342f] border-b border-gold/35" : "bg-[#0a1f1c] border-b border-gold/25"
       }`}
     >
-      <a
-        href={earthHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="h-8 px-3 rounded-full bg-green text-white text-[11px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
-      >
-        {googleEarthCta}
-      </a>
-      <a
-        href={mapsHref}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="h-8 px-3 rounded-full border border-gold/40 bg-[#0a1f1c] text-gold text-[11px] font-bold inline-flex items-center hover:border-gold transition-colors"
-      >
-        {googleMapsCta}
-      </a>
       <button
         type="button"
         onClick={() => setFullscreen((v) => !v)}
@@ -671,13 +658,34 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     </div>
   );
 
+  const googleLinks = (
+    <div className="flex flex-wrap items-center gap-1.5 px-1 pt-2">
+      <a
+        href={earthHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="h-7 px-2.5 rounded-full bg-green text-white text-[10px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
+      >
+        {googleEarthCta}
+      </a>
+      <a
+        href={mapsHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="h-7 px-2.5 rounded-full border border-gold/40 bg-[#0a1f1c] text-gold text-[10px] font-bold inline-flex items-center hover:border-gold transition-colors"
+      >
+        {googleMapsCta}
+      </a>
+    </div>
+  );
+
   const viewer = (fs: boolean) => (
     <div
       ref={fs ? shellRef : undefined}
       className={
         fs
           ? "parcel-fs-portal fixed inset-0 z-[10000] flex flex-col gap-2 bg-[#0a1f1c] p-3"
-          : "parcel-side-shell mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816] flex flex-col gap-2 p-0"
+          : "parcel-side-shell mt-2 rounded-lg overflow-hidden border border-gold/30 bg-[#071816] flex flex-col gap-0 p-0"
       }
       role={fs ? "dialog" : undefined}
       aria-modal={fs ? true : undefined}
@@ -699,27 +707,51 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
           </div>
         )}
       </div>
+      {fs && (
+        <div className="shrink-0 flex flex-wrap items-center gap-1.5 px-1">
+          <a
+            href={earthHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="h-7 px-2.5 rounded-full bg-green text-white text-[10px] font-bold inline-flex items-center"
+          >
+            {googleEarthCta}
+          </a>
+          <a
+            href={mapsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="h-7 px-2.5 rounded-full border border-gold/40 text-gold text-[10px] font-bold inline-flex items-center"
+          >
+            {googleMapsCta}
+          </a>
+        </div>
+      )}
     </div>
   );
 
-  return (
-    <div className="mt-3 rounded-xl border border-gold/35 bg-gradient-to-br from-white via-white to-gold/10 overflow-hidden">
-      <div className="px-3 pt-3 flex flex-wrap items-end justify-between gap-2">
+  const body = (
+    <>
+      <div className={`flex flex-wrap items-end justify-between gap-2 ${embedded ? "px-1" : "px-3 pt-3"}`}>
         <div>
-          <p className="text-[10px] font-bold text-gold tracking-wide">{title}</p>
-          <p className="text-[11px] text-ink-soft mt-0.5 leading-snug">{note}</p>
+          {!embedded && <p className="text-[10px] font-bold text-gold tracking-wide">{title}</p>}
+          <p className={`text-[11px] leading-snug ${embedded ? "text-gold-2/90" : "text-ink-soft mt-0.5"}`}>
+            {note}
+          </p>
           {elevHint && (
-            <p className="text-[11px] tabular-nums text-green mt-1">
-              <span className="text-ink-soft">{lang === "ar" ? "المناسيب التقريبية: " : "Approx. elevations: "}</span>
+            <p className={`text-[11px] tabular-nums mt-1 ${embedded ? "text-gold" : "text-green"}`}>
+              <span className={embedded ? "text-gold/70" : "text-ink-soft"}>
+                {lang === "ar" ? "المناسيب التقريبية: " : "Approx. elevations: "}
+              </span>
               <b>{elevHint}</b>
             </p>
           )}
         </div>
         {model.extents && !fullscreen && (
-          <p className="text-[11px] tabular-nums text-ink">
-            <span className="text-ink-soft">{lengthLabel}: </span>
+          <p className={`text-[11px] tabular-nums ${embedded ? "text-gold-2" : "text-ink"}`}>
+            <span className={embedded ? "text-gold/70" : "text-ink-soft"}>{lengthLabel}: </span>
             <b>{formatMeters(model.extents.lengthM, lang)}</b>
-            <span className="text-ink-soft"> · {widthLabel}: </span>
+            <span className={embedded ? "text-gold/70" : "text-ink-soft"}> · {widthLabel}: </span>
             <b>{formatMeters(model.extents.widthM, lang)}</b>
           </p>
         )}
@@ -727,11 +759,30 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
 
       {!fullscreen && viewer(false)}
       {fullscreen && typeof document !== "undefined" && createPortal(viewer(true), document.body)}
+      {!fullscreen && googleLinks}
 
-      <p className="px-3 pb-2 text-[10px] font-medium text-amber-900/90 bg-amber-50 border-t border-amber-200/80 leading-snug">
+      <p
+        className={`px-1 pt-2 pb-1 text-[10px] font-medium leading-snug ${
+          embedded
+            ? "text-amber-200/90"
+            : "px-3 pb-2 text-amber-900/90 bg-amber-50 border-t border-amber-200/80"
+        }`}
+      >
         {disclaimer}
       </p>
-      <p className="px-3 pb-3 text-[10px] text-ink-soft leading-snug">{schematicNote}</p>
+      <p className={`px-1 pb-1 text-[10px] leading-snug ${embedded ? "text-gold-2/70" : "px-3 pb-3 text-ink-soft"}`}>
+        {schematicNote}
+      </p>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="mt-1">{body}</div>;
+  }
+
+  return (
+    <div className="mt-3 rounded-xl border border-gold/35 bg-gradient-to-br from-white via-white to-gold/10 overflow-hidden">
+      {body}
     </div>
   );
 });

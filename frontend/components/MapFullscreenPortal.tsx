@@ -42,6 +42,8 @@ type Props = {
   areaLabel: string | null;
   areaSqm: number | null;
   extents: Extents;
+  parcelNumber?: string | null;
+  parcelLabel?: string;
   lang: "ar" | "en";
   labels: Labels;
 };
@@ -66,6 +68,8 @@ export function MapFullscreenPortal({
   areaLabel,
   areaSqm,
   extents,
+  parcelNumber = null,
+  parcelLabel = "",
   lang,
   labels: lp,
 }: Props) {
@@ -251,9 +255,10 @@ export function MapFullscreenPortal({
       const group = L.layerGroup().addTo(map);
       for (const edge of rawEdges) {
         const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
+        const rot = edge.bearingDeg.toFixed(1);
         const icon = L.divIcon({
           className: "parcel-dim-label",
-          html: `<span style="display:inline-block;padding:1px 5px;border-radius:4px;background:rgba(15,52,47,.94);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;box-shadow:0 0 0 1px #caa064,0 1px 3px rgba(0,0,0,.3);transform:translate(-50%,-50%)">${label}</span>`,
+          html: `<span style="display:inline-block;padding:1px 5px;border-radius:4px;background:rgba(15,52,47,.94);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;box-shadow:0 0 0 1px #caa064,0 1px 3px rgba(0,0,0,.3);transform:translate(-50%,-50%) rotate(${rot}deg)">${label}</span>`,
           iconSize: [0, 0],
           iconAnchor: [0, 0],
         });
@@ -263,9 +268,29 @@ export function MapFullscreenPortal({
           keyboard: false,
         }).addTo(group);
       }
+      if (parcelNumber && polygon?.[0]?.length) {
+        let sLat = 0;
+        let sLng = 0;
+        for (const [lat, lng] of polygon[0]) {
+          sLat += lat;
+          sLng += lng;
+        }
+        const n = polygon[0].length;
+        const badge = L.divIcon({
+          className: "parcel-num-label",
+          html: `<span style="display:inline-block;padding:3px 8px;border-radius:8px;background:rgba(15,52,47,.95);color:#e8c98a;font:800 11px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.35);border:1px solid #caa064;transform:translate(-50%,-50%)">${parcelLabel}: ${parcelNumber}</span>`,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0],
+        });
+        L.marker([sLat / n, sLng / n], {
+          icon: badge,
+          interactive: false,
+          keyboard: false,
+        }).addTo(group);
+      }
       dimsRef.current = group;
     });
-  }, [open, drawDimensions, showDimensions, polygon, perimeterM, lang]);
+  }, [open, drawDimensions, showDimensions, polygon, perimeterM, lang, parcelNumber, parcelLabel]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -336,6 +361,12 @@ export function MapFullscreenPortal({
         <div className="shrink-0 rounded-xl border border-gold/35 bg-[#0f342f] px-3 py-2 text-gold-2">
           <p className="text-[10px] font-bold tracking-wide mb-1 text-gold">{lp.dimensionsTitle}</p>
           <ul className="space-y-0.5 text-[11px] leading-snug">
+            {parcelNumber && (
+              <li>
+                <span className="text-gold/70">{parcelLabel}: </span>
+                <b>{parcelNumber}</b>
+              </li>
+            )}
             {(areaLabel || areaSqm != null) && (
               <li>
                 <span className="text-gold/70">{lp.dimensionsArea}: </span>

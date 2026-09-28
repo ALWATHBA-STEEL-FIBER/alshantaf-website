@@ -555,37 +555,64 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         map.removeLayer(dimensionLayerRef.current);
         dimensionLayerRef.current = null;
       }
-      if (!drawDimensions || !showDimensions || !polygon?.[0]?.length) return;
-      const rawEdges = ringEdgeDimensions(polygon[0]);
-      const sum = rawEdges.reduce((s, e) => s + e.lengthM, 0);
-      // Nudge edge labels to match official DLS perimeter when we're already close
-      // (Cassini SHAPE.LEN vs WGS84 local plane — typically within a couple percent).
-      const scale =
-        perimeterM != null &&
-        perimeterM > 0 &&
-        sum > 0 &&
-        Math.abs(perimeterM - sum) / perimeterM <= 0.05
-          ? perimeterM / sum
-          : 1;
+      if (!polygon?.[0]?.length) return;
+
       const group = L.layerGroup().addTo(map);
-      for (const edge of rawEdges) {
-        const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
-        const icon = L.divIcon({
-          className: "parcel-dim-label",
-          html: `<span style="display:inline-block;padding:1px 5px;border-radius:4px;background:rgba(15,52,47,.94);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;box-shadow:0 0 0 1px #caa064,0 1px 3px rgba(0,0,0,.3);transform:translate(-50%,-50%)">${label}</span>`,
+
+      // Parcel number always shown on the map when known
+      const parcelNo = blueprint?.parcel?.trim();
+      if (parcelNo) {
+        let sLat = 0;
+        let sLng = 0;
+        const ring = polygon[0];
+        for (const [lat, lng] of ring) {
+          sLat += lat;
+          sLng += lng;
+        }
+        const n = ring.length;
+        const badge = L.divIcon({
+          className: "parcel-num-label",
+          html: `<span style="display:inline-block;padding:3px 8px;border-radius:8px;background:rgba(15,52,47,.95);color:#e8c98a;font:800 11px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.35);border:1px solid #caa064;transform:translate(-50%,-50%)">${lp.blueprintParcel}: ${parcelNo}</span>`,
           iconSize: [0, 0],
           iconAnchor: [0, 0],
         });
-        // Sit the label on the edge (tiny outward offset already baked into edge.label)
-        L.marker([edge.label.lat, edge.label.lng], {
-          icon,
+        L.marker([sLat / n, sLng / n], {
+          icon: badge,
           interactive: false,
           keyboard: false,
         }).addTo(group);
       }
+
+      if (drawDimensions && showDimensions) {
+        const rawEdges = ringEdgeDimensions(polygon[0]);
+        const sum = rawEdges.reduce((s, e) => s + e.lengthM, 0);
+        const scale =
+          perimeterM != null &&
+          perimeterM > 0 &&
+          sum > 0 &&
+          Math.abs(perimeterM - sum) / perimeterM <= 0.05
+            ? perimeterM / sum
+            : 1;
+        for (const edge of rawEdges) {
+          const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
+          const rot = edge.bearingDeg.toFixed(1);
+          const icon = L.divIcon({
+            className: "parcel-dim-label",
+            html: `<span style="display:inline-block;padding:1px 5px;border-radius:4px;background:rgba(15,52,47,.94);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;box-shadow:0 0 0 1px #caa064,0 1px 3px rgba(0,0,0,.3);transform:translate(-50%,-50%) rotate(${rot}deg)">${label}</span>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
+          });
+          L.marker([edge.label.lat, edge.label.lng], {
+            icon,
+            interactive: false,
+            keyboard: false,
+          }).addTo(group);
+        }
+      }
+
       dimensionLayerRef.current = group;
     });
-  }, [drawDimensions, showDimensions, polygon, mapReady, lang, perimeterM, dimsEpoch]);
+  }, [drawDimensions, showDimensions, polygon, mapReady, lang, perimeterM, dimsEpoch, blueprint?.parcel]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -707,14 +734,18 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
   const hasDimensions =
     showDimensions &&
-    (areaLabel || areaSqm != null || perimeterM != null || extents);
+    (Boolean(blueprint?.parcel?.trim()) ||
+      areaLabel ||
+      areaSqm != null ||
+      perimeterM != null ||
+      extents);
 
   return (
-    <section
-      className="rounded-2xl border border-line bg-surface-2/55 p-3 sm:p-4"
-      aria-label={locked ? lp.viewLabel : lp.pickingLabel}
-      dir={lang === "ar" ? "rtl" : "ltr"}
-    >
+    <div className="space-y-4" dir={lang === "ar" ? "rtl" : "ltr"}>
+      <section
+        className="rounded-2xl border border-line bg-surface-2/55 p-3 sm:p-4"
+        aria-label={locked ? lp.viewLabel : lp.pickingLabel}
+      >
       {!locked && (
         <div className="flex gap-2">
           <input
@@ -778,8 +809,23 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       <div className={`${locked ? "" : "mt-3"} flex flex-wrap items-center justify-between gap-3`}>
         <p className="text-[11px] text-ink-soft leading-snug flex-1 min-w-[12rem]">{hint}</p>
       </div>
+      </section>
 
-      <div ref={mapShellRef} className="location-map-shell mt-2 flex flex-col gap-2">
+      <section
+        className="location-map-section w-full rounded-2xl border border-line bg-white p-3 sm:p-4 shadow-sm"
+        aria-label={lp.mapSectionTitle}
+      >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-green tracking-wide">{lp.mapSectionTitle}</h3>
+          {blueprint?.parcel?.trim() && (
+            <p className="text-xs font-bold text-ink tabular-nums">
+              <span className="text-ink-soft font-medium">{lp.blueprintParcel}: </span>
+              {blueprint.parcel.trim()}
+            </p>
+          )}
+        </div>
+
+      <div ref={mapShellRef} className="location-map-shell flex flex-col gap-2">
         <div className="location-map-toolbar shrink-0 flex flex-wrap items-center justify-end gap-2 rounded-xl border border-line bg-white px-2 py-2">
           <div
             className="inline-flex rounded-full border border-line bg-surface-2 p-0.5"
@@ -843,9 +889,15 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         </div>
 
         {hasDimensions && !loading && (
-          <div className="shrink-0 rounded-xl border border-line bg-white px-3 py-2">
+          <div className="shrink-0 rounded-xl border border-line bg-surface-2/80 px-3 py-2">
             <p className="text-[10px] font-bold tracking-wide mb-1 text-green">{lp.dimensionsTitle}</p>
             <ul className="space-y-0.5 text-[11px] leading-snug text-ink">
+              {blueprint?.parcel?.trim() && (
+                <li>
+                  <span className="text-ink-soft">{lp.blueprintParcel}: </span>
+                  <b>{blueprint.parcel.trim()}</b>
+                </li>
+              )}
               {(areaLabel || areaSqm != null) && (
                 <li>
                   <span className="text-ink-soft">{lp.dimensionsArea}: </span>
@@ -885,6 +937,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         areaLabel={areaLabel}
         areaSqm={areaSqm}
         extents={extents}
+        parcelNumber={blueprint?.parcel?.trim() || null}
+        parcelLabel={lp.blueprintParcel}
         lang={lang}
         labels={{
           basemapLabel: lp.basemapLabel,
@@ -902,73 +956,82 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       <p className="mt-2 text-[10px] text-ink-soft">
         {basemap === "map" ? "© OpenStreetMap" : "© Esri"} · {lp.osmNote}
       </p>
+      </section>
+
       {Boolean(polygon?.[0]?.length) && !loading && (
-        <ParcelSideView
-          ref={sideViewRef}
-          polygon={polygon}
-          title={lp.sideViewTitle}
-          note={lp.sideViewNote}
-          lengthLabel={lp.sideViewLength}
-          widthLabel={lp.sideViewWidth}
-          schematicNote={lp.sideViewSchematic}
-          disclaimer={lp.sideViewDisclaimer}
-          googleEarthCta={lp.sideViewGoogleEarth}
-          googleMapsCta={lp.sideViewGoogleMaps}
-          loadingLabel={lp.sideViewLoading}
-          fullscreenLabel={lp.fullscreen}
-          exitFullscreenLabel={lp.exitFullscreen}
-          lang={lang}
-          onReadyChange={handleReadyChange}
-          blueprintMeta={{
-            lang,
-            brandName: lp.blueprintBrand,
-            sheetTitle: lp.blueprintSheetTitle,
-            topViewLabel: lp.blueprintTopView,
-            sideViewLabel: lp.blueprintSideView,
-            paramsLabel: lp.blueprintParams,
-            elevRangeLabel: lp.blueprintElevRange,
-            contourStepLabel: lp.blueprintContourStep,
-            approxNote: lp.blueprintApproxNote,
-            footerNote: lp.blueprintFooter,
-            governorate: blueprint?.governorate,
-            directorate: blueprint?.directorate,
-            village: blueprint?.village,
-            basin: blueprint?.basin,
-            neighborhood: blueprint?.neighborhood,
-            parcel: blueprint?.parcel,
-            address: address || undefined,
-            coordinates: value || undefined,
-            areaLabel,
-            areaSqm,
-            perimeterM,
-            notes: blueprint?.notes,
-            notesLabel: lp.blueprintNotes,
-            industryLabel: blueprint?.industryLabel,
-            industryValue: blueprint?.industryValue,
-            industryUserChoseNote: blueprint?.industryUserChoseNote ?? lp.blueprintZoningUserChose,
-            labels: {
-              governorate: lp.blueprintGovernorate,
-              directorate: lp.blueprintDirectorate,
-              village: lp.blueprintVillage,
-              basin: lp.blueprintBasin,
-              neighborhood: lp.blueprintNeighborhood,
-              parcel: lp.blueprintParcel,
-              address: lp.blueprintAddress,
-              coordinates: lp.blueprintCoordinates,
-              area: lp.blueprintArea,
-              perimeter: lp.blueprintPerimeter,
-              extent: lp.blueprintExtent,
-            },
-          } satisfies BlueprintMeta}
-        />
+        <section
+          className="location-topo-section w-full rounded-2xl border border-gold/40 bg-gradient-to-br from-[#0a1f1c] via-[#0f342f] to-[#0a1f1c] p-3 sm:p-4 shadow-sm"
+          aria-label={lp.topoSectionTitle}
+        >
+          <h3 className="text-sm font-bold text-gold tracking-wide mb-1 px-1">{lp.topoSectionTitle}</h3>
+          <ParcelSideView
+            ref={sideViewRef}
+            polygon={polygon}
+            title={lp.sideViewTitle}
+            note={lp.sideViewNote}
+            lengthLabel={lp.sideViewLength}
+            widthLabel={lp.sideViewWidth}
+            schematicNote={lp.sideViewSchematic}
+            disclaimer={lp.sideViewDisclaimer}
+            googleEarthCta={lp.sideViewGoogleEarthShort}
+            googleMapsCta={lp.sideViewGoogleMapsShort}
+            loadingLabel={lp.sideViewLoading}
+            fullscreenLabel={lp.fullscreen}
+            exitFullscreenLabel={lp.exitFullscreen}
+            lang={lang}
+            onReadyChange={handleReadyChange}
+            embedded
+            blueprintMeta={{
+              lang,
+              brandName: lp.blueprintBrand,
+              sheetTitle: lp.blueprintSheetTitle,
+              topViewLabel: lp.blueprintTopView,
+              sideViewLabel: lp.blueprintSideView,
+              paramsLabel: lp.blueprintParams,
+              elevRangeLabel: lp.blueprintElevRange,
+              contourStepLabel: lp.blueprintContourStep,
+              approxNote: lp.blueprintApproxNote,
+              footerNote: lp.blueprintFooter,
+              governorate: blueprint?.governorate,
+              directorate: blueprint?.directorate,
+              village: blueprint?.village,
+              basin: blueprint?.basin,
+              neighborhood: blueprint?.neighborhood,
+              parcel: blueprint?.parcel,
+              address: address || undefined,
+              coordinates: value || undefined,
+              areaLabel,
+              areaSqm,
+              perimeterM,
+              notes: blueprint?.notes,
+              notesLabel: lp.blueprintNotes,
+              industryLabel: blueprint?.industryLabel,
+              industryValue: blueprint?.industryValue,
+              industryUserChoseNote: blueprint?.industryUserChoseNote ?? lp.blueprintZoningUserChose,
+              labels: {
+                governorate: lp.blueprintGovernorate,
+                directorate: lp.blueprintDirectorate,
+                village: lp.blueprintVillage,
+                basin: lp.blueprintBasin,
+                neighborhood: lp.blueprintNeighborhood,
+                parcel: lp.blueprintParcel,
+                address: lp.blueprintAddress,
+                coordinates: lp.blueprintCoordinates,
+                area: lp.blueprintArea,
+                perimeter: lp.blueprintPerimeter,
+                extent: lp.blueprintExtent,
+              },
+            } satisfies BlueprintMeta}
+          />
+        </section>
       )}
       {message && (
-        <p role="alert" className="mt-2 text-xs text-red-700">
+        <p role="alert" className="text-xs text-red-700 px-1">
           {message}
         </p>
       )}
       {(selected || polygon) && !loading && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-white px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-white px-3 py-2 text-xs">
           {!locked && <b className="text-green">✓ {lp.confirm}</b>}
           {selected && (
             <span dir="ltr" className="tabular-nums">
@@ -992,6 +1055,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 });

@@ -288,6 +288,11 @@ export type RingEdgeDimension = {
   /** Endpoints of this logical side (for corner glow). */
   start: Coords;
   end: Coords;
+  /**
+   * CSS rotation (degrees) so the label text runs along the edge on a north-up map.
+   * Flipped ±180° when needed so text stays upright/readable.
+   */
+  bearingDeg: number;
 };
 
 /** Soft bend still counts as the same curve/side; sharper = hard corner break. */
@@ -403,6 +408,9 @@ export function ringEdgeDimensions(ring: [number, number][]): RingEdgeDimension[
       origin.lat,
       origin.lng
     );
+    // CSS rotate on north-up map: east=+x, north=-y → atan2(-north, east)
+    let bearingDeg = (Math.atan2(-tanY, tanX) * 180) / Math.PI;
+    if (bearingDeg > 90 || bearingDeg < -90) bearingDeg += 180;
     const start = pts[i0]!;
     const end = pts[i1]!;
     sides.push({
@@ -412,6 +420,7 @@ export function ringEdgeDimensions(ring: [number, number][]): RingEdgeDimension[
       kind,
       start: { lat: start[0], lng: start[1] },
       end: { lat: end[0], lng: end[1] },
+      bearingDeg,
     });
   }
 
