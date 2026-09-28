@@ -46,7 +46,7 @@ function clearClientKey() {
 
 export function LandCheckForm() {
   const { t, lang } = useLanguage();
-  const { state: journey, patch: patchJourney, hydrated: journeyHydrated } = useJourney();
+  const { state: journey, patch: patchJourney } = useJourney();
   const clientKeyRef = useRef<string>("");
   const locationRef = useRef<LocationInputHandle>(null);
   const [blueprintReady, setBlueprintReady] = useState(false);
@@ -87,17 +87,6 @@ export function LandCheckForm() {
   useEffect(() => {
     clientKeyRef.current = getOrCreateClientKey();
   }, []);
-
-  useEffect(() => {
-    if (!journeyHydrated) return;
-    if (journey.industryType && !industryType) {
-      setIndustryType(journey.industryType);
-    }
-    if (journey.areaSqm && areaSqm == null) {
-      setAreaSqm(journey.areaSqm);
-      setFields((f) => (f.areaLabel ? f : { ...f, areaLabel: `${journey.areaSqm} m²` }));
-    }
-  }, [journeyHydrated, journey.industryType, journey.areaSqm, industryType, areaSqm]);
 
   const update = (key: keyof typeof fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setFields((f) => ({ ...f, [key]: e.target.value }));
@@ -350,9 +339,9 @@ export function LandCheckForm() {
                     areaLabel: "",
                     notes: "",
                   });
-                  setIndustryType(journey.industryType ?? "");
+                  setIndustryType("");
                   setDlsHint(null);
-                  setAreaSqm(journey.areaSqm);
+                  setAreaSqm(null);
                   setPerimeterM(null);
                   setParcelPolygon(null);
                   setDraftStatus("idle");
@@ -479,7 +468,7 @@ export function LandCheckForm() {
             value={industryType}
             onChange={(key) => {
               setIndustryType(key);
-              if (key) patchJourney({ industryType: key });
+              // Session-only for this form; do not persist zoning across refresh via journey.
             }}
             scope="all"
             required

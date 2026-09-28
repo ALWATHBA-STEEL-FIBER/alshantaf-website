@@ -722,8 +722,20 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       <div className={`${locked ? "" : "mt-3"} flex flex-wrap items-center justify-between gap-3`}>
         <p className="text-[11px] text-ink-soft leading-snug flex-1 min-w-[12rem]">{hint}</p>
-        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-          <div className="inline-flex rounded-full border border-line bg-white p-0.5" role="group" aria-label={lp.basemapLabel}>
+      </div>
+
+      <div
+        ref={mapShellRef}
+        className={`relative mt-2 ${
+          mapFullscreen ? "bg-[#0a1f1c] p-3 flex flex-col h-full w-full gap-2" : ""
+        }`}
+      >
+        <div
+          className={`z-20 flex flex-wrap items-center justify-end gap-2 ${
+            mapFullscreen ? "relative shrink-0" : "absolute end-2 top-2"
+          }`}
+        >
+          <div className="inline-flex rounded-full border border-line bg-white/95 backdrop-blur p-0.5 shadow-sm" role="group" aria-label={lp.basemapLabel}>
             <button
               type="button"
               onClick={() => setBasemap("map")}
@@ -747,10 +759,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             <button
               type="button"
               onClick={() => setDrawDimensions((v) => !v)}
-              className={`h-8 px-3 rounded-full text-[11px] font-bold border transition-colors ${
+              className={`h-8 px-3 rounded-full text-[11px] font-bold border shadow-sm transition-colors ${
                 drawDimensions
                   ? "bg-green/10 border-green text-green"
-                  : "border-line text-ink-soft hover:text-ink bg-white"
+                  : "border-line text-ink-soft hover:text-ink bg-white/95"
               }`}
               aria-pressed={drawDimensions}
             >
@@ -760,18 +772,13 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           <button
             type="button"
             onClick={() => void toggleElementFullscreen(mapShellRef.current)}
-            className="h-8 px-3 rounded-full border border-line bg-white text-[11px] font-bold text-ink-soft hover:text-ink transition-colors"
+            className="h-8 px-3 rounded-full border border-line bg-white/95 backdrop-blur text-[11px] font-bold text-ink-soft hover:text-ink shadow-sm transition-colors"
             aria-pressed={mapFullscreen}
           >
             {mapFullscreen ? lp.exitFullscreen : lp.fullscreen}
           </button>
         </div>
-      </div>
 
-      <div
-        ref={mapShellRef}
-        className={`relative mt-2 ${mapFullscreen ? "bg-white p-3 flex flex-col h-full w-full" : ""}`}
-      >
         <div
           ref={mapDivRef}
           className={`relative z-0 w-full overflow-hidden rounded-xl border border-line bg-surface-2 ${
@@ -779,7 +786,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           }`}
         />
         {hasDimensions && !loading && (
-          <div className="pointer-events-none absolute start-2 top-2 z-10 max-w-[min(100%-1rem,16rem)] rounded-xl bg-white/92 backdrop-blur px-3 py-2 shadow-sm border border-line/80">
+          <div className="pointer-events-none absolute start-2 bottom-2 z-10 max-w-[min(100%-1rem,16rem)] rounded-xl bg-white/92 backdrop-blur px-3 py-2 shadow-sm border border-line/80">
             <p className="text-[10px] font-bold text-green tracking-wide mb-1">{lp.dimensionsTitle}</p>
             <ul className="space-y-0.5 text-[11px] text-ink leading-snug">
               {(areaLabel || areaSqm != null) && (
@@ -805,17 +812,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             </ul>
           </div>
         )}
-        {mapFullscreen && (
-          <button
-            type="button"
-            onClick={() => void toggleElementFullscreen(mapShellRef.current)}
-            className="absolute end-2 top-2 z-20 h-9 px-3 rounded-full bg-green text-white text-[11px] font-bold shadow-md"
-          >
-            {lp.exitFullscreen}
-          </button>
-        )}
         {loading && (
-          <div className="absolute inset-0 z-10 rounded-xl bg-white/75 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 px-4 text-center">
+          <div className="absolute inset-0 z-30 rounded-xl bg-white/75 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 px-4 text-center">
             <Spinner className="w-7 h-7" />
             <p className="text-sm font-bold text-ink">{loadingLabel || lp.loading}</p>
           </div>

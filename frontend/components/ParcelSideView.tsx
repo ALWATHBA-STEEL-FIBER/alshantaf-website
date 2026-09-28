@@ -628,45 +628,60 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
             </p>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {model.extents && (
-            <p className="text-[11px] tabular-nums text-ink">
-              <span className="text-ink-soft">{lengthLabel}: </span>
-              <b>{formatMeters(model.extents.lengthM, lang)}</b>
-              <span className="text-ink-soft"> · {widthLabel}: </span>
-              <b>{formatMeters(model.extents.widthM, lang)}</b>
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={() => void toggleElementFullscreen(shellRef.current)}
-            className="h-8 px-3 rounded-full border border-line bg-white text-[11px] font-bold text-ink-soft hover:text-ink transition-colors"
-            aria-pressed={fullscreen}
-          >
-            {fullscreen ? exitFullscreenLabel : fullscreenLabel}
-          </button>
-        </div>
+        {model.extents && !fullscreen && (
+          <p className="text-[11px] tabular-nums text-ink">
+            <span className="text-ink-soft">{lengthLabel}: </span>
+            <b>{formatMeters(model.extents.lengthM, lang)}</b>
+            <span className="text-ink-soft"> · {widthLabel}: </span>
+            <b>{formatMeters(model.extents.widthM, lang)}</b>
+          </p>
+        )}
       </div>
 
       <div
         ref={shellRef}
         className={`relative mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816] ${
-          fullscreen ? "m-0 rounded-none border-0 h-full w-full flex flex-col" : ""
+          fullscreen ? "m-0 rounded-none border-0 h-full w-full flex flex-col p-3 gap-2" : ""
         }`}
       >
+        <div
+          className={`z-20 flex flex-wrap items-center justify-end gap-2 ${
+            fullscreen ? "relative shrink-0" : "absolute end-2 top-2"
+          }`}
+        >
+          {fullscreen && (
+            <>
+              <a
+                href={earthHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-8 px-3 rounded-full bg-green text-white text-[11px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
+              >
+                {googleEarthCta}
+              </a>
+              <a
+                href={mapsHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="h-8 px-3 rounded-full border border-gold/40 bg-[#0f342f] text-gold text-[11px] font-bold inline-flex items-center hover:border-gold transition-colors"
+              >
+                {googleMapsCta}
+              </a>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => void toggleElementFullscreen(shellRef.current)}
+            className="h-8 px-3 rounded-full border border-gold/40 bg-[#0f342f]/95 text-gold text-[11px] font-bold backdrop-blur shadow-sm transition-colors hover:border-gold"
+            aria-pressed={fullscreen}
+          >
+            {fullscreen ? exitFullscreenLabel : fullscreenLabel}
+          </button>
+        </div>
         <div
           ref={mountRef}
           className={`w-full ${fullscreen ? "flex-1 min-h-0 h-full" : "min-h-[280px]"}`}
         />
-        {fullscreen && (
-          <button
-            type="button"
-            onClick={() => void toggleElementFullscreen(shellRef.current)}
-            className="absolute end-3 top-3 z-20 h-9 px-3 rounded-full bg-gold text-green text-[11px] font-bold shadow-md"
-          >
-            {exitFullscreenLabel}
-          </button>
-        )}
         {(status === "loading" || status === "idle") && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/80 text-xs font-bold text-gold-2">
             {loadingLabel}
@@ -679,24 +694,26 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         )}
       </div>
 
-      <div className="px-3 py-3 flex flex-wrap gap-2">
-        <a
-          href={earthHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="h-9 px-3 rounded-full bg-green text-white text-[11px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
-        >
-          {googleEarthCta}
-        </a>
-        <a
-          href={mapsHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="h-9 px-3 rounded-full border border-line bg-white text-[11px] font-bold inline-flex items-center hover:border-gold/50 transition-colors"
-        >
-          {googleMapsCta}
-        </a>
-      </div>
+      {!fullscreen && (
+        <div className="px-3 py-3 flex flex-wrap gap-2">
+          <a
+            href={earthHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="h-9 px-3 rounded-full bg-green text-white text-[11px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
+          >
+            {googleEarthCta}
+          </a>
+          <a
+            href={mapsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="h-9 px-3 rounded-full border border-line bg-white text-[11px] font-bold inline-flex items-center hover:border-gold/50 transition-colors"
+          >
+            {googleMapsCta}
+          </a>
+        </div>
+      )}
       <p className="px-3 pb-3 text-[10px] text-ink-soft leading-snug">{schematicNote}</p>
     </div>
   );
