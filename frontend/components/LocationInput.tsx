@@ -456,7 +456,14 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     }
   }
 
-  // Sync pin + parcel canvas (outline + dims + parcel no in one paint pass).
+  // Sync pin + DLS polygon overlay (native Leaflet path + label canvas).
+  // Fit bounds only when the ring geometry actually changes — not on every render/zoom.
+  const polygonKey = useMemo(() => {
+    const ring = polygon?.[0];
+    if (!ring?.length) return "";
+    return ring.map(([lat, lng]) => `${lat.toFixed(7)},${lng.toFixed(7)}`).join("|");
+  }, [polygon]);
+
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     void import("leaflet").then((L) => {
@@ -468,7 +475,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         polygonRef.current = null;
       }
 
-      if (polygon && polygon.length > 0) {
+      if (polygon && polygon.length > 0 && polygonKey) {
         const opts: ParcelCanvasOpts = {
           rings: polygon as [number, number][][],
           showDimensions: Boolean(drawDimensions && showDimensions),
@@ -502,9 +509,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, polygon, locked, mapReady]);
+  }, [selected, polygonKey, locked, mapReady]);
 
-  // Keep canvas annotations in sync when only labels/toggle change (layer already mounted).
+  // Keep annotations in sync when only labels/toggle change (do not remount / fitBounds).
   useEffect(() => {
     const layer = polygonRef.current as
       | (import("leaflet").Layer & { setParcelOptions?: (o: ParcelCanvasOpts) => void })
