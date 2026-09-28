@@ -10,6 +10,7 @@ import {
   parseCoords,
   ringCornerPoints,
   ringEdgeDimensions,
+  ringInteriorCentroid,
   ringOrientedExtents,
   type Coords,
 } from "@/lib/mapCoords";
@@ -277,7 +278,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const mapDivRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const markerRef = useRef<import("leaflet").Marker | null>(null);
-  const polygonRef = useRef<import("leaflet").Polygon | null>(null);
+  const polygonRef = useRef<import("leaflet").LayerGroup | null>(null);
   const cornerGlowRef = useRef<import("leaflet").LayerGroup | null>(null);
   const dimensionLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const osmLayerRef = useRef<import("leaflet").TileLayer | null>(null);
@@ -478,18 +479,29 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       // leaves the "on by default" toggle with nothing drawn on the map.
 
       if (polygon && polygon.length > 0) {
-        const layer = L.polygon(polygon, {
-          color: "#0f342f",
-          weight: 3,
+        // Dual-stroke parcel: soft gold fill + outer glow stroke + crisp inner edge
+        const glowPoly = L.polygon(polygon, {
+          color: "#caa064",
+          weight: 8,
+          opacity: 0.35,
           fillColor: "#caa064",
-          fillOpacity: 0.28,
+          fillOpacity: 0.2,
           interactive: false,
           lineJoin: "round",
           lineCap: "round",
-        }).addTo(map);
-        polygonRef.current = layer;
+        });
+        const layer = L.polygon(polygon, {
+          color: "#0f342f",
+          weight: 2.5,
+          opacity: 1,
+          fill: false,
+          interactive: false,
+          lineJoin: "round",
+          lineCap: "round",
+        });
+        polygonRef.current = L.layerGroup([glowPoly, layer]).addTo(map);
 
-        // Glow every vertex so short / hard-to-see edges read clearly between bright corners
+        // Refined corner dots — small, readable, not noisy
         const glow = L.layerGroup().addTo(map);
         const ring = polygon[0] ?? [];
         const hard = new Set(
@@ -501,35 +513,24 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           if (seen.has(key)) continue;
           seen.add(key);
           const isHard = hard.has(key);
-          // Soft outer halo
           L.circleMarker([lat, lng], {
-            radius: isHard ? 9 : 7,
-            color: "#caa064",
-            weight: 0,
-            fillColor: "#caa064",
-            fillOpacity: 0.35,
-            interactive: false,
-            className: "parcel-corner-halo",
-          }).addTo(glow);
-          // Bright core
-          L.circleMarker([lat, lng], {
-            radius: isHard ? 4.5 : 3.5,
+            radius: isHard ? 5 : 3.5,
             color: "#f5e6c8",
-            weight: 2,
+            weight: 1.5,
             fillColor: "#caa064",
             fillOpacity: 1,
+            opacity: 1,
             interactive: false,
             className: "parcel-corner-glow",
           }).addTo(glow);
         }
         cornerGlowRef.current = glow;
 
-        map.fitBounds(layer.getBounds(), { padding: [28, 28], maxZoom: 18 });
+        map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 19, animate: false });
         if (markerRef.current) {
           map.removeLayer(markerRef.current);
           markerRef.current = null;
         }
-        // Re-run dimensions after polygon settles (avoids async race wiping labels)
         window.setTimeout(() => setDimsEpoch((n) => n + 1), 0);
         return;
       }
@@ -559,28 +560,29 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       const group = L.layerGroup().addTo(map);
 
-      // Parcel number always shown on the map when known
+      // Parcel number centered inside the land (area centroid)
       const parcelNo = blueprint?.parcel?.trim();
       if (parcelNo) {
-        let sLat = 0;
-        let sLng = 0;
-        const ring = polygon[0];
-        for (const [lat, lng] of ring) {
-          sLat += lat;
-          sLng += lng;
+        const center = ringInteriorCentroid(polygon[0]);
+        if (center) {
+          const badge = L.divIcon({
+            className: "parcel-num-label",
+            html: `<div style="transform:translate(-50%,-50%);text-align:center;pointer-events:none">
+              <div style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;padding:8px 12px;border-radius:12px;background:rgba(15,52,47,.96);color:#e8c98a;box-shadow:0 4px 18px rgba(0,0,0,.4);border:1.5px solid #caa064">
+                <span style="font:600 9px/1 system-ui,sans-serif;letter-spacing:.06em;opacity:.85;text-transform:uppercase">${lp.blueprintParcel}</span>
+                <span style="font:800 15px/1.1 system-ui,sans-serif;letter-spacing:.02em">${parcelNo}</span>
+              </div>
+            </div>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
+          });
+          L.marker([center.lat, center.lng], {
+            icon: badge,
+            interactive: false,
+            keyboard: false,
+            zIndexOffset: 600,
+          }).addTo(group);
         }
-        const n = ring.length;
-        const badge = L.divIcon({
-          className: "parcel-num-label",
-          html: `<span style="display:inline-block;padding:3px 8px;border-radius:8px;background:rgba(15,52,47,.95);color:#e8c98a;font:800 11px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.35);border:1px solid #caa064;transform:translate(-50%,-50%)">${lp.blueprintParcel}: ${parcelNo}</span>`,
-          iconSize: [0, 0],
-          iconAnchor: [0, 0],
-        });
-        L.marker([sLat / n, sLng / n], {
-          icon: badge,
-          interactive: false,
-          keyboard: false,
-        }).addTo(group);
       }
 
       if (drawDimensions && showDimensions) {
@@ -596,16 +598,18 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         for (const edge of rawEdges) {
           const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
           const rot = edge.bearingDeg.toFixed(1);
+          // Midline of the side — chip centered on the edge midpoint, rotated along it
           const icon = L.divIcon({
             className: "parcel-dim-label",
-            html: `<span style="display:inline-block;padding:1px 5px;border-radius:4px;background:rgba(15,52,47,.94);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;box-shadow:0 0 0 1px #caa064,0 1px 3px rgba(0,0,0,.3);transform:translate(-50%,-50%) rotate(${rot}deg)">${label}</span>`,
+            html: `<span style="display:inline-block;padding:2px 7px;border-radius:999px;background:rgba(15,52,47,.96);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;letter-spacing:.01em;box-shadow:0 0 0 1.5px #caa064,0 2px 6px rgba(0,0,0,.35);transform:translate(-50%,-50%) rotate(${rot}deg)">${label}</span>`,
             iconSize: [0, 0],
             iconAnchor: [0, 0],
           });
-          L.marker([edge.label.lat, edge.label.lng], {
+          L.marker([edge.mid.lat, edge.mid.lng], {
             icon,
             interactive: false,
             keyboard: false,
+            zIndexOffset: 400,
           }).addTo(group);
         }
       }
@@ -878,7 +882,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         <div className="relative">
           <div
             ref={mapDivRef}
-            className="location-map-pane relative z-0 w-full h-64 sm:h-80 overflow-hidden rounded-xl border border-line bg-surface-2"
+            className="location-map-pane relative z-0 w-full h-72 sm:h-[28rem] overflow-hidden rounded-xl border border-line bg-[#e8eef0]"
           />
           {loading && (
             <div className="absolute inset-0 z-30 rounded-xl bg-white/75 flex flex-col items-center justify-center gap-3 px-4 text-center">

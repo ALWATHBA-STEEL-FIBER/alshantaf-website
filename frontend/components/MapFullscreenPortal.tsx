@@ -7,6 +7,7 @@ import {
   formatSideMeters,
   ringCornerPoints,
   ringEdgeDimensions,
+  ringInteriorCentroid,
   type Coords,
 } from "@/lib/mapCoords";
 import type { ParcelRing } from "@/components/LocationInput";
@@ -140,15 +141,26 @@ export function MapFullscreenPortal({
       mapRef.current = map;
 
       if (polygon && polygon.length > 0) {
-        const layer = L.polygon(polygon, {
-          color: "#0f342f",
-          weight: 3,
+        const glowPoly = L.polygon(polygon, {
+          color: "#caa064",
+          weight: 8,
+          opacity: 0.35,
           fillColor: "#caa064",
-          fillOpacity: 0.28,
+          fillOpacity: 0.2,
           interactive: false,
           lineJoin: "round",
           lineCap: "round",
-        }).addTo(map);
+        });
+        const layer = L.polygon(polygon, {
+          color: "#0f342f",
+          weight: 2.5,
+          opacity: 1,
+          fill: false,
+          interactive: false,
+          lineJoin: "round",
+          lineCap: "round",
+        });
+        L.layerGroup([glowPoly, layer]).addTo(map);
         polyRef.current = layer;
 
         const ring = polygon[0] ?? [];
@@ -162,18 +174,9 @@ export function MapFullscreenPortal({
           seen.add(key);
           const isHard = hard.has(key);
           L.circleMarker([lat, lng], {
-            radius: isHard ? 9 : 7,
-            color: "#caa064",
-            weight: 0,
-            fillColor: "#caa064",
-            fillOpacity: 0.35,
-            interactive: false,
-            className: "parcel-corner-halo",
-          }).addTo(map);
-          L.circleMarker([lat, lng], {
-            radius: isHard ? 4.5 : 3.5,
+            radius: isHard ? 5 : 3.5,
             color: "#f5e6c8",
-            weight: 2,
+            weight: 1.5,
             fillColor: "#caa064",
             fillOpacity: 1,
             interactive: false,
@@ -181,7 +184,7 @@ export function MapFullscreenPortal({
           }).addTo(map);
         }
 
-        map.fitBounds(layer.getBounds(), { padding: [36, 36], maxZoom: 18, animate: false });
+        map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 19, animate: false });
       } else if (selected) {
         const icon = L.divIcon({
           className: "",
@@ -232,7 +235,7 @@ export function MapFullscreenPortal({
     if (!map.hasLayer(active)) active.addTo(map);
   }, [basemap, open]);
 
-  // Dimension labels on the overlay instance
+  // Dimension labels + parcel badge on the overlay instance
   useEffect(() => {
     if (!open) return;
     void import("leaflet").then((L) => {
@@ -242,51 +245,58 @@ export function MapFullscreenPortal({
         map.removeLayer(dimsRef.current);
         dimsRef.current = null;
       }
-      if (!drawDimensions || !showDimensions || !polygon?.[0]?.length) return;
-      const rawEdges = ringEdgeDimensions(polygon[0]);
-      const sum = rawEdges.reduce((s, e) => s + e.lengthM, 0);
-      const scale =
-        perimeterM != null &&
-        perimeterM > 0 &&
-        sum > 0 &&
-        Math.abs(perimeterM - sum) / perimeterM <= 0.05
-          ? perimeterM / sum
-          : 1;
+      if (!polygon?.[0]?.length) return;
       const group = L.layerGroup().addTo(map);
-      for (const edge of rawEdges) {
-        const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
-        const rot = edge.bearingDeg.toFixed(1);
-        const icon = L.divIcon({
-          className: "parcel-dim-label",
-          html: `<span style="display:inline-block;padding:1px 5px;border-radius:4px;background:rgba(15,52,47,.94);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;box-shadow:0 0 0 1px #caa064,0 1px 3px rgba(0,0,0,.3);transform:translate(-50%,-50%) rotate(${rot}deg)">${label}</span>`,
-          iconSize: [0, 0],
-          iconAnchor: [0, 0],
-        });
-        L.marker([edge.label.lat, edge.label.lng], {
-          icon,
-          interactive: false,
-          keyboard: false,
-        }).addTo(group);
-      }
-      if (parcelNumber && polygon?.[0]?.length) {
-        let sLat = 0;
-        let sLng = 0;
-        for (const [lat, lng] of polygon[0]) {
-          sLat += lat;
-          sLng += lng;
+
+      if (parcelNumber) {
+        const center = ringInteriorCentroid(polygon[0]);
+        if (center) {
+          const badge = L.divIcon({
+            className: "parcel-num-label",
+            html: `<div style="transform:translate(-50%,-50%);text-align:center;pointer-events:none">
+              <div style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;padding:8px 12px;border-radius:12px;background:rgba(15,52,47,.96);color:#e8c98a;box-shadow:0 4px 18px rgba(0,0,0,.4);border:1.5px solid #caa064">
+                <span style="font:600 9px/1 system-ui,sans-serif;letter-spacing:.06em;opacity:.85;text-transform:uppercase">${parcelLabel}</span>
+                <span style="font:800 15px/1.1 system-ui,sans-serif;letter-spacing:.02em">${parcelNumber}</span>
+              </div>
+            </div>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
+          });
+          L.marker([center.lat, center.lng], {
+            icon: badge,
+            interactive: false,
+            keyboard: false,
+            zIndexOffset: 600,
+          }).addTo(group);
         }
-        const n = polygon[0].length;
-        const badge = L.divIcon({
-          className: "parcel-num-label",
-          html: `<span style="display:inline-block;padding:3px 8px;border-radius:8px;background:rgba(15,52,47,.95);color:#e8c98a;font:800 11px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.35);border:1px solid #caa064;transform:translate(-50%,-50%)">${parcelLabel}: ${parcelNumber}</span>`,
-          iconSize: [0, 0],
-          iconAnchor: [0, 0],
-        });
-        L.marker([sLat / n, sLng / n], {
-          icon: badge,
-          interactive: false,
-          keyboard: false,
-        }).addTo(group);
+      }
+
+      if (drawDimensions && showDimensions) {
+        const rawEdges = ringEdgeDimensions(polygon[0]);
+        const sum = rawEdges.reduce((s, e) => s + e.lengthM, 0);
+        const scale =
+          perimeterM != null &&
+          perimeterM > 0 &&
+          sum > 0 &&
+          Math.abs(perimeterM - sum) / perimeterM <= 0.05
+            ? perimeterM / sum
+            : 1;
+        for (const edge of rawEdges) {
+          const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
+          const rot = edge.bearingDeg.toFixed(1);
+          const icon = L.divIcon({
+            className: "parcel-dim-label",
+            html: `<span style="display:inline-block;padding:2px 7px;border-radius:999px;background:rgba(15,52,47,.96);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;letter-spacing:.01em;box-shadow:0 0 0 1.5px #caa064,0 2px 6px rgba(0,0,0,.35);transform:translate(-50%,-50%) rotate(${rot}deg)">${label}</span>`,
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
+          });
+          L.marker([edge.mid.lat, edge.mid.lng], {
+            icon,
+            interactive: false,
+            keyboard: false,
+            zIndexOffset: 400,
+          }).addTo(group);
+        }
       }
       dimsRef.current = group;
     });

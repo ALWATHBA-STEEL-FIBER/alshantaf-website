@@ -155,6 +155,31 @@ function ringCentroid(pts: [number, number][]): Coords {
   return { lat: lat / pts.length, lng: lng / pts.length };
 }
 
+/**
+ * True area centroid of a closed ring (shoelace in local ENU).
+ * Falls inside the parcel for typical cadastral polygons — use for on-map labels.
+ */
+export function ringInteriorCentroid(ring: [number, number][]): Coords | null {
+  const pts = uniqueRing(ring);
+  if (pts.length === 0) return null;
+  if (pts.length < 3) return { lat: pts[0]![0], lng: pts[0]![1] };
+  const origin = ringCentroid(pts);
+  const enu = pts.map(([lat, lng]) => toEnu(lat, lng, origin.lat, origin.lng));
+  let twiceArea = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < enu.length; i++) {
+    const p = enu[i]!;
+    const q = enu[(i + 1) % enu.length]!;
+    const cross = p.x * q.y - q.x * p.y;
+    twiceArea += cross;
+    cx += (p.x + q.x) * cross;
+    cy += (p.y + q.y) * cross;
+  }
+  if (Math.abs(twiceArea) < 1e-12) return origin;
+  return fromEnu({ x: cx / (3 * twiceArea), y: cy / (3 * twiceArea) }, origin.lat, origin.lng);
+}
+
 /** Geodesic distance on the WGS84 sphere (haversine) — kept for call sites that need a quick estimate. */
 export function haversineMeters(a: Coords, b: Coords): number {
   const R = 6371000;
@@ -299,8 +324,6 @@ export type RingEdgeDimension = {
 const COLLINEAR_DEG = 10;
 const CURVE_MAX_DEG = 38;
 const MIN_SIDE_M = 0.2;
-/** Label sits almost on the line (metres outward). */
-const LABEL_OFFSET_M = 0.35;
 
 function turnDegrees(prev: EnuPoint, curr: EnuPoint, next: EnuPoint): number {
   const ax = curr.x - prev.x;
@@ -396,19 +419,8 @@ export function ringEdgeDimensions(ring: [number, number][]): RingEdgeDimension[
     }
 
     const mid = fromEnu(midEnu, origin.lat, origin.lng);
-    // Perpendicular outward (away from centroid at origin)
-    let nx = -tanY;
-    let ny = tanX;
-    if (nx * midEnu.x + ny * midEnu.y < 0) {
-      nx = -nx;
-      ny = -ny;
-    }
-    const label = fromEnu(
-      { x: midEnu.x + nx * LABEL_OFFSET_M, y: midEnu.y + ny * LABEL_OFFSET_M },
-      origin.lat,
-      origin.lng
-    );
-    // CSS rotate on north-up map: east=+x, north=-y → atan2(-north, east)
+    // Midline label: sit on the geometric midpoint of the side (no side offset).
+    // Bearing rotates text along the edge so it reads as that side's length.
     let bearingDeg = (Math.atan2(-tanY, tanX) * 180) / Math.PI;
     if (bearingDeg > 90 || bearingDeg < -90) bearingDeg += 180;
     const start = pts[i0]!;
@@ -416,7 +428,7 @@ export function ringEdgeDimensions(ring: [number, number][]): RingEdgeDimension[
     sides.push({
       mid,
       lengthM,
-      label,
+      label: mid,
       kind,
       start: { lat: start[0], lng: start[1] },
       end: { lat: end[0], lng: end[1] },
