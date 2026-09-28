@@ -12,6 +12,7 @@ import {
   type Coords,
 } from "@/lib/mapCoords";
 import { ParcelSideView, type ParcelSideViewHandle } from "@/components/ParcelSideView";
+import { MapFullscreenPortal } from "@/components/MapFullscreenPortal";
 import type { BlueprintMeta } from "@/lib/parcelBlueprint";
 import "leaflet/dist/leaflet.css";
 
@@ -384,6 +385,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   }, [locked, mapReady]);
 
   useEffect(() => {
+    // Force tile redraw after basemap switch / container reveal
     const map = mapRef.current;
     const osm = osmLayerRef.current;
     const sat = satLayerRef.current;
@@ -398,64 +400,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         map.removeLayer(layer);
       }
     }
-    // Force tile redraw after basemap switch / container reveal
     window.setTimeout(() => map.invalidateSize({ animate: false }), 40);
   }, [basemap, mapReady]);
 
-  useEffect(() => {
-    const refreshMapSize = () => {
-      const map = mapRef.current;
-      const pane = mapDivRef.current;
-      if (!map || !pane) return;
-      if (pane.clientWidth < 40 || pane.clientHeight < 40) return;
-
-      map.invalidateSize({ animate: false, pan: false });
-
-      const osm = osmLayerRef.current;
-      const sat = satLayerRef.current;
-      const wantSat = basemapRef.current === "satellite";
-      const active = wantSat ? sat : osm;
-      const idle = wantSat ? osm : sat;
-      if (idle && map.hasLayer(idle)) map.removeLayer(idle);
-      if (active) {
-        if (!map.hasLayer(active)) active.addTo(map);
-        active.redraw();
-      }
-
-      if (polygonRef.current) {
-        try {
-          map.fitBounds(polygonRef.current.getBounds(), {
-            padding: [28, 28],
-            maxZoom: 18,
-            animate: false,
-          });
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-
-    if (!mapReady) return;
-
-    // CSS fullscreen toggles layout — give the browser a frame, then size Leaflet
-    const timers = [0, 50, 150, 350, 700].map((ms) => window.setTimeout(refreshMapSize, ms));
-    return () => timers.forEach((id) => window.clearTimeout(id));
-  }, [mapFullscreen, mapReady]);
-
-  // Lock page scroll + Escape to exit CSS fullscreen (works on mobile; no Fullscreen API)
-  useEffect(() => {
-    if (!mapFullscreen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMapFullscreen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [mapFullscreen]);
+  // Inline map never enters fullscreen — portal mounts a separate Leaflet instance.
 
   function placeMarker(
     L: typeof import("leaflet"),
@@ -756,23 +704,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         <p className="text-[11px] text-ink-soft leading-snug flex-1 min-w-[12rem]">{hint}</p>
       </div>
 
-      <div
-        ref={mapShellRef}
-        className={`location-map-shell mt-2 flex flex-col gap-2 ${
-          mapFullscreen ? "location-map-shell--fs" : ""
-        }`}
-      >
-        <div
-          className={`location-map-toolbar shrink-0 flex flex-wrap items-center justify-end gap-2 rounded-xl border px-2 py-2 ${
-            mapFullscreen
-              ? "border-gold/40 bg-[#0f342f]"
-              : "border-line bg-white"
-          }`}
-        >
+      <div ref={mapShellRef} className="location-map-shell mt-2 flex flex-col gap-2">
+        <div className="location-map-toolbar shrink-0 flex flex-wrap items-center justify-end gap-2 rounded-xl border border-line bg-white px-2 py-2">
           <div
-            className={`inline-flex rounded-full border p-0.5 ${
-              mapFullscreen ? "border-gold/35 bg-[#0a1f1c]" : "border-line bg-surface-2"
-            }`}
+            className="inline-flex rounded-full border border-line bg-surface-2 p-0.5"
             role="group"
             aria-label={lp.basemapLabel}
           >
@@ -780,11 +715,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               type="button"
               onClick={() => setBasemap("map")}
               className={`h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
-                basemap === "map"
-                  ? "bg-green text-white"
-                  : mapFullscreen
-                    ? "text-gold/80 hover:text-gold"
-                    : "text-ink-soft hover:text-ink"
+                basemap === "map" ? "bg-green text-white" : "text-ink-soft hover:text-ink"
               }`}
             >
               {lp.basemapMap}
@@ -793,11 +724,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               type="button"
               onClick={() => setBasemap("satellite")}
               className={`h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
-                basemap === "satellite"
-                  ? "bg-green text-white"
-                  : mapFullscreen
-                    ? "text-gold/80 hover:text-gold"
-                    : "text-ink-soft hover:text-ink"
+                basemap === "satellite" ? "bg-green text-white" : "text-ink-soft hover:text-ink"
               }`}
             >
               {lp.basemapSatellite}
@@ -809,12 +736,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               onClick={() => setDrawDimensions((v) => !v)}
               className={`h-8 px-3 rounded-full text-[11px] font-bold border transition-colors ${
                 drawDimensions
-                  ? mapFullscreen
-                    ? "bg-gold/15 border-gold text-gold"
-                    : "bg-green/10 border-green text-green"
-                  : mapFullscreen
-                    ? "border-gold/35 text-gold/80 hover:text-gold bg-[#0a1f1c]"
-                    : "border-line text-ink-soft hover:text-ink bg-surface-2"
+                  ? "bg-green/10 border-green text-green"
+                  : "border-line text-ink-soft hover:text-ink bg-surface-2"
               }`}
               aria-pressed={drawDimensions}
             >
@@ -823,28 +746,18 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           )}
           <button
             type="button"
-            onClick={() => setMapFullscreen((v) => !v)}
-            className={`h-8 px-3 rounded-full border text-[11px] font-bold transition-colors ${
-              mapFullscreen
-                ? "border-gold bg-gold text-[#0a1f1c]"
-                : "border-line bg-surface-2 text-ink-soft hover:text-ink"
-            }`}
+            onClick={() => setMapFullscreen(true)}
+            className="h-8 px-3 rounded-full border border-line bg-surface-2 text-[11px] font-bold text-ink-soft hover:text-ink transition-colors"
             aria-pressed={mapFullscreen}
           >
-            {mapFullscreen ? lp.exitFullscreen : lp.fullscreen}
+            {lp.fullscreen}
           </button>
         </div>
 
-        <div
-          className={`relative min-h-0 ${
-            mapFullscreen ? "flex-1 flex flex-col" : ""
-          }`}
-        >
+        <div className="relative">
           <div
             ref={mapDivRef}
-            className={`location-map-pane relative z-0 w-full overflow-hidden rounded-xl border border-line bg-surface-2 ${
-              mapFullscreen ? "flex-1 min-h-0 h-full" : "h-64 sm:h-80"
-            }`}
+            className="location-map-pane relative z-0 w-full h-64 sm:h-80 overflow-hidden rounded-xl border border-line bg-surface-2"
           />
           {loading && (
             <div className="absolute inset-0 z-30 rounded-xl bg-white/75 flex flex-col items-center justify-center gap-3 px-4 text-center">
@@ -855,46 +768,24 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         </div>
 
         {hasDimensions && !loading && (
-          <div
-            className={`shrink-0 rounded-xl border px-3 py-2 ${
-              mapFullscreen
-                ? "border-gold/35 bg-[#0f342f] text-gold-2"
-                : "border-line bg-white"
-            }`}
-          >
-            <p
-              className={`text-[10px] font-bold tracking-wide mb-1 ${
-                mapFullscreen ? "text-gold" : "text-green"
-              }`}
-            >
-              {lp.dimensionsTitle}
-            </p>
-            <ul
-              className={`space-y-0.5 text-[11px] leading-snug ${
-                mapFullscreen ? "text-gold-2" : "text-ink"
-              }`}
-            >
+          <div className="shrink-0 rounded-xl border border-line bg-white px-3 py-2">
+            <p className="text-[10px] font-bold tracking-wide mb-1 text-green">{lp.dimensionsTitle}</p>
+            <ul className="space-y-0.5 text-[11px] leading-snug text-ink">
               {(areaLabel || areaSqm != null) && (
                 <li>
-                  <span className={mapFullscreen ? "text-gold/70" : "text-ink-soft"}>
-                    {lp.dimensionsArea}:{" "}
-                  </span>
+                  <span className="text-ink-soft">{lp.dimensionsArea}: </span>
                   <b>{areaLabel || `${areaSqm!.toLocaleString("en-JO")} m²`}</b>
                 </li>
               )}
               {perimeterM != null && perimeterM > 0 && (
                 <li>
-                  <span className={mapFullscreen ? "text-gold/70" : "text-ink-soft"}>
-                    {lp.dimensionsPerimeter}:{" "}
-                  </span>
+                  <span className="text-ink-soft">{lp.dimensionsPerimeter}: </span>
                   <b>{formatMeters(perimeterM, lang)}</b>
                 </li>
               )}
               {extents && (
                 <li>
-                  <span className={mapFullscreen ? "text-gold/70" : "text-ink-soft"}>
-                    {lp.dimensionsExtent}:{" "}
-                  </span>
+                  <span className="text-ink-soft">{lp.dimensionsExtent}: </span>
                   <b>
                     {formatMeters(extents.lengthM, lang)} × {formatMeters(extents.widthM, lang)}
                   </b>
@@ -904,6 +795,34 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           </div>
         )}
       </div>
+
+      <MapFullscreenPortal
+        open={mapFullscreen}
+        onClose={() => setMapFullscreen(false)}
+        basemap={basemap}
+        onBasemapChange={setBasemap}
+        drawDimensions={drawDimensions}
+        onDrawDimensionsChange={setDrawDimensions}
+        showDimensions={showDimensions}
+        polygon={polygon}
+        selected={selected}
+        perimeterM={perimeterM}
+        areaLabel={areaLabel}
+        areaSqm={areaSqm}
+        extents={extents}
+        lang={lang}
+        labels={{
+          basemapLabel: lp.basemapLabel,
+          basemapMap: lp.basemapMap,
+          basemapSatellite: lp.basemapSatellite,
+          dimensionsOnMap: lp.dimensionsOnMap,
+          dimensionsTitle: lp.dimensionsTitle,
+          dimensionsArea: lp.dimensionsArea,
+          dimensionsPerimeter: lp.dimensionsPerimeter,
+          dimensionsExtent: lp.dimensionsExtent,
+          exitFullscreen: lp.exitFullscreen,
+        }}
+      />
 
       <p className="mt-2 text-[10px] text-ink-soft">
         {basemap === "map" ? "© OpenStreetMap" : "© Esri"} · {lp.osmNote}

@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   contourBandsForRelief,
   contourSegments,
@@ -314,16 +315,18 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         rows: "128",
       });
 
-      let grid: ElevGrid | null = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const res = await fetch(`/api/location/elevation-grid?${qs}`, { cache: "no-cache" });
-          if (!res.ok) throw new Error(`elevation-grid-${res.status}`);
-          grid = (await res.json()) as ElevGrid;
-          break;
-        } catch {
-          if (attempt === 2) throw new Error("elevation-grid");
-          await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+      let grid: ElevGrid | null = gridRef.current;
+      if (!grid) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const res = await fetch(`/api/location/elevation-grid?${qs}`, { cache: "no-cache" });
+            if (!res.ok) throw new Error(`elevation-grid-${res.status}`);
+            grid = (await res.json()) as ElevGrid;
+            break;
+          } catch {
+            if (attempt === 2) throw new Error("elevation-grid");
+            await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+          }
         }
       }
       if (!grid) throw new Error("elevation-grid");
@@ -373,7 +376,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.setSize(w, h, false);
       renderer.domElement.style.width = "100%";
-      renderer.domElement.style.height = "auto";
+      renderer.domElement.style.height = fullscreenRef.current ? "100%" : "auto";
       renderer.domElement.style.display = "block";
       mount.replaceChildren(renderer.domElement);
       bundleRef.current = { THREE, scene, camera, renderer };
@@ -577,6 +580,8 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         renderer.setSize(nw, nh, false);
       };
       window.addEventListener("resize", onResize);
+      // Size after portal/layout paint
+      [40, 120, 280].forEach((ms) => window.setTimeout(onResize, ms));
 
       const tick = () => {
         if (cancelled) return;
@@ -607,18 +612,13 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       if (renderer?.domElement.parentElement === mount) mount.removeChild(renderer.domElement);
       mount.replaceChildren();
     };
-  }, [model, lang]);
+  }, [model, lang, fullscreen]);
 
-  // CSS fullscreen: resize WebGL canvas + lock scroll + Escape
+  // Body scroll lock + Escape while portal fullscreen is open
   useEffect(() => {
     if (!fullscreen) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const bump = () => {
-      const mount = mountRef.current as (HTMLDivElement & { __resize?: () => void }) | null;
-      mount?.__resize?.();
-    };
-    const timers = [0, 50, 150, 350, 700].map((ms) => window.setTimeout(bump, ms));
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setFullscreen(false);
     };
@@ -626,9 +626,6 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     return () => {
       document.body.style.overflow = prev;
       window.removeEventListener("keydown", onKey);
-      timers.forEach((id) => window.clearTimeout(id));
-      // Restore non-FS canvas size after exit
-      window.setTimeout(bump, 50);
     };
   }, [fullscreen]);
 
@@ -636,6 +633,74 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
 
   const earthHref = googleEarthUrl(model.centroid.lat, model.centroid.lng, model.span);
   const mapsHref = googleMapsUrl(model.centroid.lat, model.centroid.lng);
+
+  const toolbar = (fs: boolean) => (
+    <div
+      className={`shrink-0 flex flex-wrap items-center justify-end gap-2 px-2 py-2 ${
+        fs ? "bg-[#0f342f] border-b border-gold/35" : "bg-[#0a1f1c] border-b border-gold/25"
+      }`}
+    >
+      <a
+        href={earthHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="h-8 px-3 rounded-full bg-green text-white text-[11px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
+      >
+        {googleEarthCta}
+      </a>
+      <a
+        href={mapsHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="h-8 px-3 rounded-full border border-gold/40 bg-[#0a1f1c] text-gold text-[11px] font-bold inline-flex items-center hover:border-gold transition-colors"
+      >
+        {googleMapsCta}
+      </a>
+      <button
+        type="button"
+        onClick={() => setFullscreen((v) => !v)}
+        className={`h-8 px-3 rounded-full border text-[11px] font-bold transition-colors ${
+          fs
+            ? "border-gold bg-gold text-[#0a1f1c]"
+            : "border-gold/40 bg-[#0f342f] text-gold hover:border-gold"
+        }`}
+        aria-pressed={fs}
+      >
+        {fs ? exitFullscreenLabel : fullscreenLabel}
+      </button>
+    </div>
+  );
+
+  const viewer = (fs: boolean) => (
+    <div
+      ref={fs ? shellRef : undefined}
+      className={
+        fs
+          ? "parcel-fs-portal fixed inset-0 z-[10000] flex flex-col gap-2 bg-[#0a1f1c] p-3"
+          : "parcel-side-shell mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816] flex flex-col gap-2 p-0"
+      }
+      role={fs ? "dialog" : undefined}
+      aria-modal={fs ? true : undefined}
+    >
+      {toolbar(fs)}
+      <div className={`relative min-h-0 ${fs ? "flex-1 flex flex-col" : ""}`}>
+        <div
+          ref={mountRef}
+          className={`parcel-side-mount w-full ${fs ? "flex-1 min-h-0 h-full" : "min-h-[280px]"}`}
+        />
+        {(status === "loading" || status === "idle") && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/80 text-xs font-bold text-gold-2">
+            {loadingLabel}
+          </div>
+        )}
+        {status === "failed" && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/90 text-xs font-bold text-gold/80 px-4 text-center">
+            {schematicNote}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div className="mt-3 rounded-xl border border-gold/35 bg-gradient-to-br from-white via-white to-gold/10 overflow-hidden">
@@ -660,67 +725,8 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         )}
       </div>
 
-      <div
-        ref={shellRef}
-        className={`parcel-side-shell mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816] flex flex-col gap-2 ${
-          fullscreen ? "parcel-side-shell--fs mx-0 mt-0 border-0 rounded-none" : "p-0"
-        }`}
-      >
-        <div
-          className={`shrink-0 flex flex-wrap items-center justify-end gap-2 px-2 py-2 ${
-            fullscreen ? "bg-[#0f342f] border-b border-gold/35" : "bg-[#0a1f1c] border-b border-gold/25"
-          }`}
-        >
-          <a
-            href={earthHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="h-8 px-3 rounded-full bg-green text-white text-[11px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
-          >
-            {googleEarthCta}
-          </a>
-          <a
-            href={mapsHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`h-8 px-3 rounded-full border text-[11px] font-bold inline-flex items-center transition-colors ${
-              fullscreen
-                ? "border-gold/40 bg-[#0a1f1c] text-gold hover:border-gold"
-                : "border-gold/40 bg-[#0f342f] text-gold hover:border-gold"
-            }`}
-          >
-            {googleMapsCta}
-          </a>
-          <button
-            type="button"
-            onClick={() => setFullscreen((v) => !v)}
-            className={`h-8 px-3 rounded-full border text-[11px] font-bold transition-colors ${
-              fullscreen
-                ? "border-gold bg-gold text-[#0a1f1c]"
-                : "border-gold/40 bg-[#0f342f] text-gold hover:border-gold"
-            }`}
-            aria-pressed={fullscreen}
-          >
-            {fullscreen ? exitFullscreenLabel : fullscreenLabel}
-          </button>
-        </div>
-        <div className={`relative min-h-0 ${fullscreen ? "flex-1 flex flex-col px-2 pb-2" : ""}`}>
-          <div
-            ref={mountRef}
-            className={`parcel-side-mount w-full ${fullscreen ? "flex-1 min-h-0 h-full" : "min-h-[280px]"}`}
-          />
-          {(status === "loading" || status === "idle") && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/80 text-xs font-bold text-gold-2">
-              {loadingLabel}
-            </div>
-          )}
-          {status === "failed" && (
-            <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/90 text-xs font-bold text-gold/80 px-4 text-center">
-              {schematicNote}
-            </div>
-          )}
-        </div>
-      </div>
+      {!fullscreen && viewer(false)}
+      {fullscreen && typeof document !== "undefined" && createPortal(viewer(true), document.body)}
 
       <p className="px-3 pb-2 text-[10px] font-medium text-amber-900/90 bg-amber-50 border-t border-amber-200/80 leading-snug">
         {disclaimer}

@@ -61,61 +61,37 @@ body {
   border-color: rgba(200, 154, 88, 0.35) !important;
 }
 
-/* CSS fullscreen (fixed) — works on mobile; avoids native Fullscreen API + Leaflet breakage */
-.location-map-shell--fs {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: 100%;
+/* Portal fullscreen map — fixed overlay; Leaflet boots fresh inside .map-fs-portal-pane */
+.map-fs-portal {
   height: 100%;
   height: 100dvh;
   max-height: 100dvh;
-  padding: 0.75rem;
+  width: 100%;
   padding-top: max(0.75rem, env(safe-area-inset-top));
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   box-sizing: border-box;
-  background: #0a1f1c;
-  border-radius: 0;
-  margin: 0 !important;
 }
-.location-map-shell--fs .location-map-pane {
-  flex: 1 1 auto;
+.map-fs-portal-pane {
   min-height: 0;
-  height: 100% !important;
-  width: 100%;
 }
-.location-map-shell--fs .leaflet-container {
+.map-fs-portal-pane .leaflet-container {
   width: 100% !important;
   height: 100% !important;
 }
 
-.parcel-side-shell--fs {
-  position: fixed;
-  inset: 0;
-  z-index: 10000;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: 100%;
+/* Portal fullscreen 3D topography */
+.parcel-fs-portal {
   height: 100%;
   height: 100dvh;
   max-height: 100dvh;
-  padding: 0.75rem;
+  width: 100%;
   padding-top: max(0.75rem, env(safe-area-inset-top));
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   box-sizing: border-box;
-  background: #0a1f1c;
-  border-radius: 0 !important;
-  margin: 0 !important;
-  overflow: hidden;
 }
-.parcel-side-shell--fs .parcel-side-mount {
+.parcel-fs-portal .parcel-side-mount {
   flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
 }
 
 body {
