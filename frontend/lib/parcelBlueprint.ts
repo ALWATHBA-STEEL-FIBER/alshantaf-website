@@ -11,10 +11,14 @@ import {
   formatSideMeters,
   fromLocalEnu,
   ringEdgeDimensions,
+  ringInteriorCentroid,
   ringOrientedFrame,
   toLocalEnu,
   type EnuPoint,
 } from "@/lib/mapCoords";
+
+/** Public contact shown on blueprint PDF header (LTR). */
+const BLUEPRINT_HEADER_PHONE = "+962799996668";
 
 export type BlueprintMeta = {
   lang: "ar" | "en";
@@ -316,6 +320,8 @@ export async function drawParcelContextMap(opts: {
   perimeterM?: number | null;
   width?: number;
   height?: number;
+  /** Parcel number drawn at the land centroid. */
+  parcelNumber?: string | null;
   /** When satellite API fails — JPEG/PNG of the already-loaded Leaflet map. */
   mapSnapshot?: string | null;
 }): Promise<HTMLCanvasElement> {
@@ -478,6 +484,27 @@ export async function drawParcelContextMap(opts: {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(text, q.x, q.y);
+  }
+
+  // Land number at geometric center of the parcel
+  const parcelNo = opts.parcelNumber?.trim();
+  if (parcelNo) {
+    const center = ringInteriorCentroid(opts.ring);
+    if (center) {
+      const midEnu = toLocalEnu(center.lat, center.lng, frame.origin.lat, frame.origin.lng);
+      const mid = frame.toParcel(midEnu);
+      const q = toPx(mid.x, mid.y);
+      ctx.save();
+      ctx.font = '800 42px "IBM Plex Sans Arabic",system-ui,sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = "rgba(255,255,255,0.92)";
+      ctx.strokeText(parcelNo, q.x, q.y);
+      ctx.fillStyle = "#0f342f";
+      ctx.fillText(parcelNo, q.x, q.y);
+      ctx.restore();
+    }
   }
 
   drawNorthRose(ctx, frame, opts.lang, toPx, bounds);
@@ -877,7 +904,7 @@ async function printViaPageIsolation(html: string): Promise<void> {
 }
 
 /**
- * Open a print-ready A4 landscape blueprint with proper Arabic typography.
+ * Open a print-ready A4 portrait blueprint with proper Arabic typography.
  * Desktop: same-origin iframe. Mobile: page-isolation print (iframe prints the form).
  */
 export async function printParcelBlueprint(opts: {
@@ -987,8 +1014,21 @@ export async function printParcelBlueprint(opts: {
     flex-shrink: 0;
     filter: none;
   }
+  .header .brand-block { flex: 1; min-width: 0; }
   .header .brand { font-weight: 700; font-size: 12pt; color: #e8c98a; line-height: 1.15; }
   .header .sub { font-size: 8pt; color: rgba(255,255,255,0.94); margin-top: 0.4mm; }
+  .header .phone {
+    margin-inline-start: auto;
+    flex-shrink: 0;
+    font-weight: 700;
+    font-size: 11pt;
+    color: #e8c98a;
+    letter-spacing: 0.02em;
+    direction: ltr;
+    unicode-bidi: isolate;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
   .top {
     display: grid;
     grid-template-columns: 78mm minmax(0, 1fr);
@@ -1114,10 +1154,11 @@ export async function printParcelBlueprint(opts: {
   <div class="sheet">
     <header class="header">
       ${logo ? `<img src="${logo}" alt="" />` : ""}
-      <div>
+      <div class="brand-block">
         <div class="brand">${escapeHtml(meta.brandName)}</div>
         <div class="sub">${escapeHtml(meta.sheetTitle)}</div>
       </div>
+      <div class="phone" dir="ltr">${BLUEPRINT_HEADER_PHONE}</div>
     </header>
     <div class="top">
       <section class="panel">

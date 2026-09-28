@@ -192,40 +192,22 @@ function paintParcelCanvas(
     }
   }
 
-  // Parcel number — badge geometric center = land centroid pixel
+  // Parcel number alone at land centroid — fixed screen px (no zoom growth)
   const parcelNo = opts.parcelNumber?.trim();
   if (parcelNo) {
     const center = ringInteriorCentroid(ring);
     if (center) {
       const c = map.latLngToContainerPoint([center.lat, center.lng]);
-      const title = opts.parcelLabel || "";
       ctx.save();
       ctx.translate(c.x, c.y);
-      ctx.font = '600 9px system-ui, "IBM Plex Sans Arabic", sans-serif';
-      const titleW = title ? ctx.measureText(title).width : 0;
-      ctx.font = '800 16px system-ui, "IBM Plex Sans Arabic", sans-serif';
-      const numW = ctx.measureText(parcelNo).width;
-      const bw = Math.max(titleW, numW) + 28;
-      const bh = title ? 48 : 36;
-      roundRect(ctx, -bw / 2, -bh / 2, bw, bh, 12);
-      ctx.fillStyle = "rgba(15,52,47,0.96)";
-      ctx.fill();
-      ctx.strokeStyle = "#caa064";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      ctx.font = '800 14px system-ui, "IBM Plex Sans Arabic", sans-serif';
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      if (title) {
-        ctx.font = '600 9px system-ui, "IBM Plex Sans Arabic", sans-serif';
-        ctx.fillStyle = "rgba(232,201,138,0.85)";
-        ctx.fillText(title, 0, -9);
-        ctx.font = '800 16px system-ui, "IBM Plex Sans Arabic", sans-serif';
-        ctx.fillStyle = "#e8c98a";
-        ctx.fillText(parcelNo, 0, 10);
-      } else {
-        ctx.fillStyle = "#e8c98a";
-        ctx.fillText(parcelNo, 0, 0);
-      }
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = "rgba(255,255,255,0.95)";
+      ctx.strokeText(parcelNo, 0, 0);
+      ctx.fillStyle = "#0f342f";
+      ctx.fillText(parcelNo, 0, 0);
       ctx.restore();
     }
   }

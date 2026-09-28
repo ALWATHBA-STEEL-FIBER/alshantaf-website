@@ -222,6 +222,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         perimeterM: meta.perimeterM,
         width: 1400,
         height: 1400,
+        parcelNumber: meta.parcel,
         mapSnapshot: opts?.mapSnapshot ?? null,
       });
       const contourCanvas = drawParcelContourMap({
