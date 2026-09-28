@@ -61,6 +61,44 @@ body {
   border-color: rgba(200, 154, 88, 0.35) !important;
 }
 
+/* Fullscreen map shell — size the pane immediately (before React state flips) */
+.location-map-shell:fullscreen {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.75rem;
+  box-sizing: border-box;
+  background: #0a1f1c;
+}
+.location-map-shell:fullscreen .location-map-pane {
+  flex: 1 1 auto;
+  min-height: 50vh;
+  height: auto !important;
+  width: 100%;
+}
+.location-map-shell:fullscreen .leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Fullscreen 3D topography shell */
+.parcel-side-shell:fullscreen {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.75rem;
+  box-sizing: border-box;
+  background: #0a1f1c;
+}
+.parcel-side-shell:fullscreen .parcel-side-mount {
+  flex: 1 1 auto;
+  min-height: 50vh;
+}
+
 body {
   background:
     radial-gradient(1200px 500px at 10% -10%, rgba(200, 154, 88, 0.12), transparent 55%),

@@ -262,6 +262,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [basemap, setBasemap] = useState<Basemap>("map");
   const [drawDimensions, setDrawDimensions] = useState(true);
   const [mapFullscreen, setMapFullscreen] = useState(false);
+  const [dimsEpoch, setDimsEpoch] = useState(0);
   const mapShellRef = useRef<HTMLDivElement>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
@@ -270,6 +271,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const dimensionLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const osmLayerRef = useRef<import("leaflet").TileLayer | null>(null);
   const satLayerRef = useRef<import("leaflet").TileLayer | null>(null);
+  const basemapRef = useRef<Basemap>(basemap);
+  basemapRef.current = basemap;
 
   const extents = useMemo(() => {
     if (!polygon?.[0]?.length) return null;
@@ -413,17 +416,70 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   }, [basemap, mapReady]);
 
   useEffect(() => {
+    const refreshMapAfterFullscreen = () => {
+      const map = mapRef.current;
+      const pane = mapDivRef.current;
+      if (!map || !pane) return;
+      // Skip until the container has a real size (FS CSS/layout may lag one frame)
+      if (pane.clientWidth < 40 || pane.clientHeight < 40) return;
+
+      map.invalidateSize({ animate: false, pan: false });
+
+      const osm = osmLayerRef.current;
+      const sat = satLayerRef.current;
+      const wantSat = basemapRef.current === "satellite";
+      const active = wantSat ? sat : osm;
+      const idle = wantSat ? osm : sat;
+      if (idle && map.hasLayer(idle)) map.removeLayer(idle);
+      if (active) {
+        if (!map.hasLayer(active)) active.addTo(map);
+        // Hard tile recovery — redraw alone is not enough after some FS exits
+        active.redraw();
+      }
+
+      if (polygonRef.current) {
+        try {
+          map.fitBounds(polygonRef.current.getBounds(), {
+            padding: [28, 28],
+            maxZoom: 18,
+            animate: false,
+          });
+        } catch {
+          /* ignore */
+        }
+      } else {
+        const center = map.getCenter();
+        const zoom = map.getZoom();
+        map.setView(center, zoom, { animate: false });
+      }
+    };
+
     const onFs = () => {
       const shell = mapShellRef.current;
       const active = !!shell && document.fullscreenElement === shell;
       setMapFullscreen(active);
-      window.setTimeout(() => {
-        mapRef.current?.invalidateSize({ animate: false });
-      }, 80);
+      // Multiple passes — Leaflet often stays blank after one invalidate on FS enter/exit
+      [0, 50, 150, 350, 700, 1200].forEach((ms) =>
+        window.setTimeout(refreshMapAfterFullscreen, ms)
+      );
     };
     document.addEventListener("fullscreenchange", onFs);
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
+
+  // Also recover when React applies FS layout classes (size changes after state flip)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const timers = [60, 200, 500].map((ms) =>
+      window.setTimeout(() => {
+        map.invalidateSize({ animate: false, pan: false });
+        osmLayerRef.current?.redraw();
+        satLayerRef.current?.redraw();
+      }, ms)
+    );
+    return () => timers.forEach((id) => window.clearTimeout(id));
+  }, [mapFullscreen, mapReady]);
 
   function placeMarker(
     L: typeof import("leaflet"),
@@ -466,10 +522,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         map.removeLayer(polygonRef.current);
         polygonRef.current = null;
       }
-      if (dimensionLayerRef.current) {
-        map.removeLayer(dimensionLayerRef.current);
-        dimensionLayerRef.current = null;
-      }
+      // Do not clear dimension labels here — that races the dimensions effect and
+      // leaves the "on by default" toggle with nothing drawn on the map.
 
       if (polygon && polygon.length > 0) {
         const layer = L.polygon(polygon, {
@@ -485,6 +539,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           map.removeLayer(markerRef.current);
           markerRef.current = null;
         }
+        // Re-run dimensions after polygon settles (avoids async race wiping labels)
+        window.setTimeout(() => setDimsEpoch((n) => n + 1), 0);
         return;
       }
 
@@ -534,7 +590,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       }
       dimensionLayerRef.current = group;
     });
-  }, [drawDimensions, showDimensions, polygon, mapReady, lang, perimeterM]);
+  }, [drawDimensions, showDimensions, polygon, mapReady, lang, perimeterM, dimsEpoch]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -726,8 +782,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       <div
         ref={mapShellRef}
-        className={`relative mt-2 ${
-          mapFullscreen ? "bg-[#0a1f1c] p-3 flex flex-col h-full w-full gap-2" : ""
+        className={`location-map-shell relative mt-2 ${
+          mapFullscreen ? "bg-[#0a1f1c] p-3 flex flex-col gap-2 w-full h-full" : ""
         }`}
       >
         <div
@@ -781,8 +837,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
         <div
           ref={mapDivRef}
-          className={`relative z-0 w-full overflow-hidden rounded-xl border border-line bg-surface-2 ${
-            mapFullscreen ? "flex-1 min-h-0 h-full" : "h-64 sm:h-80"
+          className={`location-map-pane relative z-0 w-full overflow-hidden rounded-xl border border-line bg-surface-2 ${
+            mapFullscreen ? "flex-1 min-h-[50vh] h-full" : "h-64 sm:h-80"
           }`}
         />
         {hasDimensions && !loading && (
@@ -832,6 +888,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           lengthLabel={lp.sideViewLength}
           widthLabel={lp.sideViewWidth}
           schematicNote={lp.sideViewSchematic}
+          disclaimer={lp.sideViewDisclaimer}
           googleEarthCta={lp.sideViewGoogleEarth}
           googleMapsCta={lp.sideViewGoogleMaps}
           loadingLabel={lp.sideViewLoading}

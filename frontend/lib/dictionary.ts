@@ -627,11 +627,14 @@ export const dictionary = {
       dimensionsExtent: "الطول × العرض",
       dimensionsOnMap: "أبعاد على الخريطة",
       sideViewTitle: "منظر جانبي طبوغرافي ثلاثي الأبعاد",
-      sideViewNote: "خطوط المناسيب الحقيقية لسطح الأرض داخل حدود القطعة من دائرة الأراضي — اسحب للتدوير.",
+      sideViewNote:
+        "نموذج ارتفاعات إرشادي لسطح الأرض داخل حدود القطعة — اسحب للتدوير. للمعاينة فقط وليس مسحًا مساحيًا دقيقًا.",
       sideViewLength: "الطول",
       sideViewWidth: "العرض",
       sideViewSchematic:
-        "نموذج طبوغرافي من بيانات الارتفاع، مقصوص على مضلع القطعة الرسمي. المناسيب تقريبية بالمتر. افتح Google Earth للمسح الواقعي.",
+        "الطبوغرافيا لأغراض معلوماتية فقط وغير دقيقة بالكامل. تُبنى من مصادر ارتفاع مفتوحة (Mapzen/Terrarium وOpen-Meteo) مقصوصة على مضلع دائرة الأراضي، والمناسيب تقريبية بالمتر. أكّد القياسات بمسح مساحي رسمي أو Google Earth عند الحاجة.",
+      sideViewDisclaimer:
+        "تنبيه: الطبوغرافيا المعروضة لأغراض معلوماتية وإرشادية فقط، وليست دقيقة بالكامل ولا تغني عن مخطط مساحي رسمي.",
       sideViewGoogleEarth: "مسح ثلاثي الأبعاد في Google Earth",
       sideViewGoogleMaps: "فتح في Google Maps ثلاثي الأبعاد",
       sideViewLoading: "جارٍ بناء النموذج الطبوغرافي…",
@@ -645,7 +648,8 @@ export const dictionary = {
       blueprintParams: "بيانات القطعة",
       blueprintElevRange: "المناسيب التقريبية",
       blueprintContourStep: "فاصل خطوط المناسيب",
-      blueprintApproxNote: "المناسيب خطوط تقريبية من نموذج ارتفاع عام وليست مسحًا مساحيًا رسميًا.",
+      blueprintApproxNote:
+        "المناسيب تقريبية من نماذج ارتفاع مفتوحة (Mapzen وOpen-Meteo) لأغراض معلوماتية فقط — ليست مسحًا مساحيًا رسميًا ولا دقيقة بالكامل.",
       blueprintFooter: "Alshantaf Invest · مخطط إرشادي للقطعة · ليس بديلاً عن مخطط دائرة الأراضي والمساحة",
       blueprintNotes: "ملاحظات",
       blueprintGovernorate: "المحافظة",
@@ -2010,11 +2014,14 @@ export const dictionary = {
       dimensionsExtent: "Length × width",
       dimensionsOnMap: "Dimensions on map",
       sideViewTitle: "3D topographic side view",
-      sideViewNote: "Real elevation contour lines of the land surface inside the DLS parcel boundary — drag to orbit.",
+      sideViewNote:
+        "Advisory elevation model of the land surface inside the parcel boundary — drag to orbit. For information only; not a precise survey.",
       sideViewLength: "Length",
       sideViewWidth: "Width",
       sideViewSchematic:
-        "Topographic model from elevation data, clipped to the official cadastral polygon. Elevations are approximate in metres. Open Google Earth for a photorealistic scan.",
+        "Topography is informational only and not fully accurate. Built from open elevation sources (Mapzen/Terrarium and Open-Meteo), clipped to the official DLS polygon. Elevations are approximate in metres. Confirm with an official survey or Google Earth when needed.",
+      sideViewDisclaimer:
+        "Notice: shown topography is for information and guidance only — it is not fully accurate and does not replace an official topographic survey.",
       sideViewGoogleEarth: "3D scan in Google Earth",
       sideViewGoogleMaps: "Open in Google Maps 3D",
       sideViewLoading: "Building topographic model…",
@@ -2028,7 +2035,8 @@ export const dictionary = {
       blueprintParams: "Parcel parameters",
       blueprintElevRange: "Approx. elevations",
       blueprintContourStep: "Contour interval",
-      blueprintApproxNote: "Contour elevations are approximate from a public DEM — not an official cadastral survey.",
+      blueprintApproxNote:
+        "Elevations are approximate from open DEMs (Mapzen and Open-Meteo) for information only — not an official cadastral survey and not fully accurate.",
       blueprintFooter: "Alshantaf Invest · advisory parcel sheet · not a substitute for official DLS plans",
       blueprintNotes: "Notes",
       blueprintGovernorate: "Governorate",

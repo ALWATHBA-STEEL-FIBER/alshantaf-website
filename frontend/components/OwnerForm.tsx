@@ -607,6 +607,7 @@ export function OwnerForm() {
               loadingLabel={t.owners.dlsMapLoading}
               statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReady : undefined}
               idleNote={!fields.industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
+              showDimensions
             />
           </div>
 

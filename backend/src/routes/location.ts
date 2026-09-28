@@ -473,6 +473,75 @@ locationRouter.get(
       if (!Number.isFinite(elevations[i]!)) elevations[i] = fill;
     }
 
+    // Blend with Open-Meteo elevation (open DEM aggregate) for better local accuracy.
+    // Sample a coarser lattice, then correct the Terrarium surface by local bias.
+    const sources = ["mapzen-terrarium"];
+    try {
+      const step = Math.max(1, Math.ceil(Math.max(cols, rows) / 16));
+      const lats: number[] = [];
+      const lngs: number[] = [];
+      const idxs: number[] = [];
+      for (let r = 0; r < rows; r += step) {
+        for (let c = 0; c < cols; c += step) {
+          lats.push(q.maxLat - ((r + 0.5) / rows) * latSpan);
+          lngs.push(q.minLng + ((c + 0.5) / cols) * lngSpan);
+          idxs.push(r * cols + c);
+        }
+      }
+      // Open-Meteo accepts comma-separated lists; batch in chunks of 80.
+      const omElev = new Map<number, number>();
+      for (let i = 0; i < lats.length; i += 80) {
+        const batchLats = lats.slice(i, i + 80);
+        const batchLngs = lngs.slice(i, i + 80);
+        const batchIdx = idxs.slice(i, i + 80);
+        const url =
+          `https://api.open-meteo.com/v1/elevation?latitude=${batchLats.map((v) => v.toFixed(6)).join(",")}` +
+          `&longitude=${batchLngs.map((v) => v.toFixed(6)).join(",")}`;
+        const response = await fetch(url, {
+          headers: { "User-Agent": "AlshantafInvest/1.0 (elevation-blend)" },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!response.ok) continue;
+        const body = (await response.json()) as { elevation?: number[] };
+        const arr = body.elevation;
+        if (!Array.isArray(arr)) continue;
+        for (let k = 0; k < arr.length && k < batchIdx.length; k++) {
+          const v = arr[k];
+          if (typeof v === "number" && Number.isFinite(v)) omElev.set(batchIdx[k]!, v);
+        }
+      }
+      if (omElev.size >= 4) {
+        sources.push("open-meteo");
+        // Global bias from control points, then soft per-cell pull toward Open-Meteo samples
+        let biasSum = 0;
+        let biasN = 0;
+        for (const [idx, om] of omElev) {
+          const t = elevations[idx]!;
+          if (Number.isFinite(t)) {
+            biasSum += om - t;
+            biasN++;
+          }
+        }
+        const bias = biasN > 0 ? biasSum / biasN : 0;
+        for (let i = 0; i < elevations.length; i++) {
+          elevations[i] = elevations[i]! + bias;
+        }
+        // Stronger blend exactly on Open-Meteo sample cells
+        for (const [idx, om] of omElev) {
+          elevations[idx] = elevations[idx]! * 0.35 + om * 0.65;
+        }
+        min = Infinity;
+        max = -Infinity;
+        for (let i = 0; i < elevations.length; i++) {
+          const v = elevations[i]!;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
+    } catch {
+      // Terrarium-only fallback — Open-Meteo is best-effort
+    }
+
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.json({
       cols,
@@ -485,6 +554,7 @@ locationRouter.get(
       minElev: Number.isFinite(min) ? min : fill,
       maxElev: Number.isFinite(max) ? max : fill,
       missing,
+      sources,
       elevations,
     });
   })

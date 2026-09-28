@@ -37,6 +37,7 @@ type Props = {
   lengthLabel: string;
   widthLabel: string;
   schematicNote: string;
+  disclaimer: string;
   googleEarthCta: string;
   googleMapsCta: string;
   loadingLabel: string;
@@ -146,6 +147,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     lengthLabel,
     widthLabel,
     schematicNote,
+    disclaimer,
     googleEarthCta,
     googleMapsCta,
     loadingLabel,
@@ -575,7 +577,8 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       window.addEventListener("resize", onResize);
       const onFs = () => {
         setFullscreen(!!shellRef.current && document.fullscreenElement === shellRef.current);
-        window.setTimeout(onResize, 60);
+        // Multiple size passes so the WebGL canvas recovers after FS enter/exit
+        [40, 120, 280, 600].forEach((ms) => window.setTimeout(onResize, ms));
       };
       document.addEventListener("fullscreenchange", onFs);
 
@@ -640,7 +643,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
 
       <div
         ref={shellRef}
-        className={`relative mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816] ${
+        className={`parcel-side-shell relative mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816] ${
           fullscreen ? "m-0 rounded-none border-0 h-full w-full flex flex-col p-3 gap-2" : ""
         }`}
       >
@@ -680,7 +683,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         </div>
         <div
           ref={mountRef}
-          className={`w-full ${fullscreen ? "flex-1 min-h-0 h-full" : "min-h-[280px]"}`}
+          className={`parcel-side-mount w-full ${fullscreen ? "flex-1 min-h-0 h-full" : "min-h-[280px]"}`}
         />
         {(status === "loading" || status === "idle") && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/80 text-xs font-bold text-gold-2">
@@ -714,6 +717,9 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
           </a>
         </div>
       )}
+      <p className="px-3 pb-2 text-[10px] font-medium text-amber-900/90 bg-amber-50 border-t border-amber-200/80 leading-snug">
+        {disclaimer}
+      </p>
       <p className="px-3 pb-3 text-[10px] text-ink-soft leading-snug">{schematicNote}</p>
     </div>
   );
