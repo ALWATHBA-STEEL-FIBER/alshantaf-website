@@ -17,8 +17,16 @@ import {
   type EnuPoint,
 } from "@/lib/mapCoords";
 
-/** Public contact shown on blueprint PDF header (LTR). */
-const BLUEPRINT_HEADER_PHONE = "+962799996668";
+/** Official letterhead contacts / site line (LTR in footer). */
+const BLUEPRINT_CONTACTS = [
+  { name: "Eng. Ahmed Alshantaf", phone: "+962799996668" },
+  { name: "Eng. Mohammad Alshantaf", phone: "+962799996660" },
+] as const;
+const BLUEPRINT_SITE_URL = "https://alshantaf.com";
+const BLUEPRINT_LOCATION_EN = "Al-Qastal Industrial — in front of JTI factory";
+const BLUEPRINT_LOCATION_AR = "المنطقة الصناعية في القسطل — أمام مصنع JTI";
+const BLUEPRINT_MOTTO_EN = "Specialized in industrial real estate for 25+ years";
+const BLUEPRINT_MOTTO_AR = "متخصصون في العقارات الصناعية لأكثر من 25 عاماً";
 
 export type BlueprintMeta = {
   lang: "ar" | "en";
@@ -278,7 +286,8 @@ function drawNorthRose(
   frame: ParcelFrame,
   lang: "ar" | "en",
   toPx: (u: number, v: number) => { x: number; y: number },
-  bounds: ReturnType<typeof parcelBounds>
+  bounds: ReturnType<typeof parcelBounds>,
+  color = "#111111"
 ) {
   // Place rose near top-start of the view in parcel frame
   const anchor = { x: bounds.minX + bounds.spanX * 0.08, y: bounds.maxY - bounds.spanY * 0.1 };
@@ -291,8 +300,8 @@ function drawNorthRose(
     y: anchor.y + (nParcel.y / len) * (bounds.spanY * 0.07),
   };
   const tip = toPx(tipParcel.x, tipParcel.y);
-  ctx.strokeStyle = "#e8c98a";
-  ctx.fillStyle = "#e8c98a";
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
   ctx.lineWidth = 2.5;
   ctx.beginPath();
   ctx.moveTo(base.x, base.y);
@@ -331,7 +340,7 @@ export async function drawParcelContextMap(opts: {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#0a1f1c";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
 
   const frame = buildFrame(opts.ring);
@@ -507,12 +516,13 @@ export async function drawParcelContextMap(opts: {
     }
   }
 
-  drawNorthRose(ctx, frame, opts.lang, toPx, bounds);
+  drawNorthRose(ctx, frame, opts.lang, toPx, bounds, "#0f342f");
   return canvas;
 }
 
 /**
  * Same parcel-aligned frame as the context map, but contour levels instead of dimensions.
+ * Ink-friendly: white ground, black contour lines.
  */
 export function drawParcelContourMap(opts: {
   grid: ElevGridSnapshot;
@@ -527,7 +537,7 @@ export function drawParcelContourMap(opts: {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#071816";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
 
   const frame = buildFrame(opts.ring);
@@ -571,8 +581,8 @@ export function drawParcelContourMap(opts: {
     const layerIndex = Math.round((level - zMin) / interval);
     const major = layerIndex % majorEvery === 0;
     const segs = contourSegments(elev, cols, rows, level);
-    ctx.strokeStyle = major ? "rgba(232,201,138,0.95)" : "rgba(200,154,88,0.7)";
-    ctx.lineWidth = major ? 2.9 : 1.6;
+    ctx.strokeStyle = major ? "#111111" : "rgba(20,20,20,0.55)";
+    ctx.lineWidth = major ? 2.4 : 1.2;
     ctx.beginPath();
     let labelIn: { x: number; y: number } | null = null;
     let bestIn = 0;
@@ -583,7 +593,6 @@ export function drawParcelContourMap(opts: {
       const b = gridToParcel(x1, y1);
       const midEnu = frame.toEnu({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
       const inside = pointInPoly(midEnu.x, midEnu.y, poly);
-      // Still stroke segments that graze the parcel edge / nearby pad
       const pa = toPx(a.x, a.y);
       const pb = toPx(b.x, b.y);
       if (
@@ -606,21 +615,20 @@ export function drawParcelContourMap(opts: {
     }
     ctx.stroke();
 
-    // Every contour level gets a meter label (prefer inside parcel)
     const labelAt = labelIn ?? labelAny;
     if (labelAt && segs.length > 0) {
       const text = fmtElev(level, opts.lang);
-      ctx.font = `bold ${major ? 32 : 26}px "IBM Plex Sans Arabic",system-ui,sans-serif`;
+      ctx.font = `bold ${major ? 30 : 24}px "IBM Plex Sans Arabic",system-ui,sans-serif`;
       const tw = ctx.measureText(text).width;
-      const boxH = major ? 38 : 32;
+      const boxH = major ? 36 : 30;
       const lx = Math.max(tw / 2 + 10, Math.min(W - tw / 2 - 10, labelAt.x));
       const ly = Math.max(boxH / 2 + 4, Math.min(H - boxH / 2 - 4, labelAt.y));
-      ctx.fillStyle = "rgba(7,24,22,0.92)";
-      ctx.fillRect(lx - tw / 2 - 8, ly - boxH / 2, tw + 16, boxH);
-      ctx.strokeStyle = major ? "rgba(232,201,138,0.75)" : "rgba(200,154,88,0.5)";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(lx - tw / 2 - 8, ly - boxH / 2, tw + 16, boxH);
-      ctx.fillStyle = major ? "#e8c98a" : "#d4b07a";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(lx - tw / 2 - 7, ly - boxH / 2, tw + 14, boxH);
+      ctx.strokeStyle = "#111111";
+      ctx.lineWidth = major ? 1.6 : 1.1;
+      ctx.strokeRect(lx - tw / 2 - 7, ly - boxH / 2, tw + 14, boxH);
+      ctx.fillStyle = "#111111";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(text, lx, ly);
@@ -634,34 +642,32 @@ export function drawParcelContourMap(opts: {
     else ctx.lineTo(q.x, q.y);
   });
   ctx.closePath();
-  ctx.strokeStyle = "#e8c98a";
-  ctx.lineWidth = 4.2;
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 3.6;
   ctx.stroke();
 
-  // Approx. elevations badge on the contour sheet
   const elevText =
     opts.lang === "ar"
       ? `المناسيب التقريبية: ${fmtElev(zMin, "ar")} – ${fmtElev(zMax, "ar")}`
       : `Approx. elevations: ${fmtElev(zMin, "en")} – ${fmtElev(zMax, "en")}`;
-  ctx.font = 'bold 28px "IBM Plex Sans Arabic",system-ui,sans-serif';
+  ctx.font = 'bold 26px "IBM Plex Sans Arabic",system-ui,sans-serif';
   const elevTw = ctx.measureText(elevText).width;
-  const elevPadX = 16;
-  const elevPadY = 12;
+  const elevPadX = 14;
   const elevBoxW = elevTw + elevPadX * 2;
-  const elevBoxH = 44;
+  const elevBoxH = 40;
   const elevX = 18;
   const elevY = H - elevBoxH - 18;
-  ctx.fillStyle = "rgba(15,52,47,0.94)";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(elevX, elevY, elevBoxW, elevBoxH);
-  ctx.strokeStyle = "#c89a58";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#111111";
+  ctx.lineWidth = 1.5;
   ctx.strokeRect(elevX, elevY, elevBoxW, elevBoxH);
-  ctx.fillStyle = "#e8c98a";
+  ctx.fillStyle = "#111111";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillText(elevText, elevX + elevPadX, elevY + elevBoxH / 2);
 
-  drawNorthRose(ctx, frame, opts.lang, toPx, bounds);
+  drawNorthRose(ctx, frame, opts.lang, toPx, bounds, "#111111");
   return canvas;
 }
 
@@ -713,10 +719,9 @@ function drawTexturedTri(
   ctx.restore();
 }
 
-/** Load brand mark as solid white PNG (for dark green header). */
-export async function loadWhiteLogoPngDataUrl(): Promise<string | null> {
+/** Load brand mark as PNG data URL for the white official letterhead. */
+export async function loadPrintLogoPngDataUrl(): Promise<string | null> {
   try {
-    // Prefer PNG — webp mark can invert poorly on green headers
     let img: HTMLImageElement;
     try {
       img = await loadImage("/logo-mark.png");
@@ -731,14 +736,15 @@ export async function loadWhiteLogoPngDataUrl(): Promise<string | null> {
     if (!ctx) return null;
     ctx.clearRect(0, 0, size, size);
     ctx.drawImage(img, 0, 0, size, size);
-    ctx.globalCompositeOperation = "source-in";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, size, size);
-    ctx.globalCompositeOperation = "source-over";
     return c.toDataURL("image/png");
   } catch {
     return null;
   }
+}
+
+/** @deprecated Prefer loadPrintLogoPngDataUrl for ink-friendly sheets. */
+export async function loadWhiteLogoPngDataUrl(): Promise<string | null> {
+  return loadPrintLogoPngDataUrl();
 }
 
 /** iOS/Android (and coarse phones) — iframe.print() prints the whole app page. */
@@ -814,7 +820,7 @@ async function printViaPageIsolation(html: string): Promise<void> {
         inset: 0;
         z-index: 2147483646;
         overflow: auto;
-        background: #f3efe6;
+        background: #ffffff;
         -webkit-overflow-scrolling: touch;
       }
     }
@@ -826,7 +832,7 @@ async function printViaPageIsolation(html: string): Promise<void> {
         margin: 0 !important;
         padding: 0 !important;
         overflow: hidden !important;
-        background: #f3efe6 !important;
+        background: #ffffff !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
@@ -844,7 +850,7 @@ async function printViaPageIsolation(html: string): Promise<void> {
         height: 297mm !important;
         max-height: 297mm !important;
         overflow: hidden !important;
-        background: #f3efe6 !important;
+        background: #ffffff !important;
         z-index: auto !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
@@ -920,7 +926,16 @@ export async function printParcelBlueprint(opts: {
 }): Promise<void> {
   const { meta } = opts;
   const rtl = meta.lang === "ar";
-  const logo = await loadWhiteLogoPngDataUrl();
+  const logo = await loadPrintLogoPngDataUrl();
+  const motto = meta.lang === "ar" ? BLUEPRINT_MOTTO_AR : BLUEPRINT_MOTTO_EN;
+  const location = meta.lang === "ar" ? BLUEPRINT_LOCATION_AR : BLUEPRINT_LOCATION_EN;
+  const contactsHtml = BLUEPRINT_CONTACTS.map(
+    (c) => `
+      <div class="contact-row">
+        <span class="contact-name">${escapeHtml(c.name)}</span>
+        <span class="contact-phone" dir="ltr">${escapeHtml(c.phone)}</span>
+      </div>`
+  ).join("");
 
   const rows: Array<[string, string]> = [];
   const push = (label: string, value?: string | null) => {
@@ -972,7 +987,7 @@ export async function printParcelBlueprint(opts: {
 <meta charset="utf-8" />
 <title>${escapeHtml(meta.brandName)} — ${escapeHtml(meta.sheetTitle)}</title>
 <style>
-  /* System fonts only — no external stylesheets (CSP / offline print safe). */
+  /* Official A4 letterhead — system fonts only (CSP / offline print safe). */
   @page { size: A4 portrait; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -980,68 +995,86 @@ export async function printParcelBlueprint(opts: {
     height: 297mm;
     overflow: hidden;
     font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
-    color: #142028;
-    background: #f3efe6;
+    color: #111111;
+    background: #ffffff;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
   .sheet {
     width: 210mm;
     height: 297mm;
-    padding: 6mm;
+    padding: 7mm 8mm 6mm;
     display: grid;
-    grid-template-rows: 14mm minmax(0, 1.35fr) minmax(0, 1.2fr) 6mm;
-    gap: 3mm;
+    grid-template-rows: 28mm minmax(0, 1.25fr) minmax(0, 1.15fr) 16mm;
+    gap: 3.5mm;
     overflow: hidden;
     page-break-inside: avoid;
     break-inside: avoid;
+    border: 0.35mm solid #111111;
   }
   .header {
-    display: flex;
+    direction: ltr;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
     gap: 3mm;
-    background: #0f342f;
-    color: #fff;
-    padding: 2mm 3.5mm;
-    border-radius: 2mm;
-    height: 14mm;
+    min-height: 28mm;
+    padding: 1.5mm 0 2.5mm;
+    border-bottom: 0.45mm solid #111111;
     overflow: hidden;
   }
-  .header img {
-    width: 10mm;
-    height: 10mm;
-    object-fit: contain;
-    flex-shrink: 0;
-    filter: none;
+  .header .motto {
+    text-align: left;
+    font-size: 7.5pt;
+    font-weight: 600;
+    line-height: 1.35;
+    color: #222222;
+    max-width: 58mm;
+    justify-self: start;
   }
-  .header .brand-block { flex: 1; min-width: 0; }
-  .header .brand { font-weight: 700; font-size: 12pt; color: #e8c98a; line-height: 1.15; }
-  .header .sub { font-size: 8pt; color: rgba(255,255,255,0.94); margin-top: 0.4mm; }
-  .header .phone {
-    margin-inline-start: auto;
-    flex-shrink: 0;
-    font-weight: 700;
-    font-size: 11pt;
-    color: #e8c98a;
-    letter-spacing: 0.02em;
-    direction: ltr;
-    unicode-bidi: isolate;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
+  .header .logo-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    justify-self: center;
+  }
+  .header .logo-wrap img {
+    width: 22mm;
+    height: 22mm;
+    object-fit: contain;
+    display: block;
+  }
+  .header .title-block {
+    text-align: right;
+    justify-self: end;
+    max-width: 62mm;
+  }
+  .header .brand {
+    font-weight: 800;
+    font-size: 12.5pt;
+    color: #0f342f;
+    line-height: 1.15;
+  }
+  .header .sub {
+    font-size: 8.5pt;
+    font-weight: 600;
+    color: #222222;
+    margin-top: 0.8mm;
+    line-height: 1.25;
   }
   .top {
     display: grid;
-    grid-template-columns: 78mm minmax(0, 1fr);
-    gap: 3mm;
+    grid-template-columns: 72mm minmax(0, 1fr);
+    gap: 3.5mm;
     min-height: 0;
     height: 100%;
     overflow: hidden;
   }
   .panel {
-    background: #fff;
-    border: 0.3mm solid rgba(200,154,88,0.45);
-    border-radius: 2mm;
-    padding: 2.2mm;
+    background: #ffffff;
+    border: 0.3mm solid #222222;
+    border-radius: 0;
+    padding: 2.5mm;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -1050,13 +1083,14 @@ export async function printParcelBlueprint(opts: {
     break-inside: avoid;
   }
   .panel h2 {
-    margin: 0 0 1.2mm;
-    font-size: 8pt;
-    font-weight: 700;
-    color: #0f342f;
-    border-bottom: 0.25mm solid rgba(200,154,88,0.35);
-    padding-bottom: 1mm;
+    margin: 0 0 1.5mm;
+    font-size: 8.5pt;
+    font-weight: 800;
+    color: #111111;
+    border-bottom: 0.25mm solid #222222;
+    padding-bottom: 1.2mm;
     flex-shrink: 0;
+    letter-spacing: 0.01em;
   }
   .params {
     flex: 1 1 auto;
@@ -1067,8 +1101,10 @@ export async function printParcelBlueprint(opts: {
     justify-content: flex-start;
     gap: 0;
   }
-  .view-panel { background: #071816; }
-  .view-panel h2 { color: #e8c98a; border-color: rgba(200,154,88,0.35); }
+  .view-panel {
+    background: #ffffff;
+    padding: 2.8mm;
+  }
   .view-panel .frame {
     flex: 1;
     min-height: 0;
@@ -1076,6 +1112,9 @@ export async function printParcelBlueprint(opts: {
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    background: #ffffff;
+    border: 0.2mm solid #cccccc;
+    padding: 1.5mm;
   }
   .view-panel img {
     max-width: 100%;
@@ -1095,45 +1134,96 @@ export async function printParcelBlueprint(opts: {
     justify-content: space-between;
     gap: 2mm;
     margin: 0;
-    padding: 0.55mm 0;
-    border-bottom: 0.15mm solid rgba(20,32,40,0.08);
+    padding: 0.6mm 0;
+    border-bottom: 0.15mm solid rgba(17,17,17,0.12);
     flex-shrink: 0;
   }
   .lab {
-    font-size: 6pt;
+    font-size: 6.5pt;
     font-weight: 700;
-    color: #5d6b74;
+    color: #444444;
     margin: 0;
     flex: 0 1 auto;
-    line-height: 1.2;
+    line-height: 1.25;
   }
   .val {
     font-size: 7.5pt;
     font-weight: 600;
-    color: #142028;
-    line-height: 1.2;
+    color: #111111;
+    line-height: 1.25;
     word-break: break-word;
     text-align: end;
     max-width: 62%;
   }
   .note {
-    margin-top: 1mm;
+    margin-top: 1.2mm;
     font-size: 5.5pt;
-    color: #5d6b74;
-    line-height: 1.3;
-    padding-top: 1mm;
-    border-top: 0.2mm dashed rgba(20,32,40,0.15);
+    color: #555555;
+    line-height: 1.35;
+    padding-top: 1.2mm;
+    border-top: 0.2mm dashed rgba(17,17,17,0.25);
     flex-shrink: 0;
   }
   .footer {
-    font-size: 6pt;
-    color: #5d6b74;
-    text-align: center;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 6mm;
+    direction: ltr;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4mm;
+    align-items: end;
+    min-height: 16mm;
+    padding-top: 2mm;
+    border-top: 0.45mm solid #111111;
     overflow: hidden;
+  }
+  .footer-left {
+    text-align: left;
+    justify-self: start;
+  }
+  .footer-url {
+    font-size: 8pt;
+    font-weight: 800;
+    color: #0f342f;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+  .footer-loc {
+    margin-top: 0.8mm;
+    font-size: 6.5pt;
+    font-weight: 600;
+    color: #333333;
+    line-height: 1.3;
+    max-width: 88mm;
+  }
+  .footer-note {
+    margin-top: 1mm;
+    font-size: 5pt;
+    color: #666666;
+    line-height: 1.25;
+    max-width: 95mm;
+  }
+  .footer-right {
+    text-align: right;
+    justify-self: end;
+  }
+  .contact-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.2mm;
+    margin-bottom: 1.4mm;
+  }
+  .contact-row:last-child { margin-bottom: 0; }
+  .contact-name {
+    font-size: 7pt;
+    font-weight: 700;
+    color: #111111;
+  }
+  .contact-phone {
+    font-size: 8pt;
+    font-weight: 800;
+    color: #0f342f;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
   }
   @media print {
     html, body, .sheet {
@@ -1142,6 +1232,7 @@ export async function printParcelBlueprint(opts: {
       max-height: 297mm !important;
       overflow: hidden !important;
       margin: 0 !important;
+      background: #ffffff !important;
       page-break-after: avoid !important;
       break-after: avoid !important;
       page-break-inside: avoid !important;
@@ -1153,12 +1244,14 @@ export async function printParcelBlueprint(opts: {
 <body>
   <div class="sheet">
     <header class="header">
-      ${logo ? `<img src="${logo}" alt="" />` : ""}
-      <div class="brand-block">
+      <div class="motto">${escapeHtml(motto)}</div>
+      <div class="logo-wrap">
+        ${logo ? `<img src="${logo}" alt="" />` : `<div class="brand">${escapeHtml(meta.brandName)}</div>`}
+      </div>
+      <div class="title-block">
         <div class="brand">${escapeHtml(meta.brandName)}</div>
         <div class="sub">${escapeHtml(meta.sheetTitle)}</div>
       </div>
-      <div class="phone" dir="ltr">${BLUEPRINT_HEADER_PHONE}</div>
     </header>
     <div class="top">
       <section class="panel">
@@ -1175,7 +1268,14 @@ export async function printParcelBlueprint(opts: {
       <h2>${escapeHtml(meta.sideViewLabel)}</h2>
       <div class="frame"><img src="${opts.contourPng}" alt="" /></div>
     </section>
-    <footer class="footer">${escapeHtml(meta.footerNote)}</footer>
+    <footer class="footer">
+      <div class="footer-left">
+        <div class="footer-url" dir="ltr">${BLUEPRINT_SITE_URL}</div>
+        <div class="footer-loc">${escapeHtml(location)}</div>
+        <div class="footer-note">${escapeHtml(meta.footerNote)}</div>
+      </div>
+      <div class="footer-right">${contactsHtml}</div>
+    </footer>
   </div>
 </body>
 </html>`;
