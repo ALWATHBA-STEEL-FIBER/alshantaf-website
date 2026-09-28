@@ -123,6 +123,66 @@ export function collectContourLevels(min: number, max: number, interval: number,
   return levels;
 }
 
+/**
+ * Divide the parcel elevation difference into equal layers (mathematical spreading).
+ * Contours sit on interior boundaries so N bands → N−1 isolines, evenly spaced.
+ */
+export function evenSpreadContourLevels(
+  min: number,
+  max: number,
+  bands = 8
+): { levels: number[]; interval: number; bands: number } {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+    return { levels: [], interval: 1, bands: 0 };
+  }
+  const n = Math.max(2, Math.min(24, Math.round(bands)));
+  const interval = (max - min) / n;
+  const levels: number[] = [];
+  for (let i = 1; i < n; i++) {
+    levels.push(Number((min + interval * i).toFixed(4)));
+  }
+  return { levels, interval, bands: n };
+}
+
+/** Choose band count from relief so layer spacing stays readable. */
+export function contourBandsForRelief(reliefM: number): number {
+  if (!Number.isFinite(reliefM) || reliefM <= 0) return 6;
+  if (reliefM < 1) return 5;
+  if (reliefM < 2.5) return 6;
+  if (reliefM < 5) return 8;
+  if (reliefM < 12) return 10;
+  if (reliefM < 25) return 12;
+  return 14;
+}
+
+/**
+ * Min/max elevation for DEM samples that fall inside a parcel ring (ENU).
+ * Falls back to the full grid range if too few inside samples.
+ */
+export function elevRangeInsidePoly(
+  elev: Float32Array,
+  cols: number,
+  rows: number,
+  sampleEnu: (col: number, row: number) => { x: number; y: number },
+  ring: Array<{ x: number; y: number }>
+): { min: number; max: number } {
+  let min = Infinity;
+  let max = -Infinity;
+  let count = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const p = sampleEnu(c, r);
+      if (!pointInPoly(p.x, p.y, ring)) continue;
+      const v = elev[r * cols + c]!;
+      if (v < min) min = v;
+      if (v > max) max = v;
+      count++;
+    }
+  }
+  if (count < 4) return elevRange(elev);
+  return { min, max };
+}
+
 /** Ray-cast point-in-polygon for a closed ring of [x,y]. */
 export function pointInPoly(x: number, y: number, ring: Array<{ x: number; y: number }>): boolean {
   let inside = false;

@@ -1,8 +1,8 @@
 import {
-  collectContourLevels,
-  contourInterval,
+  contourBandsForRelief,
   contourSegments,
-  elevRange,
+  elevRangeInsidePoly,
+  evenSpreadContourLevels,
   pointInPoly,
   smoothElevGrid,
 } from "@/lib/elevationContours";
@@ -492,11 +492,23 @@ export function drawParcelContourMap(opts: {
   });
 
   const elev = smoothElevGrid(Float32Array.from(opts.grid.elevations), opts.grid.cols, opts.grid.rows, 3);
-  const { min: zMin, max: zMax } = elevRange(elev);
-  const interval = Math.min(2.5, contourInterval(16, zMax - zMin));
-  const levels = collectContourLevels(zMin, zMax, interval, 64);
   const { cols, rows, minLat, maxLat, minLng, maxLng } = opts.grid;
   const poly = frame.enu;
+  const { min: zMin, max: zMax } = elevRangeInsidePoly(
+    elev,
+    cols,
+    rows,
+    (c, r) => {
+      const lat = maxLat - ((r + 0.5) / rows) * (maxLat - minLat);
+      const lng = minLng + ((c + 0.5) / cols) * (maxLng - minLng);
+      return toLocalEnu(lat, lng, frame.origin.lat, frame.origin.lng);
+    },
+    poly
+  );
+  const relief = Math.max(0.05, zMax - zMin);
+  const bands = contourBandsForRelief(relief);
+  const { levels, interval } = evenSpreadContourLevels(zMin, zMax, bands);
+  const majorEvery = Math.max(1, Math.round(bands / 4));
 
   const gridToParcel = (gx: number, gy: number) => {
     const lat = maxLat - (gy / Math.max(1, rows - 1)) * (maxLat - minLat);
@@ -506,7 +518,8 @@ export function drawParcelContourMap(opts: {
   };
 
   for (const level of levels) {
-    const major = Math.round(level / interval) % 5 === 0;
+    const layerIndex = Math.round((level - zMin) / interval);
+    const major = layerIndex % majorEvery === 0;
     const segs = contourSegments(elev, cols, rows, level);
     ctx.strokeStyle = major ? "rgba(232,201,138,0.95)" : "rgba(200,154,88,0.7)";
     ctx.lineWidth = major ? 2.9 : 1.6;

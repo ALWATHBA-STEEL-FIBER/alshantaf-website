@@ -370,14 +370,34 @@ export function LandCheckForm() {
 
   return (
     <section className="py-16 md:py-20">
-      <div className="mx-auto max-w-[800px] px-4">
-        <div className="max-w-2xl mb-10">
+      <div className="mx-auto max-w-[1240px] px-4 grid lg:grid-cols-[1fr_1.3fr] gap-10">
+        <div>
           <span className="text-gold text-xs font-bold tracking-wide">{t.landCheck.eyebrow}</span>
           <h1 className="text-3xl md:text-4xl font-bold mt-2 text-balance">{t.landCheck.title}</h1>
           <p className="text-ink-soft mt-3 leading-relaxed">{t.landCheck.subtitle}</p>
+          <div className="mt-8 grid grid-cols-3 gap-3">
+            {t.landCheck.steps.map((step) => (
+              <div
+                key={step.n}
+                className="bg-white/85 rounded-2xl border border-line p-3.5 transition-colors hover:border-gold/40"
+              >
+                <span className="w-7 h-7 rounded-full bg-green text-white text-xs flex items-center justify-center font-bold">
+                  {step.n}
+                </span>
+                <b className="block mt-2 text-sm">{step.title}</b>
+                <small className="text-ink-soft text-xs">{step.note}</small>
+              </div>
+            ))}
+          </div>
+          <p className="mt-6 text-xs bg-white/70 border border-line rounded-2xl p-4 leading-relaxed text-ink-soft">
+            {t.landCheck.sidebarNote}
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-[1.75rem] border border-line p-5 sm:p-8 flex flex-col gap-5 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]">
+        <form
+          onSubmit={handleSubmit}
+          className="bg-white rounded-[1.75rem] border border-line p-6 md:p-8 flex flex-col gap-4 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]"
+        >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-bold text-green">{t.landCheck.contactSection}</p>
             {draftStatus === "saving" && (
@@ -389,16 +409,38 @@ export function LandCheckForm() {
           </div>
           <div className="grid sm:grid-cols-2 gap-3">
             <div>
-              <label className={labelClass}>{t.landCheck.name}</label>
-              <input className={inputClass} value={fields.name} onChange={update("name")} />
+              <label className={labelClass} htmlFor="lc-name">
+                {t.landCheck.name}
+              </label>
+              <input id="lc-name" className={inputClass} value={fields.name} onChange={update("name")} />
             </div>
             <div>
-              <label className={labelClass}>{t.landCheck.phone}</label>
-              <input type="tel" className={inputClass} value={fields.phone} onChange={updateDigits("phone")} />
+              <label className={labelClass} htmlFor="lc-phone">
+                {t.landCheck.phone}
+              </label>
+              <input
+                id="lc-phone"
+                type="tel"
+                className={inputClass}
+                value={fields.phone}
+                onChange={updateDigits("phone")}
+                placeholder="07XXXXXXXX"
+              />
             </div>
             <div className="sm:col-span-2">
-              <label className={labelClass}>{t.landCheck.email}</label>
-              <input type="email" dir="ltr" className={inputClass} value={fields.email} onChange={update("email")} />
+              <label className={labelClass} htmlFor="lc-email">
+                {t.landCheck.email}
+              </label>
+              <input
+                id="lc-email"
+                type="email"
+                dir="ltr"
+                className={inputClass}
+                value={fields.email}
+                onChange={update("email")}
+                placeholder="name@example.com"
+              />
+              <p className="text-[11px] text-ink-soft mt-1">{t.landCheck.emailNote}</p>
             </div>
           </div>
 
@@ -416,11 +458,20 @@ export function LandCheckForm() {
               village: t.owners.village,
               basin: t.owners.basin,
               neighborhood: t.owners.neighborhood,
+              other: t.owners.locationOther,
             }}
           />
           <div>
-            <label className={labelClass}>{t.owners.parcel}</label>
-            <input className={inputClass} value={fields.parcel} onChange={updateDigits("parcel")} required />
+            <label className={labelClass} htmlFor="lc-parcel">
+              {t.owners.parcel}
+            </label>
+            <input
+              id="lc-parcel"
+              className={inputClass}
+              value={fields.parcel}
+              onChange={updateDigits("parcel")}
+              required
+            />
           </div>
 
           <p className="text-xs font-bold text-green">{t.landCheck.regulationSection}</p>
@@ -435,20 +486,30 @@ export function LandCheckForm() {
           />
 
           <div className="rounded-2xl border border-line bg-white/60 p-3 sm:p-4 flex flex-col gap-3">
-            <p className="text-xs font-bold text-green">{t.owners.dlsMapSection}</p>
-            <p className="text-[11px] text-ink-soft -mt-1">
-              {!industryType
-                ? t.owners.dlsMapNeedRegulation
-                : dlsMapStatus === "loading"
-                  ? t.owners.dlsMapLoading
-                  : dlsMapStatus === "ready"
-                    ? t.owners.dlsMapReady
-                    : dlsMapStatus === "missing"
-                      ? t.owners.dlsMapMissing
-                      : dlsMapStatus === "failed"
-                        ? t.owners.dlsMapFailed
-                        : t.owners.dlsMapIdle}
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-green">{t.owners.dlsMapSection}</p>
+                <p className="text-[11px] text-ink-soft mt-0.5 leading-relaxed">
+                  {!industryType
+                    ? t.owners.dlsMapNeedRegulation
+                    : dlsMapStatus === "loading"
+                      ? t.owners.dlsMapLoading
+                      : dlsMapStatus === "ready"
+                        ? t.owners.dlsMapReady
+                        : dlsMapStatus === "missing"
+                          ? t.owners.dlsMapMissing
+                          : dlsMapStatus === "failed"
+                            ? t.owners.dlsMapFailed
+                            : t.owners.dlsMapIdle}
+                </p>
+              </div>
+              {dlsMapStatus === "loading" && (
+                <span
+                  className="inline-block w-5 h-5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
+                  aria-hidden
+                />
+              )}
+            </div>
             <LocationInput
               ref={locationRef}
               value={fields.coordinates}
@@ -459,6 +520,8 @@ export function LandCheckForm() {
               lockEditing={dlsMapStatus === "ready"}
               loading={dlsMapStatus === "loading"}
               loadingLabel={t.owners.dlsMapLoading}
+              statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReady : undefined}
+              idleNote={!industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
               areaLabel={fields.areaLabel}
               areaSqm={areaSqm}
               perimeterM={perimeterM}
@@ -472,38 +535,79 @@ export function LandCheckForm() {
                 neighborhood: fields.neighborhood,
                 parcel: fields.parcel,
                 notes: fields.notes,
-                industryLabel: t.owners.industryType,
+                industryLabel: t.regulations.selectLabel,
                 industryValue: industryType
                   ? (t.offers.industry as Record<string, string>)[industryType] || industryType
                   : undefined,
               }}
             />
-            {fields.areaLabel && (
-              <p className="text-sm">
-                <span className="text-ink-soft">{t.owners.area}: </span>
-                <b>{fields.areaLabel}</b>
-              </p>
-            )}
-            {dlsHintStatus === "loading" && <p className="text-[11px] text-ink-soft">{t.owners.dlsHintLoading}</p>}
-            {dlsHintStatus === "missing" && (
-              <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{t.owners.dlsHintMissing}</p>
-            )}
-            {dlsHintStatus === "failed" && <p className="text-[11px] text-ink-soft">{t.owners.dlsHintFailed}</p>}
-            {dlsHint && (
-              <DlsPricingHint
-                ratePerSqm={dlsHint.value}
-                areaSqm={areaSqm}
-                sizeLabel={fields.areaLabel}
-                source={dlsHint.source}
-                retrievedAt={dlsHint.retrievedAt}
-                className="rounded-xl bg-gold/10 border border-gold/30 px-3 py-2.5 text-[11px] text-ink-soft leading-relaxed"
+          </div>
+
+          <p className="text-xs font-bold text-green">{t.landCheck.detailsSection}</p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>{t.owners.area}</label>
+              <input
+                className={inputClass}
+                value={fields.areaLabel}
+                readOnly
+                placeholder={lang === "ar" ? "تُملأ تلقائيًا من دائرة الأراضي" : "Filled automatically from DLS"}
               />
-            )}
+              {dlsMapStatus === "ready" && fields.areaLabel && (
+                <p className="text-[11px] text-ink-soft mt-1.5">{t.owners.areaDlsNote}</p>
+              )}
+              {dlsMapStatus === "loading" && !fields.areaLabel && (
+                <div className="mt-2 flex items-center gap-2 text-[11px] text-ink-soft">
+                  <span
+                    className="inline-block w-3.5 h-3.5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
+                    aria-hidden
+                  />
+                  <span>{t.owners.dlsMapLoading}</span>
+                </div>
+              )}
+            </div>
+            <div>
+              <label className={labelClass}>{lang === "ar" ? "القيمة الاسترشادية" : "Guide value"}</label>
+              {dlsHintStatus === "loading" && (
+                <div className="mt-1 flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[11px] text-ink-soft">
+                  <span
+                    className="inline-block w-4 h-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
+                    aria-hidden
+                  />
+                  <span>{t.owners.dlsHintLoading}</span>
+                </div>
+              )}
+              {dlsHintStatus === "missing" && (
+                <p className="text-[11px] text-red-700 mt-1 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 leading-relaxed">
+                  {t.owners.dlsHintMissing}
+                </p>
+              )}
+              {dlsHintStatus === "failed" && (
+                <p className="text-[11px] text-ink-soft mt-1">{t.owners.dlsHintFailed}</p>
+              )}
+              {dlsHint && (
+                <DlsPricingHint
+                  ratePerSqm={dlsHint.value}
+                  areaSqm={areaSqm}
+                  sizeLabel={fields.areaLabel}
+                  source={dlsHint.source}
+                  retrievedAt={dlsHint.retrievedAt}
+                />
+              )}
+              {!dlsHint && dlsHintStatus === "idle" && (
+                <p className="text-[11px] text-ink-soft mt-1 leading-relaxed">
+                  {!industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
+                </p>
+              )}
+            </div>
           </div>
 
           <div>
-            <label className={labelClass}>{t.landCheck.notes}</label>
+            <label className={labelClass} htmlFor="lc-notes">
+              {t.landCheck.notes}
+            </label>
             <textarea
+              id="lc-notes"
               className={`${inputClass} h-24 py-2`}
               value={fields.notes}
               onChange={update("notes")}

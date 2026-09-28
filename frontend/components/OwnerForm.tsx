@@ -82,10 +82,7 @@ export function OwnerForm() {
     e: React.ChangeEvent<HTMLInputElement>
   ) => setFields((f) => ({ ...f, [key]: toWesternDigits(e.target.value) }));
 
-  // Once the land identity is fully entered (including neighborhood, matching
-  // the official DLS cascade), fetch the administrative rate as a pricing
-  // reference — shown next to the asking-price field, never written into it.
-  // In parallel, place the parcel centroid on the map from the DLS cadastral layer.
+  // Fetch DLS admin value + parcel outline once zoning + full land identity are set.
   useEffect(() => {
     let cancelled = false;
     const governorate = fields.governorate;
@@ -94,8 +91,18 @@ export function OwnerForm() {
     const basin = fields.basin;
     const neighborhood = fields.neighborhood;
     const parcel = fields.parcel.trim();
+    const industryType = fields.industryType;
     const timer = setTimeout(async () => {
       if (cancelled) return;
+      if (!industryType) {
+        setDlsHint(null);
+        setDlsHintStatus("idle");
+        setDlsMapStatus("idle");
+        setParcelPolygon(null);
+        setDlsKey(null);
+        setAreaSqm(null);
+        return;
+      }
       if (!governorate || !directorate || !village || !basin || !neighborhood || !parcel) {
         setDlsHint(null);
         setDlsHintStatus("idle");
@@ -186,7 +193,7 @@ export function OwnerForm() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [fields.governorate, fields.directorate, fields.village, fields.basin, fields.neighborhood, fields.parcel, lang]);
+  }, [fields.governorate, fields.directorate, fields.village, fields.basin, fields.neighborhood, fields.parcel, fields.industryType, lang]);
 
   const MAX_IMAGES = 10;
   const MAX_IMAGE_MB = 8;
@@ -559,20 +566,30 @@ export function OwnerForm() {
               id="owner-parcel" className={inputClass} value={fields.parcel} onChange={updateDigits("parcel")} required />
           </div>
 
+          <p className="text-xs font-bold text-green">{t.owners.regulationSection}</p>
+          <RegulationGuide
+            scope="industrial"
+            value={fields.industryType}
+            onChange={(value) => setFields((f) => ({ ...f, industryType: value }))}
+            required
+          />
+
           <div className="rounded-2xl border border-line bg-white/60 p-3 sm:p-4 flex flex-col gap-3">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-bold text-green">{t.owners.dlsMapSection}</p>
                 <p className="text-[11px] text-ink-soft mt-0.5 leading-relaxed">
-                  {dlsMapStatus === "loading"
-                    ? t.owners.dlsMapLoading
-                    : dlsMapStatus === "ready"
-                      ? t.owners.dlsMapReady
-                      : dlsMapStatus === "missing"
-                        ? t.owners.dlsMapMissing
-                        : dlsMapStatus === "failed"
-                          ? t.owners.dlsMapFailed
-                          : t.owners.dlsMapIdle}
+                  {!fields.industryType
+                    ? t.owners.dlsMapNeedRegulation
+                    : dlsMapStatus === "loading"
+                      ? t.owners.dlsMapLoading
+                      : dlsMapStatus === "ready"
+                        ? t.owners.dlsMapReady
+                        : dlsMapStatus === "missing"
+                          ? t.owners.dlsMapMissing
+                          : dlsMapStatus === "failed"
+                            ? t.owners.dlsMapFailed
+                            : t.owners.dlsMapIdle}
                 </p>
               </div>
               {dlsMapStatus === "loading" && (
@@ -589,7 +606,7 @@ export function OwnerForm() {
               loading={dlsMapStatus === "loading"}
               loadingLabel={t.owners.dlsMapLoading}
               statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReady : undefined}
-              idleNote={t.owners.dlsMapIdle}
+              idleNote={!fields.industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
             />
           </div>
 
@@ -651,13 +668,6 @@ export function OwnerForm() {
                   retrievedAt={dlsHint.retrievedAt}
                 />
               )}
-            </div>
-            <div className="sm:col-span-2">
-              <RegulationGuide
-                scope="industrial"
-                value={fields.industryType}
-                onChange={(value) => setFields((f) => ({ ...f, industryType: value }))}
-              />
             </div>
             <div>
               <label className={labelClass} htmlFor="owner-activity">{t.owners.activity}</label>

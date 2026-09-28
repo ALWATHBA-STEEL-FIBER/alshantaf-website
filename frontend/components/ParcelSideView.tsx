@@ -2,20 +2,20 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
+  contourBandsForRelief,
+  contourSegments,
+  elevRangeInsidePoly,
+  elevTintRgb,
+  evenSpreadContourLevels,
+  pointInPoly,
+  smoothElevGrid,
+} from "@/lib/elevationContours";
+import {
   formatMeters,
   ringOrientedExtents,
   ringToLocalEnu,
   toLocalEnu,
 } from "@/lib/mapCoords";
-import {
-  collectContourLevels,
-  contourInterval,
-  contourSegments,
-  elevRange,
-  elevTintRgb,
-  pointInPoly,
-  smoothElevGrid,
-} from "@/lib/elevationContours";
 import {
   drawParcelContextMap,
   drawParcelContourMap,
@@ -40,6 +40,8 @@ type Props = {
   googleEarthCta: string;
   googleMapsCta: string;
   loadingLabel: string;
+  fullscreenLabel: string;
+  exitFullscreenLabel: string;
   lang: "ar" | "en";
   blueprintMeta?: BlueprintMeta;
   onReadyChange?: (ready: boolean) => void;
@@ -147,6 +149,8 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     googleEarthCta,
     googleMapsCta,
     loadingLabel,
+    fullscreenLabel,
+    exitFullscreenLabel,
     lang,
     blueprintMeta,
     onReadyChange,
@@ -155,6 +159,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
 ) {
   const ring = polygon?.[0];
   const mountRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<SceneBundle | null>(null);
   const gridRef = useRef<ElevGrid | null>(null);
   const intervalRef = useRef(2);
@@ -162,6 +167,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
   metaRef.current = blueprintMeta;
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [elevHint, setElevHint] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
 
   const model = useMemo(() => {
     if (!ring?.length) return null;
@@ -222,8 +228,18 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       // Contour panel is required; context may use map snapshot without satellite API
       if (contourPng.length < 4000) throw new Error("contour-failed");
       if (contextPng.length < 2000) throw new Error("context-failed");
-      const elev = Float32Array.from(grid.elevations);
-      const { min: elevMinM, max: elevMaxM } = elevRange(elev);
+      const elev = smoothElevGrid(Float32Array.from(grid.elevations), grid.cols, grid.rows, 3);
+      const { min: elevMinM, max: elevMaxM } = elevRangeInsidePoly(
+        elev,
+        grid.cols,
+        grid.rows,
+        (c, r) => {
+          const lat = grid.maxLat - ((r + 0.5) / grid.rows) * (grid.maxLat - grid.minLat);
+          const lng = grid.minLng + ((c + 0.5) / grid.cols) * (grid.maxLng - grid.minLng);
+          return toLocalEnu(lat, lng, modelNow.origin.lat, modelNow.origin.lng);
+        },
+        modelNow.enu.map((p) => ({ x: p.x, y: p.y }))
+      );
 
       await printParcelBlueprint({
         meta: {
@@ -312,17 +328,27 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
 
       const rawElev = Float32Array.from(grid.elevations);
       const elev = smoothElevGrid(rawElev, grid.cols, grid.rows, 3);
-      const { min: zMin, max: zMax } = elevRange(elev);
-      const relief = Math.max(0.5, zMax - zMin);
-      // Stronger vertical exaggeration so relief reads clearly in the viewport
-      const exag = Math.min(12, Math.max(3.2, (model.span * 0.32) / relief));
-      const interval = Math.min(2.5, contourInterval(16, relief));
-      intervalRef.current = interval;
-      setElevHint(`${elevLabel(zMin, lang)} – ${elevLabel(zMax, lang)}`);
-
       const origin = model.origin;
       const polyEnu = model.enu.map((p) => ({ x: p.x, y: p.y }));
-      const levels = collectContourLevels(zMin, zMax, interval, 64);
+      const latAt = (row: number) => grid.maxLat - ((row + 0.5) / grid.rows) * (grid.maxLat - grid.minLat);
+      const lngAt = (col: number) => grid.minLng + ((col + 0.5) / grid.cols) * (grid.maxLng - grid.minLng);
+      // Elevation range from the land itself (not the padded DEM around it)
+      const { min: zMin, max: zMax } = elevRangeInsidePoly(
+        elev,
+        grid.cols,
+        grid.rows,
+        (c, r) => toLocalEnu(latAt(r), lngAt(c), origin.lat, origin.lng),
+        polyEnu
+      );
+      const relief = Math.max(0.05, zMax - zMin);
+      // Near true vertical scale (1 m ≈ 1 m). Mild boost only on nearly flat parcels.
+      const exag = relief < 1.25 ? 1.2 : relief < 2.5 ? 1.1 : 1;
+      // Divide the land's elevation difference into equal mathematical layers
+      const bands = contourBandsForRelief(relief);
+      const { levels, interval } = evenSpreadContourLevels(zMin, zMax, bands);
+      const majorEvery = Math.max(1, Math.round(bands / 4));
+      intervalRef.current = interval;
+      setElevHint(`${elevLabel(zMin, lang)} – ${elevLabel(zMax, lang)}`);
 
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x071816);
@@ -359,9 +385,6 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       const contourGroup = new THREE.Group();
       scene.add(contourGroup);
 
-      const latAt = (row: number) => grid.maxLat - ((row + 0.5) / grid.rows) * (grid.maxLat - grid.minLat);
-      const lngAt = (col: number) => grid.minLng + ((col + 0.5) / grid.cols) * (grid.maxLng - grid.minLng);
-
       const toWorld = (col: number, row: number, elevM: number) => {
         const enu = toLocalEnu(latAt(row), lngAt(col), origin.lat, origin.lng);
         return new THREE.Vector3(enu.x, (elevM - zMin) * exag, -enu.y);
@@ -375,7 +398,8 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       };
 
       for (const level of levels) {
-        const major = Math.round(level / interval) % 5 === 0;
+        const layerIndex = Math.round((level - zMin) / interval);
+        const major = layerIndex % majorEvery === 0;
         const segs = contourSegments(elev, grid.cols, grid.rows, level);
         const positions: number[] = [];
         let labelPos: import("three").Vector3 | null = null;
@@ -540,12 +564,20 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       const onResize = () => {
         if (!renderer || !mountRef.current) return;
         const nw = mountRef.current.clientWidth || w;
-        const nh = Math.max(280, Math.round(nw * 0.48));
-        camera.aspect = nw / nh;
+        const fs = !!shellRef.current && document.fullscreenElement === shellRef.current;
+        const nh = fs
+          ? Math.max(320, mountRef.current.clientHeight || Math.round(window.innerHeight * 0.85))
+          : Math.max(280, Math.round(nw * 0.48));
+        camera.aspect = nw / Math.max(1, nh);
         camera.updateProjectionMatrix();
         renderer.setSize(nw, nh, false);
       };
       window.addEventListener("resize", onResize);
+      const onFs = () => {
+        setFullscreen(!!shellRef.current && document.fullscreenElement === shellRef.current);
+        window.setTimeout(onResize, 60);
+      };
+      document.addEventListener("fullscreenchange", onFs);
 
       const tick = () => {
         if (cancelled) return;
@@ -558,6 +590,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
 
       (mount as HTMLDivElement & { __cleanup?: () => void }).__cleanup = () => {
         window.removeEventListener("resize", onResize);
+        document.removeEventListener("fullscreenchange", onFs);
       };
     })().catch(() => {
       if (!cancelled) setStatus("failed");
@@ -595,18 +628,45 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
             </p>
           )}
         </div>
-        {model.extents && (
-          <p className="text-[11px] tabular-nums text-ink">
-            <span className="text-ink-soft">{lengthLabel}: </span>
-            <b>{formatMeters(model.extents.lengthM, lang)}</b>
-            <span className="text-ink-soft"> · {widthLabel}: </span>
-            <b>{formatMeters(model.extents.widthM, lang)}</b>
-          </p>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {model.extents && (
+            <p className="text-[11px] tabular-nums text-ink">
+              <span className="text-ink-soft">{lengthLabel}: </span>
+              <b>{formatMeters(model.extents.lengthM, lang)}</b>
+              <span className="text-ink-soft"> · {widthLabel}: </span>
+              <b>{formatMeters(model.extents.widthM, lang)}</b>
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => void toggleElementFullscreen(shellRef.current)}
+            className="h-8 px-3 rounded-full border border-line bg-white text-[11px] font-bold text-ink-soft hover:text-ink transition-colors"
+            aria-pressed={fullscreen}
+          >
+            {fullscreen ? exitFullscreenLabel : fullscreenLabel}
+          </button>
+        </div>
       </div>
 
-      <div className="relative mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816]">
-        <div ref={mountRef} className="w-full min-h-[280px]" />
+      <div
+        ref={shellRef}
+        className={`relative mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816] ${
+          fullscreen ? "m-0 rounded-none border-0 h-full w-full flex flex-col" : ""
+        }`}
+      >
+        <div
+          ref={mountRef}
+          className={`w-full ${fullscreen ? "flex-1 min-h-0 h-full" : "min-h-[280px]"}`}
+        />
+        {fullscreen && (
+          <button
+            type="button"
+            onClick={() => void toggleElementFullscreen(shellRef.current)}
+            className="absolute end-3 top-3 z-20 h-9 px-3 rounded-full bg-gold text-green text-[11px] font-bold shadow-md"
+          >
+            {exitFullscreenLabel}
+          </button>
+        )}
         {(status === "loading" || status === "idle") && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/80 text-xs font-bold text-gold-2">
             {loadingLabel}
@@ -641,3 +701,16 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     </div>
   );
 });
+
+async function toggleElementFullscreen(el: HTMLElement | null) {
+  if (!el) return;
+  try {
+    if (document.fullscreenElement === el) {
+      await document.exitFullscreen();
+    } else if (el.requestFullscreen) {
+      await el.requestFullscreen();
+    }
+  } catch {
+    /* blocked / unsupported */
+  }
+}

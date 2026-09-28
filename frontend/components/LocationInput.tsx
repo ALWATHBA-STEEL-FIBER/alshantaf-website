@@ -12,7 +12,6 @@ import {
   type Coords,
 } from "@/lib/mapCoords";
 import { ParcelSideView, type ParcelSideViewHandle } from "@/components/ParcelSideView";
-import { createContourTopoLayer } from "@/lib/contourTopoLayer";
 import type { BlueprintMeta } from "@/lib/parcelBlueprint";
 import "leaflet/dist/leaflet.css";
 
@@ -20,7 +19,20 @@ const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
 type SearchResult = { latitude: number; longitude: number; address: string };
 /** Leaflet-ready ring: [lat, lng][]. */
 export type ParcelRing = [number, number][];
-type Basemap = "map" | "satellite" | "topo";
+type Basemap = "map" | "satellite";
+
+async function toggleElementFullscreen(el: HTMLElement | null) {
+  if (!el) return;
+  try {
+    if (document.fullscreenElement === el) {
+      await document.exitFullscreen();
+    } else if (el.requestFullscreen) {
+      await el.requestFullscreen();
+    }
+  } catch {
+    /* browser blocked or unsupported */
+  }
+}
 
 export type LocationInputHandle = {
   printBlueprint: () => Promise<void>;
@@ -114,7 +126,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     const map = mapRef.current;
     const sat = satLayerRef.current;
     const osm = osmLayerRef.current;
-    const topo = topoLayerRef.current;
     if (!map || !sat) return null;
 
     const prevBasemap = basemap;
@@ -123,7 +134,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     try {
       // Show satellite tiles that are already cacheable in the map view
       if (osm && map.hasLayer(osm)) map.removeLayer(osm);
-      if (topo && map.hasLayer(topo)) map.removeLayer(topo);
       if (!map.hasLayer(sat)) sat.addTo(map);
       setBasemap("satellite");
 
@@ -221,7 +231,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     } finally {
       // Restore previous basemap selection
       setBasemap(prevBasemap);
-      const layers = { map: osm, satellite: sat, topo } as const;
+      const layers = { map: osm, satellite: sat } as const;
       const active = layers[prevBasemap];
       for (const layer of Object.values(layers)) {
         if (!layer) continue;
@@ -251,6 +261,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [mapReady, setMapReady] = useState(false);
   const [basemap, setBasemap] = useState<Basemap>("map");
   const [drawDimensions, setDrawDimensions] = useState(true);
+  const [mapFullscreen, setMapFullscreen] = useState(false);
+  const mapShellRef = useRef<HTMLDivElement>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const markerRef = useRef<import("leaflet").Marker | null>(null);
@@ -258,7 +270,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const dimensionLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const osmLayerRef = useRef<import("leaflet").TileLayer | null>(null);
   const satLayerRef = useRef<import("leaflet").TileLayer | null>(null);
-  const topoLayerRef = useRef<import("leaflet").GridLayer | null>(null);
 
   const extents = useMemo(() => {
     if (!polygon?.[0]?.length) return null;
@@ -325,11 +336,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           crossOrigin: true,
         }
       );
-      const topo = createContourTopoLayer(L);
       osm.addTo(map);
       osmLayerRef.current = osm;
       satLayerRef.current = sat;
-      topoLayerRef.current = topo;
       mapRef.current = map;
 
       clickHandler = (event) => {
@@ -364,7 +373,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       dimensionLayerRef.current = null;
       osmLayerRef.current = null;
       satLayerRef.current = null;
-      topoLayerRef.current = null;
     };
     // Leaflet must be initialized once per container; lockEditing toggles via effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -389,10 +397,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     const map = mapRef.current;
     const osm = osmLayerRef.current;
     const sat = satLayerRef.current;
-    const topo = topoLayerRef.current;
-    if (!map || !osm || !sat || !topo) return;
+    if (!map || !osm || !sat) return;
 
-    const layers = { map: osm, satellite: sat, topo } as const;
+    const layers = { map: osm, satellite: sat } as const;
     const active = layers[basemap];
     for (const layer of Object.values(layers)) {
       if (layer === active) {
@@ -404,6 +411,19 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     // Force tile redraw after basemap switch / container reveal
     window.setTimeout(() => map.invalidateSize({ animate: false }), 40);
   }, [basemap, mapReady]);
+
+  useEffect(() => {
+    const onFs = () => {
+      const shell = mapShellRef.current;
+      const active = !!shell && document.fullscreenElement === shell;
+      setMapFullscreen(active);
+      window.setTimeout(() => {
+        mapRef.current?.invalidateSize({ animate: false });
+      }, 80);
+    };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
 
   function placeMarker(
     L: typeof import("leaflet"),
@@ -452,12 +472,11 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       }
 
       if (polygon && polygon.length > 0) {
-        const topoStyle = basemap === "topo";
         const layer = L.polygon(polygon, {
-          color: topoStyle ? "#e8c98a" : "#113a34",
-          weight: topoStyle ? 2.8 : 2.5,
-          fillColor: topoStyle ? "#c89a58" : "#caa064",
-          fillOpacity: topoStyle ? 0.12 : 0.28,
+          color: "#113a34",
+          weight: 2.5,
+          fillColor: "#caa064",
+          fillOpacity: 0.28,
           interactive: false,
         }).addTo(map);
         polygonRef.current = layer;
@@ -479,19 +498,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, polygon, locked, mapReady]);
-
-  // Retint parcel outline when switching to/from contour topography.
-  useEffect(() => {
-    const layer = polygonRef.current;
-    if (!layer || !mapReady) return;
-    const topoStyle = basemap === "topo";
-    layer.setStyle({
-      color: topoStyle ? "#e8c98a" : "#113a34",
-      weight: topoStyle ? 2.8 : 2.5,
-      fillColor: topoStyle ? "#c89a58" : "#caa064",
-      fillOpacity: topoStyle ? 0.12 : 0.28,
-    });
-  }, [basemap, mapReady, polygon]);
 
   // Draw edge length labels on the parcel outline when enabled.
   useEffect(() => {
@@ -539,7 +545,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       map.invalidateSize({ animate: false });
       osmLayerRef.current?.redraw();
       satLayerRef.current?.redraw();
-      topoLayerRef.current?.redraw();
     };
 
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => refresh()) : null;
@@ -730,15 +735,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             </button>
             <button
               type="button"
-              onClick={() => setBasemap("topo")}
-              className={`h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
-                basemap === "topo" ? "bg-green text-white" : "text-ink-soft hover:text-ink"
-              }`}
-            >
-              {lp.basemapTopo}
-            </button>
-            <button
-              type="button"
               onClick={() => setBasemap("satellite")}
               className={`h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
                 basemap === "satellite" ? "bg-green text-white" : "text-ink-soft hover:text-ink"
@@ -761,16 +757,25 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               {lp.dimensionsOnMap}
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => void toggleElementFullscreen(mapShellRef.current)}
+            className="h-8 px-3 rounded-full border border-line bg-white text-[11px] font-bold text-ink-soft hover:text-ink transition-colors"
+            aria-pressed={mapFullscreen}
+          >
+            {mapFullscreen ? lp.exitFullscreen : lp.fullscreen}
+          </button>
         </div>
       </div>
 
-      <div className="relative mt-2">
+      <div
+        ref={mapShellRef}
+        className={`relative mt-2 ${mapFullscreen ? "bg-white p-3 flex flex-col h-full w-full" : ""}`}
+      >
         <div
           ref={mapDivRef}
-          className={`relative z-0 h-64 w-full overflow-hidden rounded-xl border sm:h-80 ${
-            basemap === "topo"
-              ? "border-gold/40 bg-[#071816] location-map--topo"
-              : "border-line bg-surface-2"
+          className={`relative z-0 w-full overflow-hidden rounded-xl border border-line bg-surface-2 ${
+            mapFullscreen ? "flex-1 min-h-0 h-full" : "h-64 sm:h-80"
           }`}
         />
         {hasDimensions && !loading && (
@@ -800,6 +805,15 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             </ul>
           </div>
         )}
+        {mapFullscreen && (
+          <button
+            type="button"
+            onClick={() => void toggleElementFullscreen(mapShellRef.current)}
+            className="absolute end-2 top-2 z-20 h-9 px-3 rounded-full bg-green text-white text-[11px] font-bold shadow-md"
+          >
+            {lp.exitFullscreen}
+          </button>
+        )}
         {loading && (
           <div className="absolute inset-0 z-10 rounded-xl bg-white/75 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 px-4 text-center">
             <Spinner className="w-7 h-7" />
@@ -809,12 +823,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       </div>
 
       <p className="mt-2 text-[10px] text-ink-soft">
-        {basemap === "map"
-          ? "© OpenStreetMap"
-          : basemap === "topo"
-            ? "Terrain © Mapzen / AWS · contours Alshantaf"
-            : "© Esri"}{" "}
-        · {lp.osmNote}
+        {basemap === "map" ? "© OpenStreetMap" : "© Esri"} · {lp.osmNote}
       </p>
       {Boolean(polygon?.[0]?.length) && !loading && (
         <ParcelSideView
@@ -828,6 +837,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           googleEarthCta={lp.sideViewGoogleEarth}
           googleMapsCta={lp.sideViewGoogleMaps}
           loadingLabel={lp.sideViewLoading}
+          fullscreenLabel={lp.fullscreen}
+          exitFullscreenLabel={lp.exitFullscreen}
           lang={lang}
           onReadyChange={handleReadyChange}
           blueprintMeta={{
