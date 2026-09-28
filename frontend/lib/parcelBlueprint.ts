@@ -1063,144 +1063,249 @@ async function composeBlueprintA4Jpeg(opts: {
   return canvas.toDataURL("image/jpeg", 0.92);
 }
 
+function dataUrlToUint8Array(dataUrl: string): Uint8Array {
+  const comma = dataUrl.indexOf(",");
+  const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function readJpegSize(bytes: Uint8Array): { w: number; h: number } {
+  let i = 2;
+  while (i + 9 < bytes.length) {
+    if (bytes[i] !== 0xff) break;
+    const marker = bytes[i + 1]!;
+    if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+      const h = (bytes[i + 5]! << 8) | bytes[i + 6]!;
+      const w = (bytes[i + 7]! << 8) | bytes[i + 8]!;
+      return { w, h };
+    }
+    const len = (bytes[i + 2]! << 8) | bytes[i + 3]!;
+    i += 2 + len;
+  }
+  return { w: 1240, h: 1754 };
+}
+
+/** One-page A4 PDF wrapping a full-bleed JPEG (no deps — reliable on iOS). */
+function jpegDataUrlToPdfBlob(jpegDataUrl: string): Blob {
+  const jpeg = dataUrlToUint8Array(jpegDataUrl);
+  const { w: imgW, h: imgH } = readJpegSize(jpeg);
+  const pageW = 595.28; // A4 pt
+  const pageH = 841.89;
+
+  const enc = new TextEncoder();
+  const chunks: Uint8Array[] = [];
+  const offsets: number[] = [0];
+  let pos = 0;
+  const push = (part: string | Uint8Array) => {
+    const bytes = typeof part === "string" ? enc.encode(part) : part;
+    chunks.push(bytes);
+    pos += bytes.length;
+  };
+  const objStart = () => {
+    offsets.push(pos);
+  };
+
+  push("%PDF-1.4\n");
+  objStart();
+  push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  objStart();
+  push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+  objStart();
+  push(
+    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Contents 4 0 R /Resources << /XObject << /Im0 5 0 R >> >> >>\nendobj\n`
+  );
+  const content = `q\n${pageW} 0 0 ${pageH} 0 0 cm\n/Im0 Do\nQ\n`;
+  objStart();
+  push(`4 0 obj\n<< /Length ${enc.encode(content).length} >>\nstream\n${content}endstream\nendobj\n`);
+  objStart();
+  push(
+    `5 0 obj\n<< /Type /XObject /Subtype /Image /Width ${imgW} /Height ${imgH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`
+  );
+  push(jpeg);
+  push("\nendstream\nendobj\n");
+
+  const xrefPos = pos;
+  push(`xref\n0 ${offsets.length}\n`);
+  push("0000000000 65535 f \n");
+  for (let i = 1; i < offsets.length; i++) {
+    push(`${String(offsets[i]).padStart(10, "0")} 00000 n \n`);
+  }
+  push(
+    `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`
+  );
+
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) {
+    out.set(c, o);
+    o += c.length;
+  }
+  return new Blob([out], { type: "application/pdf" });
+}
+
 /**
- * Mobile-safe print: show a preview, then print a single flattened A4 JPEG.
- * iOS Safari paginates overflowing HTML onto a blank page 2 — one image cannot.
+ * Mobile: show a one-page PDF sheet popup with Download + Print.
+ * Avoids Safari HTML print (blank page 2). Preview uses the JPEG; actions use the PDF.
  */
-async function printViaPageIsolation(pageJpeg: string, lang: "ar" | "en"): Promise<void> {
-  const prevId = "alshantaf-blueprint-print";
-  const prevGate = "alshantaf-blueprint-print-gate";
+async function openMobilePdfPopup(opts: {
+  pageJpeg: string;
+  lang: "ar" | "en";
+  fileName: string;
+}): Promise<void> {
+  const { pageJpeg, lang, fileName } = opts;
+  const pdfBlob = jpegDataUrlToPdfBlob(pageJpeg);
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+  const prevId = "alshantaf-blueprint-pdf";
   document.getElementById(prevId)?.remove();
-  document.getElementById(prevGate)?.remove();
-  document.querySelectorAll("[data-blueprint-print-style]").forEach((n) => n.remove());
+
+  const ar = lang === "ar";
+  const t = {
+    title: ar ? "مخطط القطعة (PDF)" : "Parcel blueprint (PDF)",
+    note: ar ? "صفحة واحدة · مقاس A4" : "1 page · A4",
+    download: ar ? "تنزيل PDF" : "Download PDF",
+    print: ar ? "طباعة" : "Print",
+    open: ar ? "فتح PDF" : "Open PDF",
+    close: ar ? "إغلاق" : "Close",
+  };
 
   const host = document.createElement("div");
   host.id = prevId;
-  host.setAttribute("data-blueprint-print", "1");
-  host.innerHTML = `<img class="sheet-flat" src="${pageJpeg}" alt="" width="1240" height="1754" />`;
-
-  const gate = document.createElement("style");
-  gate.id = prevGate;
-  gate.textContent = `
-    @media screen {
-      #${prevId} {
-        position: fixed;
-        inset: 0;
-        z-index: 2147483646;
-        overflow: auto;
-        background: #ffffff;
-        -webkit-overflow-scrolling: touch;
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        padding: 12px;
-      }
-      #${prevId} .sheet-flat {
-        width: min(100%, 210mm);
-        height: auto;
-        max-width: 100%;
-        display: block;
-        box-shadow: 0 8px 32px rgba(0,0,0,.18);
-      }
-    }
-    @media print {
-      @page { size: 210mm 297mm; margin: 0; }
-      html, body.alshantaf-printing {
-        width: 210mm !important;
-        height: 297mm !important;
-        max-height: 297mm !important;
-        min-height: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        border: 0 !important;
-        overflow: hidden !important;
-        background: #ffffff !important;
-      }
-      body.alshantaf-printing > *:not(#${prevId}) {
-        display: none !important;
-        width: 0 !important;
-        height: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        overflow: hidden !important;
-        visibility: hidden !important;
-        position: absolute !important;
-        left: -99999px !important;
-      }
-      #${prevId} {
-        display: block !important;
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 210mm !important;
-        height: 297mm !important;
-        max-height: 297mm !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        overflow: hidden !important;
-        background: #ffffff !important;
-        page-break-after: avoid !important;
-        page-break-inside: avoid !important;
-        break-after: avoid !important;
-        break-inside: avoid !important;
-      }
-      #${prevId} .sheet-flat {
-        display: block !important;
-        width: 210mm !important;
-        height: 297mm !important;
-        max-width: 210mm !important;
-        max-height: 297mm !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        border: 0 !important;
-        object-fit: fill !important;
-        page-break-after: avoid !important;
-        page-break-inside: avoid !important;
-      }
-      .alshantaf-print-close { display: none !important; }
-    }
+  host.setAttribute("role", "dialog");
+  host.setAttribute("aria-modal", "true");
+  host.dir = ar ? "rtl" : "ltr";
+  host.innerHTML = `
+    <div class="abp-backdrop"></div>
+    <div class="abp-sheet">
+      <header class="abp-head">
+        <div>
+          <div class="abp-title">${escapeHtml(t.title)}</div>
+          <div class="abp-note">${escapeHtml(t.note)}</div>
+        </div>
+        <button type="button" class="abp-x" aria-label="${escapeHtml(t.close)}">×</button>
+      </header>
+      <div class="abp-preview">
+        <img src="${pageJpeg}" alt="" />
+      </div>
+      <footer class="abp-actions">
+        <button type="button" class="abp-btn abp-primary" data-act="download">${escapeHtml(t.download)}</button>
+        <button type="button" class="abp-btn" data-act="print">${escapeHtml(t.print)}</button>
+        <button type="button" class="abp-btn" data-act="open">${escapeHtml(t.open)}</button>
+      </footer>
+    </div>
   `;
 
-  document.head.appendChild(gate);
-  document.body.appendChild(host);
-  document.body.classList.add("alshantaf-printing");
-
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.className = "alshantaf-print-close";
-  closeBtn.textContent = lang === "ar" ? "إغلاق المعاينة" : "Close preview";
-  closeBtn.style.cssText =
-    "position:fixed;top:10px;inset-inline-end:10px;z-index:2147483647;padding:10px 14px;border:0;border-radius:999px;background:#0f342f;color:#e8c98a;font:600 14px/1.2 system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.25)";
-  document.body.appendChild(closeBtn);
+  const style = document.createElement("style");
+  style.id = "alshantaf-blueprint-pdf-style";
+  style.textContent = `
+    #${prevId} {
+      position: fixed; inset: 0; z-index: 2147483646;
+      display: flex; align-items: stretch; justify-content: center;
+      font-family: "IBM Plex Sans Arabic", "Segoe UI", system-ui, sans-serif;
+    }
+    #${prevId} .abp-backdrop {
+      position: absolute; inset: 0; background: rgba(7,24,22,0.72);
+    }
+    #${prevId} .abp-sheet {
+      position: relative; z-index: 1; margin: 0; width: 100%; max-width: 560px;
+      background: #f7f4ee; display: flex; flex-direction: column;
+      max-height: 100%; box-shadow: 0 24px 64px rgba(0,0,0,.35);
+    }
+    @media (min-width: 600px) {
+      #${prevId} { padding: 16px; align-items: center; }
+      #${prevId} .abp-sheet { border-radius: 16px; max-height: min(920px, 100%); }
+    }
+    #${prevId} .abp-head {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 12px; padding: 14px 16px; background: #0f342f; color: #fff;
+    }
+    #${prevId} .abp-title { font-weight: 800; font-size: 16px; color: #e8c98a; }
+    #${prevId} .abp-note { font-size: 12px; color: rgba(255,255,255,.8); margin-top: 2px; }
+    #${prevId} .abp-x {
+      border: 0; background: transparent; color: #e8c98a; font-size: 28px;
+      line-height: 1; width: 40px; height: 40px; border-radius: 999px; cursor: pointer;
+    }
+    #${prevId} .abp-preview {
+      flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch;
+      padding: 12px; background: #e8e2d6;
+    }
+    #${prevId} .abp-preview img {
+      display: block; width: 100%; height: auto; background: #fff;
+      box-shadow: 0 8px 24px rgba(0,0,0,.18);
+    }
+    #${prevId} .abp-actions {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+      background: #fff; border-top: 1px solid rgba(15,52,47,.12);
+    }
+    #${prevId} .abp-btn {
+      border: 1px solid rgba(15,52,47,.25); background: #fff; color: #0f342f;
+      font-weight: 700; font-size: 13px; padding: 12px 8px; border-radius: 999px; cursor: pointer;
+    }
+    #${prevId} .abp-btn.abp-primary {
+      background: #0f342f; color: #e8c98a; border-color: #0f342f;
+    }
+  `;
 
   const cleanup = () => {
     if ((cleanup as { done?: boolean }).done) return;
     (cleanup as { done?: boolean }).done = true;
-    document.body.classList.remove("alshantaf-printing");
-    gate.remove();
+    style.remove();
     host.remove();
-    closeBtn.remove();
-    window.removeEventListener("afterprint", onAfter);
+    URL.revokeObjectURL(pdfUrl);
   };
-  const onAfter = () => cleanup();
-  closeBtn.addEventListener("click", cleanup);
 
-  try {
-    await waitForElementImages(host);
-    await new Promise((r) => window.setTimeout(r, 250));
-    window.addEventListener("afterprint", onAfter);
-    window.focus();
-    window.print();
-    window.setTimeout(cleanup, 90_000);
-  } catch (err) {
-    cleanup();
-    throw err instanceof Error ? err : new Error("print-failed");
-  }
+  document.head.appendChild(style);
+  document.body.appendChild(host);
+
+  host.querySelector(".abp-backdrop")?.addEventListener("click", cleanup);
+  host.querySelector(".abp-x")?.addEventListener("click", cleanup);
+
+  const downloadPdf = async () => {
+    const file = new File([pdfBlob], fileName, { type: "application/pdf" });
+    try {
+      if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: t.title });
+        return;
+      }
+    } catch {
+      /* user cancelled share — fall through to anchor download */
+    }
+    const a = document.createElement("a");
+    a.href = pdfUrl;
+    a.download = fileName;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const openPdf = () => {
+    const win = window.open(pdfUrl, "_blank", "noopener,noreferrer");
+    if (!win) {
+      // Popup blocked — navigate same tab as last resort
+      window.location.href = pdfUrl;
+    }
+  };
+
+  const printPdf = () => {
+    // Open the real one-page PDF in Safari’s viewer (has Print / Share).
+    openPdf();
+  };
+
+  host.querySelector('[data-act="download"]')?.addEventListener("click", () => {
+    void downloadPdf();
+  });
+  host.querySelector('[data-act="print"]')?.addEventListener("click", printPdf);
+  host.querySelector('[data-act="open"]')?.addEventListener("click", openPdf);
 }
 
 /**
  * Open a print-ready A4 portrait blueprint with proper Arabic typography.
- * Desktop: same-origin iframe. Mobile: page-isolation print (iframe prints the form).
+ * Desktop: same-origin iframe. Mobile: one-page PDF popup (download / print / open).
  */
 export async function printParcelBlueprint(opts: {
   meta: BlueprintMeta;
@@ -1639,31 +1744,39 @@ export async function printParcelBlueprint(opts: {
       window.setTimeout(kick, 600);
     });
 
+  const mobileSheetOpts = {
+    lang: meta.lang,
+    brandName: meta.brandName,
+    sheetTitle: meta.sheetTitle,
+    motto,
+    location,
+    logoDataUrl: logo,
+    contextPng: opts.contextPng,
+    contourPng: opts.contourPng,
+    params: rows,
+    paramsLabel: meta.paramsLabel,
+    topViewLabel: meta.topViewLabel,
+    sideViewLabel: meta.sideViewLabel,
+    approxNote: meta.approxNote,
+    footerNote: meta.footerNote,
+  };
+
+  const openMobilePdf = async () => {
+    const pageJpeg = await composeBlueprintA4Jpeg(mobileSheetOpts);
+    const parcelBit = meta.parcel?.trim() ? `-${meta.parcel.trim()}` : "";
+    const fileName = `alshantaf-blueprint${parcelBit}.pdf`.replace(/[^\w.\-]+/g, "_");
+    await openMobilePdfPopup({ pageJpeg, lang: meta.lang, fileName });
+  };
+
   // Explicit target window (desktop popup path)
   if (opts.targetWindow && !opts.targetWindow.closed) {
     await printFrom(opts.targetWindow);
     return;
   }
 
-  // Mobile / coarse pointers: flatten to one A4 JPEG so Safari cannot spill a blank page 2.
+  // Mobile: PDF popup with download / print (one A4 page — no Safari blank page 2).
   if (needsPageIsolationPrint()) {
-    const pageJpeg = await composeBlueprintA4Jpeg({
-      lang: meta.lang,
-      brandName: meta.brandName,
-      sheetTitle: meta.sheetTitle,
-      motto,
-      location,
-      logoDataUrl: logo,
-      contextPng: opts.contextPng,
-      contourPng: opts.contourPng,
-      params: rows,
-      paramsLabel: meta.paramsLabel,
-      topViewLabel: meta.topViewLabel,
-      sideViewLabel: meta.sideViewLabel,
-      approxNote: meta.approxNote,
-      footerNote: meta.footerNote,
-    });
-    await printViaPageIsolation(pageJpeg, meta.lang);
+    await openMobilePdf();
     return;
   }
 
@@ -1675,23 +1788,7 @@ export async function printParcelBlueprint(opts: {
   const frameWin = iframe.contentWindow;
   if (!frameWin) {
     iframe.remove();
-    const pageJpeg = await composeBlueprintA4Jpeg({
-      lang: meta.lang,
-      brandName: meta.brandName,
-      sheetTitle: meta.sheetTitle,
-      motto,
-      location,
-      logoDataUrl: logo,
-      contextPng: opts.contextPng,
-      contourPng: opts.contourPng,
-      params: rows,
-      paramsLabel: meta.paramsLabel,
-      topViewLabel: meta.topViewLabel,
-      sideViewLabel: meta.sideViewLabel,
-      approxNote: meta.approxNote,
-      footerNote: meta.footerNote,
-    });
-    await printViaPageIsolation(pageJpeg, meta.lang);
+    await openMobilePdf();
     return;
   }
   try {
