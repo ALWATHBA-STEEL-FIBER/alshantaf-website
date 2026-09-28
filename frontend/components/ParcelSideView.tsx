@@ -170,6 +170,8 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [elevHint, setElevHint] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
 
   const model = useMemo(() => {
     if (!ring?.length) return null;
@@ -566,7 +568,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       const onResize = () => {
         if (!renderer || !mountRef.current) return;
         const nw = mountRef.current.clientWidth || w;
-        const fs = !!shellRef.current && document.fullscreenElement === shellRef.current;
+        const fs = fullscreenRef.current;
         const nh = fs
           ? Math.max(320, mountRef.current.clientHeight || Math.round(window.innerHeight * 0.85))
           : Math.max(280, Math.round(nw * 0.48));
@@ -575,12 +577,6 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         renderer.setSize(nw, nh, false);
       };
       window.addEventListener("resize", onResize);
-      const onFs = () => {
-        setFullscreen(!!shellRef.current && document.fullscreenElement === shellRef.current);
-        // Multiple size passes so the WebGL canvas recovers after FS enter/exit
-        [40, 120, 280, 600].forEach((ms) => window.setTimeout(onResize, ms));
-      };
-      document.addEventListener("fullscreenchange", onFs);
 
       const tick = () => {
         if (cancelled) return;
@@ -591,10 +587,10 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       tick();
       setStatus("ready");
 
-      (mount as HTMLDivElement & { __cleanup?: () => void }).__cleanup = () => {
+      (mount as HTMLDivElement & { __cleanup?: () => void; __resize?: () => void }).__cleanup = () => {
         window.removeEventListener("resize", onResize);
-        document.removeEventListener("fullscreenchange", onFs);
       };
+      (mount as HTMLDivElement & { __cleanup?: () => void; __resize?: () => void }).__resize = onResize;
     })().catch(() => {
       if (!cancelled) setStatus("failed");
     });
@@ -612,6 +608,29 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       mount.replaceChildren();
     };
   }, [model, lang]);
+
+  // CSS fullscreen: resize WebGL canvas + lock scroll + Escape
+  useEffect(() => {
+    if (!fullscreen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const bump = () => {
+      const mount = mountRef.current as (HTMLDivElement & { __resize?: () => void }) | null;
+      mount?.__resize?.();
+    };
+    const timers = [0, 50, 150, 350, 700].map((ms) => window.setTimeout(bump, ms));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+      timers.forEach((id) => window.clearTimeout(id));
+      // Restore non-FS canvas size after exit
+      window.setTimeout(bump, 50);
+    };
+  }, [fullscreen]);
 
   if (!model) return null;
 
@@ -643,67 +662,20 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
 
       <div
         ref={shellRef}
-        className={`parcel-side-shell relative mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816] ${
-          fullscreen ? "m-0 rounded-none border-0 h-full w-full flex flex-col p-3 gap-2" : ""
+        className={`parcel-side-shell mt-2 mx-2 rounded-lg overflow-hidden border border-line/70 bg-[#071816] flex flex-col gap-2 ${
+          fullscreen ? "parcel-side-shell--fs mx-0 mt-0 border-0 rounded-none" : "p-0"
         }`}
       >
         <div
-          className={`z-20 flex flex-wrap items-center justify-end gap-2 ${
-            fullscreen ? "relative shrink-0" : "absolute end-2 top-2"
+          className={`shrink-0 flex flex-wrap items-center justify-end gap-2 px-2 py-2 ${
+            fullscreen ? "bg-[#0f342f] border-b border-gold/35" : "bg-[#0a1f1c] border-b border-gold/25"
           }`}
         >
-          {fullscreen && (
-            <>
-              <a
-                href={earthHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="h-8 px-3 rounded-full bg-green text-white text-[11px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
-              >
-                {googleEarthCta}
-              </a>
-              <a
-                href={mapsHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="h-8 px-3 rounded-full border border-gold/40 bg-[#0f342f] text-gold text-[11px] font-bold inline-flex items-center hover:border-gold transition-colors"
-              >
-                {googleMapsCta}
-              </a>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={() => void toggleElementFullscreen(shellRef.current)}
-            className="h-8 px-3 rounded-full border border-gold/40 bg-[#0f342f]/95 text-gold text-[11px] font-bold backdrop-blur shadow-sm transition-colors hover:border-gold"
-            aria-pressed={fullscreen}
-          >
-            {fullscreen ? exitFullscreenLabel : fullscreenLabel}
-          </button>
-        </div>
-        <div
-          ref={mountRef}
-          className={`parcel-side-mount w-full ${fullscreen ? "flex-1 min-h-0 h-full" : "min-h-[280px]"}`}
-        />
-        {(status === "loading" || status === "idle") && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/80 text-xs font-bold text-gold-2">
-            {loadingLabel}
-          </div>
-        )}
-        {status === "failed" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/90 text-xs font-bold text-gold/80 px-4 text-center">
-            {schematicNote}
-          </div>
-        )}
-      </div>
-
-      {!fullscreen && (
-        <div className="px-3 py-3 flex flex-wrap gap-2">
           <a
             href={earthHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="h-9 px-3 rounded-full bg-green text-white text-[11px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
+            className="h-8 px-3 rounded-full bg-green text-white text-[11px] font-bold inline-flex items-center hover:bg-green-2 transition-colors"
           >
             {googleEarthCta}
           </a>
@@ -711,12 +683,45 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
             href={mapsHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="h-9 px-3 rounded-full border border-line bg-white text-[11px] font-bold inline-flex items-center hover:border-gold/50 transition-colors"
+            className={`h-8 px-3 rounded-full border text-[11px] font-bold inline-flex items-center transition-colors ${
+              fullscreen
+                ? "border-gold/40 bg-[#0a1f1c] text-gold hover:border-gold"
+                : "border-gold/40 bg-[#0f342f] text-gold hover:border-gold"
+            }`}
           >
             {googleMapsCta}
           </a>
+          <button
+            type="button"
+            onClick={() => setFullscreen((v) => !v)}
+            className={`h-8 px-3 rounded-full border text-[11px] font-bold transition-colors ${
+              fullscreen
+                ? "border-gold bg-gold text-[#0a1f1c]"
+                : "border-gold/40 bg-[#0f342f] text-gold hover:border-gold"
+            }`}
+            aria-pressed={fullscreen}
+          >
+            {fullscreen ? exitFullscreenLabel : fullscreenLabel}
+          </button>
         </div>
-      )}
+        <div className={`relative min-h-0 ${fullscreen ? "flex-1 flex flex-col px-2 pb-2" : ""}`}>
+          <div
+            ref={mountRef}
+            className={`parcel-side-mount w-full ${fullscreen ? "flex-1 min-h-0 h-full" : "min-h-[280px]"}`}
+          />
+          {(status === "loading" || status === "idle") && (
+            <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/80 text-xs font-bold text-gold-2">
+              {loadingLabel}
+            </div>
+          )}
+          {status === "failed" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-[#071816]/90 text-xs font-bold text-gold/80 px-4 text-center">
+              {schematicNote}
+            </div>
+          )}
+        </div>
+      </div>
+
       <p className="px-3 pb-2 text-[10px] font-medium text-amber-900/90 bg-amber-50 border-t border-amber-200/80 leading-snug">
         {disclaimer}
       </p>
@@ -724,16 +729,3 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     </div>
   );
 });
-
-async function toggleElementFullscreen(el: HTMLElement | null) {
-  if (!el) return;
-  try {
-    if (document.fullscreenElement === el) {
-      await document.exitFullscreen();
-    } else if (el.requestFullscreen) {
-      await el.requestFullscreen();
-    }
-  } catch {
-    /* blocked / unsupported */
-  }
-}
