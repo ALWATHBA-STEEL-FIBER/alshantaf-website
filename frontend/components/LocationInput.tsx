@@ -5,8 +5,10 @@ import { useLanguage } from "@/lib/LanguageProvider";
 import {
   coordsToString,
   formatMeters,
+  formatSideMeters,
   mapsLinkFromCoords,
   parseCoords,
+  ringCornerPoints,
   ringEdgeDimensions,
   ringOrientedExtents,
   type Coords,
@@ -193,7 +195,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               : 1;
           for (const edge of edges) {
             const p = map.latLngToContainerPoint([edge.label.lat, edge.label.lng]);
-            const text = formatMeters(edge.lengthM * scaleLen, lang);
+            const text = formatSideMeters(edge.lengthM * scaleLen, lang, edge.kind);
             ctx.font = 'bold 15px "IBM Plex Sans Arabic",system-ui,sans-serif';
             const tw = ctx.measureText(text).width;
             ctx.fillStyle = "rgba(15,52,47,0.92)";
@@ -206,6 +208,26 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             ctx.textBaseline = "middle";
             ctx.fillText(text, p.x, p.y);
           }
+        }
+
+        // Corner glow on snapshot
+        for (const [lat, lng] of ring) {
+          const p = map.latLngToContainerPoint([lat, lng]);
+          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 10);
+          g.addColorStop(0, "rgba(200,160,100,0.95)");
+          g.addColorStop(0.45, "rgba(200,160,100,0.45)");
+          g.addColorStop(1, "rgba(200,160,100,0)");
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#caa064";
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#f5e6c8";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
         }
       }
 
@@ -256,6 +278,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const markerRef = useRef<import("leaflet").Marker | null>(null);
   const polygonRef = useRef<import("leaflet").Polygon | null>(null);
+  const cornerGlowRef = useRef<import("leaflet").LayerGroup | null>(null);
   const dimensionLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const osmLayerRef = useRef<import("leaflet").TileLayer | null>(null);
   const satLayerRef = useRef<import("leaflet").TileLayer | null>(null);
@@ -364,6 +387,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       dimensionLayerRef.current = null;
       osmLayerRef.current = null;
       satLayerRef.current = null;
+      cornerGlowRef.current = null;
     };
     // Leaflet must be initialized once per container; lockEditing toggles via effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -446,18 +470,60 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         map.removeLayer(polygonRef.current);
         polygonRef.current = null;
       }
+      if (cornerGlowRef.current) {
+        map.removeLayer(cornerGlowRef.current);
+        cornerGlowRef.current = null;
+      }
       // Do not clear dimension labels here — that races the dimensions effect and
       // leaves the "on by default" toggle with nothing drawn on the map.
 
       if (polygon && polygon.length > 0) {
         const layer = L.polygon(polygon, {
-          color: "#113a34",
-          weight: 2.5,
+          color: "#0f342f",
+          weight: 3,
           fillColor: "#caa064",
           fillOpacity: 0.28,
           interactive: false,
+          lineJoin: "round",
+          lineCap: "round",
         }).addTo(map);
         polygonRef.current = layer;
+
+        // Glow every vertex so short / hard-to-see edges read clearly between bright corners
+        const glow = L.layerGroup().addTo(map);
+        const ring = polygon[0] ?? [];
+        const hard = new Set(
+          ringCornerPoints(ring).map((c) => `${c.lat.toFixed(7)},${c.lng.toFixed(7)}`)
+        );
+        const seen = new Set<string>();
+        for (const [lat, lng] of ring) {
+          const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const isHard = hard.has(key);
+          // Soft outer halo
+          L.circleMarker([lat, lng], {
+            radius: isHard ? 9 : 7,
+            color: "#caa064",
+            weight: 0,
+            fillColor: "#caa064",
+            fillOpacity: 0.35,
+            interactive: false,
+            className: "parcel-corner-halo",
+          }).addTo(glow);
+          // Bright core
+          L.circleMarker([lat, lng], {
+            radius: isHard ? 4.5 : 3.5,
+            color: "#f5e6c8",
+            weight: 2,
+            fillColor: "#caa064",
+            fillOpacity: 1,
+            interactive: false,
+            className: "parcel-corner-glow",
+          }).addTo(glow);
+        }
+        cornerGlowRef.current = glow;
+
         map.fitBounds(layer.getBounds(), { padding: [28, 28], maxZoom: 18 });
         if (markerRef.current) {
           map.removeLayer(markerRef.current);
@@ -503,14 +569,19 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           : 1;
       const group = L.layerGroup().addTo(map);
       for (const edge of rawEdges) {
-        const label = formatMeters(edge.lengthM * scale, lang);
+        const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
         const icon = L.divIcon({
           className: "parcel-dim-label",
-          html: `<span style="display:inline-block;padding:2px 6px;border-radius:6px;background:rgba(17,58,52,.92);color:#fff;font:700 10px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.25);border:1px solid #caa064;transform:translate(-50%,-50%)">${label}</span>`,
+          html: `<span style="display:inline-block;padding:1px 5px;border-radius:4px;background:rgba(15,52,47,.94);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;box-shadow:0 0 0 1px #caa064,0 1px 3px rgba(0,0,0,.3);transform:translate(-50%,-50%)">${label}</span>`,
           iconSize: [0, 0],
           iconAnchor: [0, 0],
         });
-        L.marker([edge.label.lat, edge.label.lng], { icon, interactive: false, keyboard: false }).addTo(group);
+        // Sit the label on the edge (tiny outward offset already baked into edge.label)
+        L.marker([edge.label.lat, edge.label.lng], {
+          icon,
+          interactive: false,
+          keyboard: false,
+        }).addTo(group);
       }
       dimensionLayerRef.current = group;
     });
@@ -603,6 +674,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     if (polygonRef.current && mapRef.current) {
       mapRef.current.removeLayer(polygonRef.current);
       polygonRef.current = null;
+    }
+    if (cornerGlowRef.current && mapRef.current) {
+      mapRef.current.removeLayer(cornerGlowRef.current);
+      cornerGlowRef.current = null;
     }
     if (dimensionLayerRef.current && mapRef.current) {
       mapRef.current.removeLayer(dimensionLayerRef.current);

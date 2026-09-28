@@ -44,6 +44,17 @@ body {
   font: inherit;
 }
 
+/* Parcel corner glow — short edges read between bright vertices */
+.leaflet-container .parcel-corner-halo {
+  filter: blur(0.2px);
+}
+.leaflet-container .parcel-corner-glow {
+  filter: drop-shadow(0 0 3px rgba(245, 230, 200, 0.95)) drop-shadow(0 0 8px rgba(200, 160, 100, 0.85));
+}
+.parcel-dim-label {
+  pointer-events: none;
+}
+
 /* Contour topography basemap — gold isolines on deep green void */
 .location-map--topo.leaflet-container {
   background: #071816;

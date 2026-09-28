@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   formatMeters,
+  formatSideMeters,
+  ringCornerPoints,
   ringEdgeDimensions,
   type Coords,
 } from "@/lib/mapCoords";
@@ -135,13 +137,46 @@ export function MapFullscreenPortal({
 
       if (polygon && polygon.length > 0) {
         const layer = L.polygon(polygon, {
-          color: "#113a34",
-          weight: 2.5,
+          color: "#0f342f",
+          weight: 3,
           fillColor: "#caa064",
           fillOpacity: 0.28,
           interactive: false,
+          lineJoin: "round",
+          lineCap: "round",
         }).addTo(map);
         polyRef.current = layer;
+
+        const ring = polygon[0] ?? [];
+        const hard = new Set(
+          ringCornerPoints(ring).map((c) => `${c.lat.toFixed(7)},${c.lng.toFixed(7)}`)
+        );
+        const seen = new Set<string>();
+        for (const [lat, lng] of ring) {
+          const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const isHard = hard.has(key);
+          L.circleMarker([lat, lng], {
+            radius: isHard ? 9 : 7,
+            color: "#caa064",
+            weight: 0,
+            fillColor: "#caa064",
+            fillOpacity: 0.35,
+            interactive: false,
+            className: "parcel-corner-halo",
+          }).addTo(map);
+          L.circleMarker([lat, lng], {
+            radius: isHard ? 4.5 : 3.5,
+            color: "#f5e6c8",
+            weight: 2,
+            fillColor: "#caa064",
+            fillOpacity: 1,
+            interactive: false,
+            className: "parcel-corner-glow",
+          }).addTo(map);
+        }
+
         map.fitBounds(layer.getBounds(), { padding: [36, 36], maxZoom: 18, animate: false });
       } else if (selected) {
         const icon = L.divIcon({
@@ -215,10 +250,10 @@ export function MapFullscreenPortal({
           : 1;
       const group = L.layerGroup().addTo(map);
       for (const edge of rawEdges) {
-        const label = formatMeters(edge.lengthM * scale, lang);
+        const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
         const icon = L.divIcon({
           className: "parcel-dim-label",
-          html: `<span style="display:inline-block;padding:2px 6px;border-radius:6px;background:rgba(17,58,52,.92);color:#fff;font:700 10px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.25);border:1px solid #caa064;transform:translate(-50%,-50%)">${label}</span>`,
+          html: `<span style="display:inline-block;padding:1px 5px;border-radius:4px;background:rgba(15,52,47,.94);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;box-shadow:0 0 0 1px #caa064,0 1px 3px rgba(0,0,0,.3);transform:translate(-50%,-50%)">${label}</span>`,
           iconSize: [0, 0],
           iconAnchor: [0, 0],
         });

@@ -283,53 +283,177 @@ export type RingEdgeDimension = {
   lengthM: number;
   /** Unit outward-ish offset hint for label placement (lat/lng degrees, tiny). */
   label: Coords;
+  /** Straight run vs densified curve (merged soft bends). */
+  kind: "edge" | "curve";
+  /** Endpoints of this logical side (for corner glow). */
+  start: Coords;
+  end: Coords;
 };
+
+/** Soft bend still counts as the same curve/side; sharper = hard corner break. */
+const COLLINEAR_DEG = 10;
+const CURVE_MAX_DEG = 38;
+const MIN_SIDE_M = 0.2;
+/** Label sits almost on the line (metres outward). */
+const LABEL_OFFSET_M = 0.35;
+
+function turnDegrees(prev: EnuPoint, curr: EnuPoint, next: EnuPoint): number {
+  const ax = curr.x - prev.x;
+  const ay = curr.y - prev.y;
+  const bx = next.x - curr.x;
+  const by = next.y - curr.y;
+  if (Math.hypot(ax, ay) < 1e-9 || Math.hypot(bx, by) < 1e-9) return 0;
+  let d = ((Math.atan2(by, bx) - Math.atan2(ay, ax)) * 180) / Math.PI;
+  while (d > 180) d -= 360;
+  while (d < -180) d += 360;
+  return d;
+}
 
 /**
  * Edge midpoints + lengths for drawing dimension labels on a parcel ring ([lat,lng][]).
- * Lengths use a local WGS84 ENU plane (accurate at cadastral scale).
+ * Collinear runs and soft bends (curves) are merged into one side with total length,
+ * so densified arcs don't spawn dozens of tiny dimension labels.
  */
 export function ringEdgeDimensions(ring: [number, number][]): RingEdgeDimension[] {
   const pts = uniqueRing(ring);
   if (pts.length < 2) return [];
+  const n = pts.length;
   const origin = ringCentroid(pts);
   const enu = pts.map(([lat, lng]) => toEnu(lat, lng, origin.lat, origin.lng));
-  const edges: RingEdgeDimension[] = [];
 
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i]!;
-    const b = pts[(i + 1) % pts.length]!;
-    const ea = enu[i]!;
-    const eb = enu[(i + 1) % enu.length]!;
-    const dx = eb.x - ea.x;
-    const dy = eb.y - ea.y;
-    const lengthM = Math.hypot(dx, dy);
-    if (lengthM < 0.25) continue;
+  const turns: number[] = new Array(n);
+  const hardCorner: boolean[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = turnDegrees(enu[(i - 1 + n) % n]!, enu[i]!, enu[(i + 1) % n]!);
+    turns[i] = t;
+    hardCorner[i] = Math.abs(t) >= CURVE_MAX_DEG;
+  }
 
-    const midEnu = { x: (ea.x + eb.x) / 2, y: (ea.y + eb.y) / 2 };
+  // At least one break so a fully smooth loop still yields one side.
+  if (!hardCorner.some(Boolean)) hardCorner[0] = true;
+
+  const breakIdx: number[] = [];
+  for (let i = 0; i < n; i++) if (hardCorner[i]) breakIdx.push(i);
+  if (breakIdx.length === 0) breakIdx.push(0);
+
+  const sides: RingEdgeDimension[] = [];
+
+  for (let bi = 0; bi < breakIdx.length; bi++) {
+    const i0 = breakIdx[bi]!;
+    const i1 = breakIdx[(bi + 1) % breakIdx.length]!;
+    const path: number[] = [i0];
+    let j = (i0 + 1) % n;
+    let guard = 0;
+    while (j !== i1 && guard < n + 2) {
+      path.push(j);
+      j = (j + 1) % n;
+      guard++;
+    }
+    path.push(i1);
+    if (path.length < 2) continue;
+
+    let lengthM = 0;
+    for (let k = 0; k < path.length - 1; k++) {
+      const a = enu[path[k]!]!;
+      const b = enu[path[k + 1]!]!;
+      lengthM += Math.hypot(b.x - a.x, b.y - a.y);
+    }
+    if (lengthM < MIN_SIDE_M) continue;
+
+    let maxSoft = 0;
+    for (let k = 1; k < path.length - 1; k++) {
+      maxSoft = Math.max(maxSoft, Math.abs(turns[path[k]!]!));
+    }
+    const kind: "edge" | "curve" =
+      path.length > 2 && maxSoft >= COLLINEAR_DEG ? "curve" : "edge";
+
+    // Midpoint by arc length along the side
+    let remaining = lengthM / 2;
+    let midEnu = enu[path[0]!]!;
+    let tanX = 1;
+    let tanY = 0;
+    for (let k = 0; k < path.length - 1; k++) {
+      const a = enu[path[k]!]!;
+      const b = enu[path[k + 1]!]!;
+      const seg = Math.hypot(b.x - a.x, b.y - a.y);
+      if (seg < 1e-9) continue;
+      if (remaining <= seg) {
+        const t = remaining / seg;
+        midEnu = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+        tanX = (b.x - a.x) / seg;
+        tanY = (b.y - a.y) / seg;
+        break;
+      }
+      remaining -= seg;
+      midEnu = b;
+      tanX = (b.x - a.x) / seg;
+      tanY = (b.y - a.y) / seg;
+    }
+
     const mid = fromEnu(midEnu, origin.lat, origin.lng);
-
-    // Offset label ~1.8 m perpendicular to the edge (outward from ring centroid).
-    const inv = lengthM > 0 ? 1 / lengthM : 0;
-    let nx = -dy * inv;
-    let ny = dx * inv;
-    const cx = midEnu.x;
-    const cy = midEnu.y;
-    // Flip normal so it points away from centroid (0,0 in ENU after recentering — centroid is origin).
-    if (nx * cx + ny * cy < 0) {
+    // Perpendicular outward (away from centroid at origin)
+    let nx = -tanY;
+    let ny = tanX;
+    if (nx * midEnu.x + ny * midEnu.y < 0) {
       nx = -nx;
       ny = -ny;
     }
-    const label = fromEnu({ x: midEnu.x + nx * 1.8, y: midEnu.y + ny * 1.8 }, origin.lat, origin.lng);
-
-    edges.push({ mid, lengthM, label });
+    const label = fromEnu(
+      { x: midEnu.x + nx * LABEL_OFFSET_M, y: midEnu.y + ny * LABEL_OFFSET_M },
+      origin.lat,
+      origin.lng
+    );
+    const start = pts[i0]!;
+    const end = pts[i1]!;
+    sides.push({
+      mid,
+      lengthM,
+      label,
+      kind,
+      start: { lat: start[0], lng: start[1] },
+      end: { lat: end[0], lng: end[1] },
+    });
   }
-  return edges;
+
+  return sides;
 }
 
-/** Sum of planar edge lengths (client-side perimeter). */
+/** Distinct hard-corner vertices for glow markers (lat/lng pairs). */
+export function ringCornerPoints(ring: [number, number][]): Coords[] {
+  const pts = uniqueRing(ring);
+  if (pts.length < 2) return [];
+  const n = pts.length;
+  const origin = ringCentroid(pts);
+  const enu = pts.map(([lat, lng]) => toEnu(lat, lng, origin.lat, origin.lng));
+  const corners: Coords[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = Math.abs(turnDegrees(enu[(i - 1 + n) % n]!, enu[i]!, enu[(i + 1) % n]!));
+    // Include hard corners and also mild bends so short edges stay visible
+    if (t >= COLLINEAR_DEG || n <= 8) {
+      corners.push({ lat: pts[i]![0], lng: pts[i]![1] });
+    }
+  }
+  // Always show every vertex when the ring is sparse; when dense, hard+mild only.
+  // If somehow empty, fall back to all vertices.
+  if (corners.length === 0) {
+    return pts.map(([lat, lng]) => ({ lat, lng }));
+  }
+  return corners;
+}
+
+/** Sum of planar edge lengths (client-side perimeter) — uses raw segments, not merged sides. */
 export function ringPerimeterMeters(ring: [number, number][]): number {
-  return ringEdgeDimensions(ring).reduce((sum, edge) => sum + edge.lengthM, 0);
+  const pts = uniqueRing(ring);
+  if (pts.length < 2) return 0;
+  const origin = ringCentroid(pts);
+  const enu = pts.map(([lat, lng]) => toEnu(lat, lng, origin.lat, origin.lng));
+  let sum = 0;
+  for (let i = 0; i < enu.length; i++) {
+    const a = enu[i]!;
+    const b = enu[(i + 1) % enu.length]!;
+    sum += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  return sum;
 }
 
 export function formatMeters(meters: number, lang: "ar" | "en"): string {
@@ -342,4 +466,15 @@ export function formatMeters(meters: number, lang: "ar" | "en"): string {
     minimumFractionDigits: 0,
   });
   return lang === "ar" ? `${n} م` : `${n} m`;
+}
+
+/** Dimension label text; curves get a small arc mark so merged bends read as one side. */
+export function formatSideMeters(
+  meters: number,
+  lang: "ar" | "en",
+  kind: "edge" | "curve" = "edge"
+): string {
+  const base = formatMeters(meters, lang);
+  if (kind !== "curve") return base;
+  return lang === "ar" ? `⌒ ${base}` : `⌒ ${base}`;
 }

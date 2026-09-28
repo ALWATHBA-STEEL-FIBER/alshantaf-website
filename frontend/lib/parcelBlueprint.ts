@@ -8,6 +8,7 @@ import {
 } from "@/lib/elevationContours";
 import {
   formatMeters,
+  formatSideMeters,
   fromLocalEnu,
   ringEdgeDimensions,
   ringOrientedFrame,
@@ -426,9 +427,31 @@ export async function drawParcelContextMap(opts: {
   ctx.fill();
   ctx.strokeStyle = "#e8c98a";
   ctx.lineWidth = 3.5;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   ctx.stroke();
 
-  // Edge dimensions (scaled to official perimeter when close)
+  // Corner glow so short edges stay visible on the print sheet
+  for (const p of bounds.parcelPts) {
+    const q = toPx(p.x, p.y);
+    const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, 14);
+    g.addColorStop(0, "rgba(200,160,100,0.9)");
+    g.addColorStop(0.5, "rgba(200,160,100,0.35)");
+    g.addColorStop(1, "rgba(200,160,100,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#caa064";
+    ctx.beginPath();
+    ctx.arc(q.x, q.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#f5e6c8";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // Edge dimensions — merged sides (curves counted as one total)
   const edges = ringEdgeDimensions(opts.ring);
   const sum = edges.reduce((s, e) => s + e.lengthM, 0);
   const scaleLen =
@@ -442,7 +465,7 @@ export async function drawParcelContextMap(opts: {
     const midEnu = toLocalEnu(edge.label.lat, edge.label.lng, frame.origin.lat, frame.origin.lng);
     const mid = frame.toParcel(midEnu);
     const q = toPx(mid.x, mid.y);
-    const text = formatMeters(edge.lengthM * scaleLen, opts.lang);
+    const text = formatSideMeters(edge.lengthM * scaleLen, opts.lang, edge.kind);
     ctx.font = 'bold 28px "IBM Plex Sans Arabic",system-ui,sans-serif';
     const tw = ctx.measureText(text).width;
     const boxH = 34;
