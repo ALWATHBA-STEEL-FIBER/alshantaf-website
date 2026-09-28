@@ -155,7 +155,7 @@ export function sampleBilinear(elev: Float32Array, w: number, h: number, x: numb
  * read as smooth topography instead of stair-step DEM noise.
  */
 export function smoothElevGrid(elev: Float32Array, w: number, h: number, passes = 2): Float32Array {
-  let src = elev;
+  let src = Float32Array.from(elev);
   let dst = new Float32Array(w * h);
   const at = (grid: Float32Array, x: number, y: number) =>
     grid[Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x))]!;
@@ -177,11 +177,11 @@ export function smoothElevGrid(elev: Float32Array, w: number, h: number, passes 
         dst[y * w + x] = v / 16;
       }
     }
-    const tmp = src === elev ? new Float32Array(w * h) : src;
+    const tmp = src;
     src = dst;
     dst = tmp;
   }
-  return src === elev ? elev.slice() : src;
+  return src;
 }
 
 /** Hypsometric tint: deep green valleys → gold ridges (0..1 normalized elev). */
