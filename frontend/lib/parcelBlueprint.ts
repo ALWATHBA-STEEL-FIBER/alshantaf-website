@@ -23,8 +23,9 @@ const BLUEPRINT_CONTACTS = [
   { name: "Eng. Mohammad Alshantaf", phone: "+962799996660" },
 ] as const;
 const BLUEPRINT_SITE_URL = "https://alshantaf.com";
-const BLUEPRINT_LOCATION_EN = "Al-Qastal Industrial — in front of JTI factory";
-const BLUEPRINT_LOCATION_AR = "المنطقة الصناعية في القسطل — أمام مصنع JTI";
+const BLUEPRINT_LOCATION_EN = "Al-Qastal Industrial — in front of \u2066JTI\u2069 factory";
+/** LRI/PDI keep the Latin brand "JTI" from jumping to the start in RTL. */
+const BLUEPRINT_LOCATION_AR = "المنطقة الصناعية في القسطل — أمام مصنع \u2066JTI\u2069";
 const BLUEPRINT_MOTTO_EN = "Specialized in industrial real estate for 25+ years";
 const BLUEPRINT_MOTTO_AR = "متخصصون في العقارات الصناعية لأكثر من 25 عاماً";
 
@@ -789,16 +790,284 @@ function waitForElementImages(root: ParentNode, timeoutMs = 8000): Promise<void>
   });
 }
 
+function wrapCanvasText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number
+): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines: string[] = [];
+  let cur = words[0]!;
+  for (let i = 1; i < words.length; i++) {
+    const trial = `${cur} ${words[i]}`;
+    if (ctx.measureText(trial).width <= maxWidth) cur = trial;
+    else {
+      lines.push(cur);
+      cur = words[i]!;
+    }
+  }
+  lines.push(cur);
+  return lines;
+}
+
+function drawContainedImage(
+  ctx: CanvasRenderingContext2D,
+  img: CanvasImageSource,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+) {
+  const iw = "naturalWidth" in img && (img as HTMLImageElement).naturalWidth
+    ? (img as HTMLImageElement).naturalWidth
+    : (img as HTMLCanvasElement).width;
+  const ih = "naturalHeight" in img && (img as HTMLImageElement).naturalHeight
+    ? (img as HTMLImageElement).naturalHeight
+    : (img as HTMLCanvasElement).height;
+  if (!iw || !ih) return;
+  const scale = Math.min(w / iw, h / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  const dx = x + (w - dw) / 2;
+  const dy = y + (h - dh) / 2;
+  ctx.drawImage(img, dx, dy, dw, dh);
+}
+
 /**
- * Mobile-safe print: inject the sheet into the current document, hide everything
- * else with @media print, then call window.print(). Hidden iframes print the
- * land-check form as a multi-page screenshot on iOS/Android.
- *
- * iOS Safari creates a blank page-2 if anything exceeds one page height — keep
- * the print root absolutely clipped to exactly one A4.
+ * Flatten the letterhead to one A4 JPEG — the only reliable single-page print on iOS Safari
+ * (WebKit often ignores overflow:hidden and paginates HTML onto a blank page 2).
  */
-async function printViaPageIsolation(html: string): Promise<void> {
-  const parsed = new DOMParser().parseFromString(html, "text/html");
+async function composeBlueprintA4Jpeg(opts: {
+  lang: "ar" | "en";
+  brandName: string;
+  sheetTitle: string;
+  motto: string;
+  location: string;
+  logoDataUrl: string | null;
+  contextPng: string;
+  contourPng: string;
+  params: Array<[string, string]>;
+  paramsLabel: string;
+  topViewLabel: string;
+  sideViewLabel: string;
+  approxNote: string;
+  footerNote: string;
+}): Promise<string> {
+  const W = 1240;
+  const H = 1754;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+  const rtl = opts.lang === "ar";
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = "#111111";
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+
+  const padX = 36;
+  const padTop = 28;
+  let y = padTop;
+
+  // Header
+  const headerH = 110;
+  const logoSize = 88;
+  const colW = (W - padX * 2 - logoSize - 40) / 2;
+
+  ctx.fillStyle = "#222222";
+  ctx.font = '600 22px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  const mottoLines = wrapCanvasText(ctx, opts.motto, colW - 8);
+  mottoLines.slice(0, 4).forEach((line, i) => {
+    ctx.fillText(line, padX, y + 8 + i * 26);
+  });
+
+  if (opts.logoDataUrl) {
+    try {
+      const logo = await loadImage(opts.logoDataUrl);
+      ctx.drawImage(logo, (W - logoSize) / 2, y + (headerH - logoSize) / 2, logoSize, logoSize);
+    } catch {
+      /* skip logo */
+    }
+  }
+
+  ctx.fillStyle = "#0f342f";
+  ctx.font = '800 34px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.textAlign = "right";
+  ctx.fillText(opts.brandName, W - padX, y + 18, colW);
+  ctx.fillStyle = "#222222";
+  ctx.font = '600 24px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  const titleLines = wrapCanvasText(ctx, opts.sheetTitle, colW - 8);
+  titleLines.slice(0, 2).forEach((line, i) => {
+    ctx.fillText(line, W - padX, y + 58 + i * 28, colW);
+  });
+
+  y += headerH;
+  ctx.strokeStyle = "#111111";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(padX, y);
+  ctx.lineTo(W - padX, y);
+  ctx.stroke();
+  y += 16;
+
+  // Top: params + context map
+  const topH = 680;
+  const paramsW = 400;
+  const gap = 16;
+  const mapW = W - padX * 2 - paramsW - gap;
+
+  // Params panel
+  ctx.strokeStyle = "#222222";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(padX, y, paramsW, topH);
+  ctx.fillStyle = "#111111";
+  ctx.font = '800 24px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.textAlign = rtl ? "right" : "left";
+  ctx.textBaseline = "top";
+  const paramsTitleX = rtl ? padX + paramsW - 14 : padX + 14;
+  ctx.fillText(opts.paramsLabel, paramsTitleX, y + 12, paramsW - 28);
+  ctx.strokeStyle = "#222222";
+  ctx.beginPath();
+  ctx.moveTo(padX + 12, y + 44);
+  ctx.lineTo(padX + paramsW - 12, y + 44);
+  ctx.stroke();
+
+  let rowY = y + 54;
+  ctx.font = '700 18px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  for (const [lab, val] of opts.params) {
+    if (rowY > y + topH - 90) break;
+    ctx.fillStyle = "#444444";
+    ctx.textAlign = rtl ? "right" : "left";
+    ctx.fillText(lab, paramsTitleX, rowY, paramsW * 0.42);
+    ctx.fillStyle = "#111111";
+    ctx.font = '600 20px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+    ctx.textAlign = rtl ? "left" : "right";
+    const valX = rtl ? padX + 14 : padX + paramsW - 14;
+    ctx.fillText(val, valX, rowY, paramsW * 0.52);
+    ctx.font = '700 18px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+    rowY += 28;
+  }
+  ctx.fillStyle = "#555555";
+  ctx.font = '500 15px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.textAlign = rtl ? "right" : "left";
+  const noteLines = wrapCanvasText(ctx, opts.approxNote, paramsW - 28);
+  let noteY = y + topH - 14 - noteLines.slice(0, 3).length * 18;
+  noteLines.slice(0, 3).forEach((line) => {
+    ctx.fillText(line, paramsTitleX, noteY, paramsW - 28);
+    noteY += 18;
+  });
+
+  // Context map panel
+  const mapX = padX + paramsW + gap;
+  ctx.strokeStyle = "#222222";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(mapX, y, mapW, topH);
+  ctx.fillStyle = "#111111";
+  ctx.font = '800 24px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.textAlign = rtl ? "right" : "left";
+  const mapTitleX = rtl ? mapX + mapW - 14 : mapX + 14;
+  ctx.fillText(opts.topViewLabel, mapTitleX, y + 12, mapW - 28);
+  ctx.strokeStyle = "#222222";
+  ctx.beginPath();
+  ctx.moveTo(mapX + 12, y + 44);
+  ctx.lineTo(mapX + mapW - 12, y + 44);
+  ctx.stroke();
+  const framePad = 10;
+  const frameX = mapX + framePad;
+  const frameY = y + 52;
+  const frameW = mapW - framePad * 2;
+  const frameH = topH - 52 - framePad;
+  ctx.strokeStyle = "#cccccc";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(frameX, frameY, frameW, frameH);
+  try {
+    const mapImg = await loadImage(opts.contextPng);
+    drawContainedImage(ctx, mapImg, frameX + 4, frameY + 4, frameW - 8, frameH - 8);
+  } catch {
+    /* skip */
+  }
+
+  y += topH + 16;
+
+  // Topo panel
+  const footerReserve = 120;
+  const topoH = H - y - footerReserve - 20;
+  ctx.strokeStyle = "#222222";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(padX, y, W - padX * 2, topoH);
+  ctx.fillStyle = "#111111";
+  ctx.font = '800 24px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.textAlign = rtl ? "right" : "left";
+  const topoTitleX = rtl ? W - padX - 14 : padX + 14;
+  ctx.fillText(opts.sideViewLabel, topoTitleX, y + 12, W - padX * 2 - 28);
+  ctx.strokeStyle = "#222222";
+  ctx.beginPath();
+  ctx.moveTo(padX + 12, y + 44);
+  ctx.lineTo(W - padX - 12, y + 44);
+  ctx.stroke();
+  const tFrameX = padX + framePad;
+  const tFrameY = y + 52;
+  const tFrameW = W - padX * 2 - framePad * 2;
+  const tFrameH = topoH - 52 - framePad;
+  ctx.strokeStyle = "#cccccc";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(tFrameX, tFrameY, tFrameW, tFrameH);
+  try {
+    const topoImg = await loadImage(opts.contourPng);
+    drawContainedImage(ctx, topoImg, tFrameX + 4, tFrameY + 4, tFrameW - 8, tFrameH - 8);
+  } catch {
+    /* skip */
+  }
+
+  y += topoH + 12;
+  ctx.strokeStyle = "#111111";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(padX, y);
+  ctx.lineTo(W - padX, y);
+  ctx.stroke();
+  y += 14;
+
+  // Footer
+  ctx.fillStyle = "#0f342f";
+  ctx.font = '800 24px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.textAlign = "left";
+  ctx.fillText(BLUEPRINT_SITE_URL, padX, y);
+  ctx.fillStyle = "#333333";
+  ctx.font = '600 18px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.fillText(opts.location, padX, y + 28, W * 0.5);
+  ctx.fillStyle = "#666666";
+  ctx.font = '500 14px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  const footNote = wrapCanvasText(ctx, opts.footerNote, W * 0.52);
+  footNote.slice(0, 2).forEach((line, i) => {
+    ctx.fillText(line, padX, y + 52 + i * 16, W * 0.52);
+  });
+
+  let contactY = y;
+  for (const c of BLUEPRINT_CONTACTS) {
+    ctx.fillStyle = "#111111";
+    ctx.font = '700 18px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+    ctx.textAlign = "right";
+    ctx.fillText(c.name, W - padX, contactY);
+    ctx.fillStyle = "#0f342f";
+    ctx.font = '800 22px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+    ctx.fillText(c.phone, W - padX, contactY + 24);
+    contactY += 56;
+  }
+
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
+/**
+ * Mobile-safe print: show a preview, then print a single flattened A4 JPEG.
+ * iOS Safari paginates overflowing HTML onto a blank page 2 — one image cannot.
+ */
+async function printViaPageIsolation(pageJpeg: string, lang: "ar" | "en"): Promise<void> {
   const prevId = "alshantaf-blueprint-print";
   const prevGate = "alshantaf-blueprint-print-gate";
   document.getElementById(prevId)?.remove();
@@ -808,16 +1077,7 @@ async function printViaPageIsolation(html: string): Promise<void> {
   const host = document.createElement("div");
   host.id = prevId;
   host.setAttribute("data-blueprint-print", "1");
-
-  // Styles go in <head> (not inside the print host) so they don't affect layout height on iOS.
-  for (const node of Array.from(parsed.head.querySelectorAll("style"))) {
-    const style = document.importNode(node, true) as HTMLStyleElement;
-    style.setAttribute("data-blueprint-print-style", "1");
-    document.head.appendChild(style);
-  }
-  for (const node of Array.from(parsed.body.childNodes)) {
-    host.appendChild(document.importNode(node, true));
-  }
+  host.innerHTML = `<img class="sheet-flat" src="${pageJpeg}" alt="" width="1240" height="1754" />`;
 
   const gate = document.createElement("style");
   gate.id = prevGate;
@@ -830,20 +1090,22 @@ async function printViaPageIsolation(html: string): Promise<void> {
         overflow: auto;
         background: #ffffff;
         -webkit-overflow-scrolling: touch;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding: 12px;
+      }
+      #${prevId} .sheet-flat {
+        width: min(100%, 210mm);
+        height: auto;
+        max-width: 100%;
+        display: block;
+        box-shadow: 0 8px 32px rgba(0,0,0,.18);
       }
     }
     @media print {
       @page { size: 210mm 297mm; margin: 0; }
-      html {
-        width: 210mm !important;
-        height: 297mm !important;
-        max-height: 297mm !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        overflow: hidden !important;
-        background: #ffffff !important;
-      }
-      body.alshantaf-printing {
+      html, body.alshantaf-printing {
         width: 210mm !important;
         height: 297mm !important;
         max-height: 297mm !important;
@@ -853,9 +1115,6 @@ async function printViaPageIsolation(html: string): Promise<void> {
         border: 0 !important;
         overflow: hidden !important;
         background: #ffffff !important;
-        position: relative !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
       }
       body.alshantaf-printing > *:not(#${prevId}) {
         display: none !important;
@@ -873,45 +1132,30 @@ async function printViaPageIsolation(html: string): Promise<void> {
         position: absolute !important;
         top: 0 !important;
         left: 0 !important;
-        right: auto !important;
-        bottom: auto !important;
-        inset: auto !important;
+        width: 210mm !important;
+        height: 297mm !important;
+        max-height: 297mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        background: #ffffff !important;
+        page-break-after: avoid !important;
+        page-break-inside: avoid !important;
+        break-after: avoid !important;
+        break-inside: avoid !important;
+      }
+      #${prevId} .sheet-flat {
+        display: block !important;
         width: 210mm !important;
         height: 297mm !important;
         max-width: 210mm !important;
         max-height: 297mm !important;
         margin: 0 !important;
         padding: 0 !important;
-        overflow: hidden !important;
-        background: #ffffff !important;
-        z-index: 1 !important;
-        page-break-after: avoid !important;
-        page-break-before: avoid !important;
-        page-break-inside: avoid !important;
-        break-after: avoid !important;
-        break-before: avoid !important;
-        break-inside: avoid !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-        visibility: visible !important;
-      }
-      #${prevId} .sheet {
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 210mm !important;
-        height: 297mm !important;
-        max-height: 297mm !important;
-        margin: 0 !important;
-        overflow: hidden !important;
+        border: 0 !important;
+        object-fit: fill !important;
         page-break-after: avoid !important;
         page-break-inside: avoid !important;
-        break-after: avoid !important;
-        break-inside: avoid !important;
-      }
-      #${prevId} * {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
       }
       .alshantaf-print-close { display: none !important; }
     }
@@ -924,7 +1168,7 @@ async function printViaPageIsolation(html: string): Promise<void> {
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "alshantaf-print-close";
-  closeBtn.textContent = parsed.documentElement.lang === "ar" ? "إغلاق المعاينة" : "Close preview";
+  closeBtn.textContent = lang === "ar" ? "إغلاق المعاينة" : "Close preview";
   closeBtn.style.cssText =
     "position:fixed;top:10px;inset-inline-end:10px;z-index:2147483647;padding:10px 14px;border:0;border-radius:999px;background:#0f342f;color:#e8c98a;font:600 14px/1.2 system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.25)";
   document.body.appendChild(closeBtn);
@@ -936,7 +1180,6 @@ async function printViaPageIsolation(html: string): Promise<void> {
     gate.remove();
     host.remove();
     closeBtn.remove();
-    document.querySelectorAll("[data-blueprint-print-style]").forEach((n) => n.remove());
     window.removeEventListener("afterprint", onAfter);
   };
   const onAfter = () => cleanup();
@@ -944,7 +1187,7 @@ async function printViaPageIsolation(html: string): Promise<void> {
 
   try {
     await waitForElementImages(host);
-    await new Promise((r) => window.setTimeout(r, 200));
+    await new Promise((r) => window.setTimeout(r, 250));
     window.addEventListener("afterprint", onAfter);
     window.focus();
     window.print();
@@ -1402,9 +1645,25 @@ export async function printParcelBlueprint(opts: {
     return;
   }
 
-  // Mobile: never use hidden iframe — it prints the whole land-check form.
+  // Mobile / coarse pointers: flatten to one A4 JPEG so Safari cannot spill a blank page 2.
   if (needsPageIsolationPrint()) {
-    await printViaPageIsolation(html);
+    const pageJpeg = await composeBlueprintA4Jpeg({
+      lang: meta.lang,
+      brandName: meta.brandName,
+      sheetTitle: meta.sheetTitle,
+      motto,
+      location,
+      logoDataUrl: logo,
+      contextPng: opts.contextPng,
+      contourPng: opts.contourPng,
+      params: rows,
+      paramsLabel: meta.paramsLabel,
+      topViewLabel: meta.topViewLabel,
+      sideViewLabel: meta.sideViewLabel,
+      approxNote: meta.approxNote,
+      footerNote: meta.footerNote,
+    });
+    await printViaPageIsolation(pageJpeg, meta.lang);
     return;
   }
 
@@ -1416,8 +1675,23 @@ export async function printParcelBlueprint(opts: {
   const frameWin = iframe.contentWindow;
   if (!frameWin) {
     iframe.remove();
-    // Last resort
-    await printViaPageIsolation(html);
+    const pageJpeg = await composeBlueprintA4Jpeg({
+      lang: meta.lang,
+      brandName: meta.brandName,
+      sheetTitle: meta.sheetTitle,
+      motto,
+      location,
+      logoDataUrl: logo,
+      contextPng: opts.contextPng,
+      contourPng: opts.contourPng,
+      params: rows,
+      paramsLabel: meta.paramsLabel,
+      topViewLabel: meta.topViewLabel,
+      sideViewLabel: meta.sideViewLabel,
+      approxNote: meta.approxNote,
+      footerNote: meta.footerNote,
+    });
+    await printViaPageIsolation(pageJpeg, meta.lang);
     return;
   }
   try {
