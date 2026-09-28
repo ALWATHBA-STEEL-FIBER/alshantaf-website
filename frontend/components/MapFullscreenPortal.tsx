@@ -10,6 +10,7 @@ import {
   ringInteriorCentroid,
   type Coords,
 } from "@/lib/mapCoords";
+import { parcelDimDivIcon, parcelNumberDivIcon } from "@/lib/mapLabelIcons";
 import type { ParcelRing } from "@/components/LocationInput";
 import "leaflet/dist/leaflet.css";
 
@@ -251,19 +252,8 @@ export function MapFullscreenPortal({
       if (parcelNumber) {
         const center = ringInteriorCentroid(polygon[0]);
         if (center) {
-          const badge = L.divIcon({
-            className: "parcel-num-label",
-            html: `<div style="transform:translate(-50%,-50%);text-align:center;pointer-events:none">
-              <div style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;padding:8px 12px;border-radius:12px;background:rgba(15,52,47,.96);color:#e8c98a;box-shadow:0 4px 18px rgba(0,0,0,.4);border:1.5px solid #caa064">
-                <span style="font:600 9px/1 system-ui,sans-serif;letter-spacing:.06em;opacity:.85;text-transform:uppercase">${parcelLabel}</span>
-                <span style="font:800 15px/1.1 system-ui,sans-serif;letter-spacing:.02em">${parcelNumber}</span>
-              </div>
-            </div>`,
-            iconSize: [0, 0],
-            iconAnchor: [0, 0],
-          });
           L.marker([center.lat, center.lng], {
-            icon: badge,
+            icon: parcelNumberDivIcon(L, parcelLabel, parcelNumber),
             interactive: false,
             keyboard: false,
             zIndexOffset: 600,
@@ -283,15 +273,8 @@ export function MapFullscreenPortal({
             : 1;
         for (const edge of rawEdges) {
           const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
-          const rot = edge.bearingDeg.toFixed(1);
-          const icon = L.divIcon({
-            className: "parcel-dim-label",
-            html: `<span style="display:inline-block;padding:2px 7px;border-radius:999px;background:rgba(15,52,47,.96);color:#fff;font:700 10px/1.15 system-ui,sans-serif;white-space:nowrap;letter-spacing:.01em;box-shadow:0 0 0 1.5px #caa064,0 2px 6px rgba(0,0,0,.35);transform:translate(-50%,-50%) rotate(${rot}deg)">${label}</span>`,
-            iconSize: [0, 0],
-            iconAnchor: [0, 0],
-          });
           L.marker([edge.mid.lat, edge.mid.lng], {
-            icon,
+            icon: parcelDimDivIcon(L, label, edge.bearingDeg),
             interactive: false,
             keyboard: false,
             zIndexOffset: 400,

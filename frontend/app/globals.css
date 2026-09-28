@@ -53,6 +53,7 @@ body {
   pointer-events: none !important;
   background: transparent !important;
   border: none !important;
+  margin: 0 !important;
 }
 
 /* Contour topography basemap — gold isolines on deep green void */
