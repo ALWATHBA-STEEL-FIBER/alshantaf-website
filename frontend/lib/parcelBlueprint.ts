@@ -793,6 +793,9 @@ function waitForElementImages(root: ParentNode, timeoutMs = 8000): Promise<void>
  * Mobile-safe print: inject the sheet into the current document, hide everything
  * else with @media print, then call window.print(). Hidden iframes print the
  * land-check form as a multi-page screenshot on iOS/Android.
+ *
+ * iOS Safari creates a blank page-2 if anything exceeds one page height — keep
+ * the print root absolutely clipped to exactly one A4.
  */
 async function printViaPageIsolation(html: string): Promise<void> {
   const parsed = new DOMParser().parseFromString(html, "text/html");
@@ -800,12 +803,17 @@ async function printViaPageIsolation(html: string): Promise<void> {
   const prevGate = "alshantaf-blueprint-print-gate";
   document.getElementById(prevId)?.remove();
   document.getElementById(prevGate)?.remove();
+  document.querySelectorAll("[data-blueprint-print-style]").forEach((n) => n.remove());
 
   const host = document.createElement("div");
   host.id = prevId;
   host.setAttribute("data-blueprint-print", "1");
+
+  // Styles go in <head> (not inside the print host) so they don't affect layout height on iOS.
   for (const node of Array.from(parsed.head.querySelectorAll("style"))) {
-    host.appendChild(document.importNode(node, true));
+    const style = document.importNode(node, true) as HTMLStyleElement;
+    style.setAttribute("data-blueprint-print-style", "1");
+    document.head.appendChild(style);
   }
   for (const node of Array.from(parsed.body.childNodes)) {
     host.appendChild(document.importNode(node, true));
@@ -825,42 +833,87 @@ async function printViaPageIsolation(html: string): Promise<void> {
       }
     }
     @media print {
-      @page { size: A4 portrait; margin: 0; }
-      html, body {
+      @page { size: 210mm 297mm; margin: 0; }
+      html {
         width: 210mm !important;
         height: 297mm !important;
+        max-height: 297mm !important;
         margin: 0 !important;
         padding: 0 !important;
         overflow: hidden !important;
         background: #ffffff !important;
+      }
+      body.alshantaf-printing {
+        width: 210mm !important;
+        height: 297mm !important;
+        max-height: 297mm !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        overflow: hidden !important;
+        background: #ffffff !important;
+        position: relative !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
       body.alshantaf-printing > *:not(#${prevId}) {
         display: none !important;
+        width: 0 !important;
         height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
         overflow: hidden !important;
         visibility: hidden !important;
+        position: absolute !important;
+        left: -99999px !important;
       }
       #${prevId} {
         display: block !important;
-        position: static !important;
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: auto !important;
+        bottom: auto !important;
         inset: auto !important;
         width: 210mm !important;
         height: 297mm !important;
+        max-width: 210mm !important;
         max-height: 297mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
         overflow: hidden !important;
         background: #ffffff !important;
-        z-index: auto !important;
+        z-index: 1 !important;
+        page-break-after: avoid !important;
+        page-break-before: avoid !important;
+        page-break-inside: avoid !important;
+        break-after: avoid !important;
+        break-before: avoid !important;
+        break-inside: avoid !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
         visibility: visible !important;
+      }
+      #${prevId} .sheet {
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 210mm !important;
+        height: 297mm !important;
+        max-height: 297mm !important;
+        margin: 0 !important;
+        overflow: hidden !important;
+        page-break-after: avoid !important;
+        page-break-inside: avoid !important;
+        break-after: avoid !important;
+        break-inside: avoid !important;
       }
       #${prevId} * {
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-        visibility: visible !important;
       }
+      .alshantaf-print-close { display: none !important; }
     }
   `;
 
@@ -883,17 +936,11 @@ async function printViaPageIsolation(html: string): Promise<void> {
     gate.remove();
     host.remove();
     closeBtn.remove();
+    document.querySelectorAll("[data-blueprint-print-style]").forEach((n) => n.remove());
     window.removeEventListener("afterprint", onAfter);
   };
   const onAfter = () => cleanup();
   closeBtn.addEventListener("click", cleanup);
-
-  // Hide close control when actually printing
-  gate.textContent += `
-    @media print {
-      .alshantaf-print-close { display: none !important; }
-    }
-  `;
 
   try {
     await waitForElementImages(host);
@@ -901,7 +948,6 @@ async function printViaPageIsolation(html: string): Promise<void> {
     window.addEventListener("afterprint", onAfter);
     window.focus();
     window.print();
-    // Resolve immediately (print UI is async). Clean up after dialog closes or timeout.
     window.setTimeout(cleanup, 90_000);
   } catch (err) {
     cleanup();
@@ -987,12 +1033,13 @@ export async function printParcelBlueprint(opts: {
 <meta charset="utf-8" />
 <title>${escapeHtml(meta.brandName)} — ${escapeHtml(meta.sheetTitle)}</title>
 <style>
-  /* Official A4 letterhead — system fonts only (CSP / offline print safe). */
-  @page { size: A4 portrait; margin: 0; }
+  /* Official A4 letterhead — clipped to one page (iOS Safari safe). */
+  @page { size: 210mm 297mm; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
     width: 210mm;
     height: 297mm;
+    max-height: 297mm;
     overflow: hidden;
     font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
     color: #111111;
@@ -1003,33 +1050,38 @@ export async function printParcelBlueprint(opts: {
   .sheet {
     width: 210mm;
     height: 297mm;
-    padding: 7mm 8mm 6mm;
+    max-height: 297mm;
+    padding: 5mm 6mm 4mm;
     display: grid;
-    grid-template-rows: 28mm minmax(0, 1.25fr) minmax(0, 1.15fr) 16mm;
-    gap: 3.5mm;
+    grid-template-rows: 22mm minmax(0, 1.2fr) minmax(0, 1.1fr) 14mm;
+    gap: 2.5mm;
     overflow: hidden;
+    page-break-after: avoid;
     page-break-inside: avoid;
+    break-after: avoid;
     break-inside: avoid;
-    border: 0.35mm solid #111111;
+    border: 0.3mm solid #111111;
   }
   .header {
     direction: ltr;
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    gap: 3mm;
-    min-height: 28mm;
-    padding: 1.5mm 0 2.5mm;
-    border-bottom: 0.45mm solid #111111;
+    gap: 2mm;
+    height: 22mm;
+    max-height: 22mm;
+    min-height: 0;
+    padding: 0 0 1.5mm;
+    border-bottom: 0.4mm solid #111111;
     overflow: hidden;
   }
   .header .motto {
     text-align: left;
-    font-size: 7.5pt;
+    font-size: 6.5pt;
     font-weight: 600;
-    line-height: 1.35;
+    line-height: 1.3;
     color: #222222;
-    max-width: 58mm;
+    max-width: 56mm;
     justify-self: start;
   }
   .header .logo-wrap {
@@ -1039,42 +1091,42 @@ export async function printParcelBlueprint(opts: {
     justify-self: center;
   }
   .header .logo-wrap img {
-    width: 22mm;
-    height: 22mm;
+    width: 18mm;
+    height: 18mm;
     object-fit: contain;
     display: block;
   }
   .header .title-block {
     text-align: right;
     justify-self: end;
-    max-width: 62mm;
+    max-width: 60mm;
   }
   .header .brand {
     font-weight: 800;
-    font-size: 12.5pt;
+    font-size: 11pt;
     color: #0f342f;
-    line-height: 1.15;
+    line-height: 1.1;
   }
   .header .sub {
-    font-size: 8.5pt;
+    font-size: 7.5pt;
     font-weight: 600;
     color: #222222;
-    margin-top: 0.8mm;
-    line-height: 1.25;
+    margin-top: 0.5mm;
+    line-height: 1.2;
   }
   .top {
     display: grid;
-    grid-template-columns: 72mm minmax(0, 1fr);
-    gap: 3.5mm;
+    grid-template-columns: 68mm minmax(0, 1fr);
+    gap: 2.5mm;
     min-height: 0;
     height: 100%;
     overflow: hidden;
   }
   .panel {
     background: #ffffff;
-    border: 0.3mm solid #222222;
+    border: 0.25mm solid #222222;
     border-radius: 0;
-    padding: 2.5mm;
+    padding: 2mm;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -1083,12 +1135,12 @@ export async function printParcelBlueprint(opts: {
     break-inside: avoid;
   }
   .panel h2 {
-    margin: 0 0 1.5mm;
-    font-size: 8.5pt;
+    margin: 0 0 1mm;
+    font-size: 8pt;
     font-weight: 800;
     color: #111111;
-    border-bottom: 0.25mm solid #222222;
-    padding-bottom: 1.2mm;
+    border-bottom: 0.2mm solid #222222;
+    padding-bottom: 1mm;
     flex-shrink: 0;
     letter-spacing: 0.01em;
   }
@@ -1103,7 +1155,7 @@ export async function printParcelBlueprint(opts: {
   }
   .view-panel {
     background: #ffffff;
-    padding: 2.8mm;
+    padding: 2mm;
   }
   .view-panel .frame {
     flex: 1;
@@ -1114,7 +1166,7 @@ export async function printParcelBlueprint(opts: {
     overflow: hidden;
     background: #ffffff;
     border: 0.2mm solid #cccccc;
-    padding: 1.5mm;
+    padding: 1mm;
   }
   .view-panel img {
     max-width: 100%;
@@ -1134,33 +1186,33 @@ export async function printParcelBlueprint(opts: {
     justify-content: space-between;
     gap: 2mm;
     margin: 0;
-    padding: 0.6mm 0;
+    padding: 0.45mm 0;
     border-bottom: 0.15mm solid rgba(17,17,17,0.12);
     flex-shrink: 0;
   }
   .lab {
-    font-size: 6.5pt;
+    font-size: 6pt;
     font-weight: 700;
     color: #444444;
     margin: 0;
     flex: 0 1 auto;
-    line-height: 1.25;
+    line-height: 1.2;
   }
   .val {
-    font-size: 7.5pt;
+    font-size: 7pt;
     font-weight: 600;
     color: #111111;
-    line-height: 1.25;
+    line-height: 1.2;
     word-break: break-word;
     text-align: end;
     max-width: 62%;
   }
   .note {
-    margin-top: 1.2mm;
-    font-size: 5.5pt;
+    margin-top: 0.8mm;
+    font-size: 5pt;
     color: #555555;
-    line-height: 1.35;
-    padding-top: 1.2mm;
+    line-height: 1.25;
+    padding-top: 0.8mm;
     border-top: 0.2mm dashed rgba(17,17,17,0.25);
     flex-shrink: 0;
   }
@@ -1168,11 +1220,13 @@ export async function printParcelBlueprint(opts: {
     direction: ltr;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 4mm;
+    gap: 3mm;
     align-items: end;
-    min-height: 16mm;
-    padding-top: 2mm;
-    border-top: 0.45mm solid #111111;
+    height: 14mm;
+    max-height: 14mm;
+    min-height: 0;
+    padding-top: 1.5mm;
+    border-top: 0.4mm solid #111111;
     overflow: hidden;
   }
   .footer-left {
@@ -1180,25 +1234,25 @@ export async function printParcelBlueprint(opts: {
     justify-self: start;
   }
   .footer-url {
-    font-size: 8pt;
+    font-size: 7.5pt;
     font-weight: 800;
     color: #0f342f;
     direction: ltr;
     unicode-bidi: isolate;
   }
   .footer-loc {
-    margin-top: 0.8mm;
-    font-size: 6.5pt;
+    margin-top: 0.4mm;
+    font-size: 6pt;
     font-weight: 600;
     color: #333333;
-    line-height: 1.3;
+    line-height: 1.2;
     max-width: 88mm;
   }
   .footer-note {
-    margin-top: 1mm;
-    font-size: 5pt;
+    margin-top: 0.5mm;
+    font-size: 4.5pt;
     color: #666666;
-    line-height: 1.25;
+    line-height: 1.2;
     max-width: 95mm;
   }
   .footer-right {
@@ -1209,21 +1263,23 @@ export async function printParcelBlueprint(opts: {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 0.2mm;
-    margin-bottom: 1.4mm;
+    gap: 0;
+    margin-bottom: 0.8mm;
   }
   .contact-row:last-child { margin-bottom: 0; }
   .contact-name {
-    font-size: 7pt;
+    font-size: 6.5pt;
     font-weight: 700;
     color: #111111;
+    line-height: 1.15;
   }
   .contact-phone {
-    font-size: 8pt;
+    font-size: 7.5pt;
     font-weight: 800;
     color: #0f342f;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
+    line-height: 1.15;
   }
   @media print {
     html, body, .sheet {
