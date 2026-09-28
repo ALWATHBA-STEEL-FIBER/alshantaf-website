@@ -62,13 +62,21 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
 
       this._corners = L.layerGroup().addTo(map);
 
+      // Labels above outline/corners (overlayPane=400) — stay inside the map.
+      if (!map.getPane("parcelLabelPane")) {
+        map.createPane("parcelLabelPane");
+        const pane = map.getPane("parcelLabelPane")!;
+        pane.style.zIndex = "650";
+        pane.style.pointerEvents = "none";
+      }
       const canvas = L.DomUtil.create("canvas", "parcel-canvas-layer") as HTMLCanvasElement;
       canvas.style.pointerEvents = "none";
       canvas.style.position = "absolute";
       canvas.style.left = "0";
       canvas.style.top = "0";
+      canvas.style.zIndex = "1";
       this._canvas = canvas;
-      map.getPanes().overlayPane.appendChild(canvas);
+      map.getPane("parcelLabelPane")!.appendChild(canvas);
 
       this._onRedraw = () => {
         if (this._raf) cancelAnimationFrame(this._raf);
