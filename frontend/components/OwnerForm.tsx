@@ -580,7 +580,6 @@ export function OwnerForm() {
               )}
             </div>
             <LocationInput
-              key={dlsMapStatus === "ready" ? "dls-locked" : "dls-editable"}
               value={fields.coordinates}
               onChange={(v) => setFields((f) => ({ ...f, coordinates: v }))}
               address={fields.address}

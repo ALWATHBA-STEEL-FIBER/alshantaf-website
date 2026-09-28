@@ -149,3 +149,59 @@ export function sampleBilinear(elev: Float32Array, w: number, h: number, x: numb
   const d = elev[(y0 + 1) * w + x0 + 1]!;
   return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
 }
+
+/**
+ * Gaussian-ish box blur on a height field so marching-squares isolines
+ * read as smooth topography instead of stair-step DEM noise.
+ */
+export function smoothElevGrid(elev: Float32Array, w: number, h: number, passes = 2): Float32Array {
+  let src = elev;
+  let dst = new Float32Array(w * h);
+  const at = (grid: Float32Array, x: number, y: number) =>
+    grid[Math.max(0, Math.min(h - 1, y)) * w + Math.max(0, Math.min(w - 1, x))]!;
+
+  for (let pass = 0; pass < passes; pass++) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        // 3×3 kernel, centre weighted higher
+        const v =
+          at(src, x - 1, y - 1) * 1 +
+          at(src, x, y - 1) * 2 +
+          at(src, x + 1, y - 1) * 1 +
+          at(src, x - 1, y) * 2 +
+          at(src, x, y) * 4 +
+          at(src, x + 1, y) * 2 +
+          at(src, x - 1, y + 1) * 1 +
+          at(src, x, y + 1) * 2 +
+          at(src, x + 1, y + 1) * 1;
+        dst[y * w + x] = v / 16;
+      }
+    }
+    const tmp = src === elev ? new Float32Array(w * h) : src;
+    src = dst;
+    dst = tmp;
+  }
+  return src === elev ? elev.slice() : src;
+}
+
+/** Hypsometric tint: deep green valleys → gold ridges (0..1 normalized elev). */
+export function elevTintRgb(t: number): [number, number, number] {
+  const u = Math.max(0, Math.min(1, t));
+  // #0a2e28 → #1f554a → #c89a58 → #e8c98a
+  const stops: Array<[number, number, number, number]> = [
+    [0, 10, 46, 40],
+    [0.35, 15, 85, 74],
+    [0.65, 200, 154, 88],
+    [1, 232, 201, 138],
+  ];
+  let i = 0;
+  while (i < stops.length - 2 && u > stops[i + 1]![0]) i++;
+  const a = stops[i]!;
+  const b = stops[i + 1]!;
+  const f = (u - a[0]) / (b[0] - a[0] || 1);
+  return [
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f),
+    Math.round(a[3] + (b[3] - a[3]) * f),
+  ];
+}

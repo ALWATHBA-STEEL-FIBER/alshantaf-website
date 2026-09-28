@@ -239,6 +239,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     onBlueprintReadyChange?.(ready);
   }
   const locked = readOnly || lockEditing;
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
   const initial = parseCoords(value);
   const [draft, setDraft] = useState(initial ? coordsToString(initial) : "");
   const [selected, setSelected] = useState<Coords | null>(initial);
@@ -275,7 +277,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   }, [value]);
 
   function commit(coords: Coords, nextAddress?: string) {
-    if (locked) return;
+    if (lockedRef.current) return;
     setSelected(coords);
     setDraft(coordsToString(coords));
     onChange(coordsToString(coords));
@@ -287,8 +289,20 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   useEffect(() => {
     if (!mapDivRef.current || mapRef.current) return;
     let cancelled = false;
-    import("leaflet").then((L) => {
+    let clickHandler: ((event: import("leaflet").LeafletMouseEvent) => void) | null = null;
+
+    const boot = async () => {
+      const L = await import("leaflet");
       if (cancelled || !mapDivRef.current) return;
+
+      // Wait until the container has a real size — init with 0×0 is a common blank-map cause.
+      for (let i = 0; i < 12 && !cancelled; i++) {
+        const el = mapDivRef.current;
+        if (el && el.clientWidth > 20 && el.clientHeight > 20) break;
+        await new Promise((r) => window.setTimeout(r, 50));
+      }
+      if (cancelled || !mapDivRef.current || mapRef.current) return;
+
       const start = selected ? ([selected.lat, selected.lng] as [number, number]) : DEFAULT_CENTER;
       const map = L.map(mapDivRef.current, {
         zoomControl: true,
@@ -317,21 +331,33 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       satLayerRef.current = sat;
       topoLayerRef.current = topo;
       mapRef.current = map;
+
+      clickHandler = (event) => {
+        if (lockedRef.current) return;
+        placeMarker(L, map, event.latlng.lat, event.latlng.lng, true);
+        commit({ lat: event.latlng.lat, lng: event.latlng.lng });
+      };
+      map.on("click", clickHandler);
+
+      // Extra invalidate passes after layout / fonts / sibling UI settle
+      requestAnimationFrame(() => {
+        map.invalidateSize({ animate: false });
+        window.setTimeout(() => map.invalidateSize({ animate: false }), 120);
+        window.setTimeout(() => map.invalidateSize({ animate: false }), 400);
+      });
       setMapReady(true);
-      if (!locked) {
-        map.on("click", (event) => {
-          placeMarker(L, map, event.latlng.lat, event.latlng.lng, true);
-          commit({ lat: event.latlng.lat, lng: event.latlng.lng });
-        });
-      }
-    }).catch(() => {
+    };
+
+    boot().catch(() => {
       setStatus("error");
       setMessage(lp.loading);
     });
     return () => {
       cancelled = true;
       setMapReady(false);
-      mapRef.current?.remove();
+      const map = mapRef.current;
+      if (map && clickHandler) map.off("click", clickHandler);
+      map?.remove();
       mapRef.current = null;
       markerRef.current = null;
       polygonRef.current = null;
@@ -340,9 +366,24 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       satLayerRef.current = null;
       topoLayerRef.current = null;
     };
-    // Leaflet must be initialized once per container; lockEditing changes remount via key from parent if needed.
+    // Leaflet must be initialized once per container; lockEditing toggles via effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep interaction mode in sync without remounting (remounts caused intermittent blank maps).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    if (locked) {
+      map.doubleClickZoom.disable();
+      map.boxZoom.disable();
+      if (markerRef.current?.dragging) markerRef.current.dragging.disable();
+    } else {
+      map.doubleClickZoom.enable();
+      map.boxZoom.enable();
+      if (markerRef.current?.dragging) markerRef.current.dragging.enable();
+    }
+  }, [locked, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -360,6 +401,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         map.removeLayer(layer);
       }
     }
+    // Force tile redraw after basemap switch / container reveal
+    window.setTimeout(() => map.invalidateSize({ animate: false }), 40);
   }, [basemap, mapReady]);
 
   function placeMarker(
@@ -501,12 +544,17 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => refresh()) : null;
     ro?.observe(el);
-    const t = window.setTimeout(refresh, 80);
+    const t1 = window.setTimeout(refresh, 80);
+    const t2 = window.setTimeout(refresh, 320);
+    // After loading overlay clears, tiles often need a second size pass
+    const t3 = !loading ? window.setTimeout(refresh, 160) : 0;
     return () => {
       ro?.disconnect();
-      window.clearTimeout(t);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      if (t3) window.clearTimeout(t3);
     };
-  }, [loading, basemap, mapReady]);
+  }, [loading, basemap, mapReady, polygon]);
 
   async function search() {
     if (locked || query.trim().length < 2) return;

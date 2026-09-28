@@ -4,6 +4,7 @@ import {
   contourSegments,
   elevRange,
   pointInPoly,
+  smoothElevGrid,
 } from "@/lib/elevationContours";
 import {
   formatMeters,
@@ -490,7 +491,7 @@ export function drawParcelContourMap(opts: {
     y: oy - (v - bounds.cy) * scale,
   });
 
-  const elev = Float32Array.from(opts.grid.elevations);
+  const elev = smoothElevGrid(Float32Array.from(opts.grid.elevations), opts.grid.cols, opts.grid.rows, 3);
   const { min: zMin, max: zMax } = elevRange(elev);
   const interval = Math.min(2.5, contourInterval(16, zMax - zMin));
   const levels = collectContourLevels(zMin, zMax, interval, 64);

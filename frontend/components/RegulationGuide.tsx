@@ -12,6 +12,8 @@ type Props = {
   readOnly?: boolean;
   /** Land-check shows all zoning; listing/owner forms stay industrial-only. */
   scope?: "all" | "industrial";
+  /** Mark the select as required (land-check gate before DLS fetch). */
+  required?: boolean;
   className?: string;
 };
 
@@ -32,7 +34,7 @@ function formatSetbackValue(
   return raw;
 }
 
-export function RegulationGuide({ value, onChange, readOnly = false, scope = "all", className }: Props) {
+export function RegulationGuide({ value, onChange, readOnly = false, scope = "all", required = false, className }: Props) {
   const { t } = useLanguage();
   const selected = value || null;
   const guide = selected ? t.regulations.types[selected] : null;
@@ -43,10 +45,14 @@ export function RegulationGuide({ value, onChange, readOnly = false, scope = "al
     <div className={className ?? "rounded-2xl border border-line bg-white/80 p-4 sm:p-5"}>
       {!readOnly && (
         <div>
-          <label className="text-xs font-bold text-ink-soft mb-1 block">{t.regulations.selectLabel}</label>
+          <label className="text-xs font-bold text-ink-soft mb-1 block">
+            {t.regulations.selectLabel}
+            {required ? <span className="text-red-600"> *</span> : null}
+          </label>
           <select
             className="w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold"
             value={value}
+            required={required}
             onChange={(e) => onChange?.(e.target.value as IndustryType | "")}
           >
             <option value="">{t.regulations.selectPlaceholder}</option>

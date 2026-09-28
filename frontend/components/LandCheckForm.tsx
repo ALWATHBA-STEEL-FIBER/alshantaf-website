@@ -178,6 +178,16 @@ export function LandCheckForm() {
     const { governorate, directorate, village, basin, neighborhood, parcel } = fields;
     const parcelNo = parcel.trim();
     const timer = setTimeout(async () => {
+      if (!industryType) {
+        setDlsHint(null);
+        setDlsHintStatus("idle");
+        setDlsMapStatus("idle");
+        setParcelPolygon(null);
+        setDlsKey(null);
+        setAreaSqm(null);
+        setPerimeterM(null);
+        return;
+      }
       if (!governorate || !directorate || !village || !basin || !neighborhood || !parcelNo) {
         setDlsHint(null);
         setDlsHintStatus("idle");
@@ -256,11 +266,15 @@ export function LandCheckForm() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [fields.governorate, fields.directorate, fields.village, fields.basin, fields.neighborhood, fields.parcel, lang]);
+  }, [fields.governorate, fields.directorate, fields.village, fields.basin, fields.neighborhood, fields.parcel, industryType, lang]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (!industryType) {
+      setError(t.landCheck.regulationRequired);
+      return;
+    }
     if (!fields.governorate || !fields.directorate || !fields.village || !fields.basin || !fields.neighborhood || !fields.parcel) {
       setError(t.landCheck.requiredError);
       return;
@@ -409,22 +423,34 @@ export function LandCheckForm() {
             <input className={inputClass} value={fields.parcel} onChange={updateDigits("parcel")} required />
           </div>
 
+          <p className="text-xs font-bold text-green">{t.landCheck.regulationSection}</p>
+          <RegulationGuide
+            value={industryType}
+            onChange={(key) => {
+              setIndustryType(key);
+              if (key) patchJourney({ industryType: key });
+            }}
+            scope="all"
+            required
+          />
+
           <div className="rounded-2xl border border-line bg-white/60 p-3 sm:p-4 flex flex-col gap-3">
             <p className="text-xs font-bold text-green">{t.owners.dlsMapSection}</p>
             <p className="text-[11px] text-ink-soft -mt-1">
-              {dlsMapStatus === "loading"
-                ? t.owners.dlsMapLoading
-                : dlsMapStatus === "ready"
-                  ? t.owners.dlsMapReady
-                  : dlsMapStatus === "missing"
-                    ? t.owners.dlsMapMissing
-                    : dlsMapStatus === "failed"
-                      ? t.owners.dlsMapFailed
-                      : t.owners.dlsMapIdle}
+              {!industryType
+                ? t.owners.dlsMapNeedRegulation
+                : dlsMapStatus === "loading"
+                  ? t.owners.dlsMapLoading
+                  : dlsMapStatus === "ready"
+                    ? t.owners.dlsMapReady
+                    : dlsMapStatus === "missing"
+                      ? t.owners.dlsMapMissing
+                      : dlsMapStatus === "failed"
+                        ? t.owners.dlsMapFailed
+                        : t.owners.dlsMapIdle}
             </p>
             <LocationInput
               ref={locationRef}
-              key={dlsMapStatus === "ready" ? "dls-locked" : "dls-editable"}
               value={fields.coordinates}
               onChange={(v) => setFields((f) => ({ ...f, coordinates: v }))}
               address={fields.address}
@@ -474,16 +500,6 @@ export function LandCheckForm() {
               />
             )}
           </div>
-
-          <p className="text-xs font-bold text-green">{t.landCheck.regulationSection}</p>
-          <RegulationGuide
-            value={industryType}
-            onChange={(key) => {
-              setIndustryType(key);
-              if (key) patchJourney({ industryType: key });
-            }}
-            scope="all"
-          />
 
           <div>
             <label className={labelClass}>{t.landCheck.notes}</label>

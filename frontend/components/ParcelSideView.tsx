@@ -12,7 +12,9 @@ import {
   contourInterval,
   contourSegments,
   elevRange,
+  elevTintRgb,
   pointInPoly,
+  smoothElevGrid,
 } from "@/lib/elevationContours";
 import {
   drawParcelContextMap,
@@ -128,8 +130,9 @@ function makeLabelSprite(
     depthWrite: false,
   });
   const sprite = new THREE.Sprite(mat);
-  const scale = major ? 14 : 11;
-  sprite.scale.set(scale, scale * 0.25, 1);
+  sprite.renderOrder = 10;
+  const scale = major ? 16 : 13;
+  sprite.scale.set(scale, scale * 0.28, 1);
   return sprite;
 }
 
@@ -307,10 +310,12 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       if (cancelled) return;
       gridRef.current = grid;
 
-      const elev = Float32Array.from(grid.elevations);
+      const rawElev = Float32Array.from(grid.elevations);
+      const elev = smoothElevGrid(rawElev, grid.cols, grid.rows, 3);
       const { min: zMin, max: zMax } = elevRange(elev);
       const relief = Math.max(0.5, zMax - zMin);
-      const exag = Math.min(8, Math.max(2.2, (model.span * 0.22) / relief));
+      // Stronger vertical exaggeration so relief reads clearly in the viewport
+      const exag = Math.min(12, Math.max(3.2, (model.span * 0.32) / relief));
       const interval = Math.min(2.5, contourInterval(16, relief));
       intervalRef.current = interval;
       setElevHint(`${elevLabel(zMin, lang)} – ${elevLabel(zMax, lang)}`);
@@ -343,10 +348,13 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       mount.replaceChildren(renderer.domElement);
       bundleRef.current = { THREE, scene, camera, renderer };
 
-      scene.add(new THREE.AmbientLight(0xc89a58, 0.55));
-      const key = new THREE.DirectionalLight(0xfff2d8, 0.85);
-      key.position.set(-1, 2, 1);
+      scene.add(new THREE.AmbientLight(0xd4b07a, 0.72));
+      const key = new THREE.DirectionalLight(0xfff6e4, 1.15);
+      key.position.set(-1.2, 2.4, 1.1);
       scene.add(key);
+      const fill = new THREE.DirectionalLight(0x7a9e94, 0.45);
+      fill.position.set(1.4, 0.8, -1);
+      scene.add(fill);
 
       const contourGroup = new THREE.Group();
       scene.add(contourGroup);
@@ -372,20 +380,29 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         const positions: number[] = [];
         let labelPos: import("three").Vector3 | null = null;
         let bestLen = 0;
+        let labelAny: import("three").Vector3 | null = null;
+        let bestAny = 0;
         for (const [x0, y0, x1, y1] of segs) {
           const midX = (x0 + x1) / 2;
           const midY = (y0 + y1) / 2;
           const midLat = grid.maxLat - (midY / Math.max(1, grid.rows - 1)) * (grid.maxLat - grid.minLat);
           const midLng = grid.minLng + (midX / Math.max(1, grid.cols - 1)) * (grid.maxLng - grid.minLng);
           const midEnu = toLocalEnu(midLat, midLng, origin.lat, origin.lng);
-          if (!pointInPoly(midEnu.x, midEnu.y, polyEnu)) continue;
           const a = toWorldFrac(x0, y0, level);
           const b = toWorldFrac(x1, y1, level);
-          positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
-          const len = a.distanceTo(b);
-          if (len > bestLen) {
-            bestLen = len;
-            labelPos = a.clone().add(b).multiplyScalar(0.5);
+          const inside = pointInPoly(midEnu.x, midEnu.y, polyEnu);
+          if (inside) {
+            positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+            const len = a.distanceTo(b);
+            if (len > bestLen) {
+              bestLen = len;
+              labelPos = a.clone().add(b).multiplyScalar(0.5);
+            }
+          }
+          const anyLen = a.distanceTo(b);
+          if (anyLen > bestAny) {
+            bestAny = anyLen;
+            labelAny = a.clone().add(b).multiplyScalar(0.5);
           }
         }
         if (positions.length < 6) continue;
@@ -395,16 +412,21 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         const mat = new THREE.LineBasicMaterial({
           color: major ? 0xe8c98a : 0xc89a58,
           transparent: true,
-          opacity: major ? 0.95 : 0.72,
+          opacity: major ? 1 : 0.82,
           depthWrite: false,
+          depthTest: true,
         });
         disposables.push(mat);
-        contourGroup.add(new THREE.LineSegments(geo, mat));
+        const lines = new THREE.LineSegments(geo, mat);
+        lines.renderOrder = 2;
+        contourGroup.add(lines);
 
-        if (labelPos && bestLen > 0.4) {
+        // Always label every contour level that has geometry (prefer inside parcel)
+        const labelAt = labelPos ?? labelAny;
+        if (labelAt) {
           const sprite = makeLabelSprite(THREE, elevLabel(level, lang), major);
-          sprite.position.copy(labelPos);
-          sprite.position.y += major ? 1.2 : 0.7;
+          sprite.position.copy(labelAt);
+          sprite.position.y += major ? 1.8 : 1.2;
           const map = sprite.material.map;
           if (map) disposables.push(map);
           disposables.push(sprite.material);
@@ -414,16 +436,21 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
 
       {
         const positions: number[] = [];
+        const colors: number[] = [];
         const indices: number[] = [];
         const cols = grid.cols;
         const rows = grid.rows;
         const inside = new Uint8Array(cols * rows);
+        const range = Math.max(0.01, zMax - zMin);
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const enu = toLocalEnu(latAt(r), lngAt(c), origin.lat, origin.lng);
             inside[r * cols + c] = pointInPoly(enu.x, enu.y, polyEnu) ? 1 : 0;
-            const v = toWorld(c, r, elev[r * cols + c]!);
+            const e = elev[r * cols + c]!;
+            const v = toWorld(c, r, e);
             positions.push(v.x, v.y, v.z);
+            const [cr, cg, cb] = elevTintRgb((e - zMin) / range);
+            colors.push(cr / 255, cg / 255, cb / 255);
           }
         }
         for (let r = 0; r < rows - 1; r++) {
@@ -439,19 +466,38 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         if (indices.length) {
           const geo = new THREE.BufferGeometry();
           geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+          geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
           geo.setIndex(indices);
           geo.computeVertexNormals();
           disposables.push(geo);
           const mat = new THREE.MeshStandardMaterial({
-            color: 0x0f342f,
-            metalness: 0.15,
-            roughness: 0.85,
+            vertexColors: true,
+            metalness: 0.08,
+            roughness: 0.62,
             transparent: true,
-            opacity: 0.55,
+            opacity: 0.92,
             side: THREE.DoubleSide,
+            flatShading: false,
           });
           disposables.push(mat);
-          scene.add(new THREE.Mesh(geo, mat));
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.renderOrder = 0;
+          scene.add(mesh);
+
+          // Slightly lifted wire-lite overlay for volume edges
+          const wire = new THREE.Mesh(
+            geo,
+            new THREE.MeshBasicMaterial({
+              color: 0xc89a58,
+              wireframe: true,
+              transparent: true,
+              opacity: 0.12,
+              depthWrite: false,
+            })
+          );
+          wire.renderOrder = 1;
+          disposables.push(wire.material);
+          scene.add(wire);
         }
       }
 
@@ -469,14 +515,16 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
             Math.min(grid.rows - 1, Math.round(((grid.maxLat - lat) / (grid.maxLat - grid.minLat)) * (grid.rows - 1)))
           );
           const e = elev[row * grid.cols + col]!;
-          outline.push(p.x, (e - zMin) * exag + 0.35, -p.y);
+          outline.push(p.x, (e - zMin) * exag + 0.45, -p.y);
         }
         const geo = new THREE.BufferGeometry();
         geo.setAttribute("position", new THREE.Float32BufferAttribute(outline, 3));
         disposables.push(geo);
-        const mat = new THREE.LineBasicMaterial({ color: 0xe8c98a });
+        const mat = new THREE.LineBasicMaterial({ color: 0xe8c98a, linewidth: 2 });
         disposables.push(mat);
-        scene.add(new THREE.Line(geo, mat));
+        const line = new THREE.Line(geo, mat);
+        line.renderOrder = 3;
+        scene.add(line);
       }
 
       const orbit = new OrbitControls(camera, renderer.domElement);

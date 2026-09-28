@@ -10,6 +10,7 @@ import {
   decodeTerrarium,
   elevRange,
   sampleBilinear,
+  smoothElevGrid,
 } from "@/lib/elevationContours";
 
 type LeafletNS = typeof import("leaflet");
@@ -71,30 +72,54 @@ function drawContours(
   drawSet(LINE, 1.05, false);
   drawSet(MAJOR, 1.75, true);
 
-  // Approximate elevation labels (m) on major contour midpoints
+  // Elevation labels on every major contour — always place at least one when segs exist
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
+  const placed: Array<{ x: number; y: number }> = [];
+  const tooClose = (x: number, y: number) =>
+    placed.some((p) => Math.hypot(p.x - x, p.y - y) < 36);
+
   for (const level of levels) {
     const major = Math.round(level / interval) % 5 === 0;
     if (!major) continue;
     const segs = contourSegments(elev, w, h, level);
+    if (!segs.length) continue;
+
+    // Prefer longest mid-tile segment; fall back to any segment midpoint
     let best: { x: number; y: number; len: number } | null = null;
+    let fallback: { x: number; y: number; len: number } | null = null;
     for (const [x0, y0, x1, y1] of segs) {
       const ax = x0 * scaleX;
       const ay = y0 * scaleY;
       const bx = x1 * scaleX;
       const by = y1 * scaleY;
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
       const len = Math.hypot(bx - ax, by - ay);
-      if (!best || len > best.len) best = { x: (ax + bx) / 2, y: (ay + by) / 2, len };
+      const inPad = mx > 28 && mx < RENDER_SIZE - 28 && my > 28 && my < RENDER_SIZE - 28;
+      if (!fallback || len > fallback.len) fallback = { x: mx, y: my, len };
+      if (inPad && (!best || len > best.len)) best = { x: mx, y: my, len };
     }
-    if (!best || best.len < 14) continue;
+    const pick = best ?? fallback;
+    if (!pick) continue;
+    let lx = Math.max(22, Math.min(RENDER_SIZE - 22, pick.x));
+    let ly = Math.max(16, Math.min(RENDER_SIZE - 16, pick.y));
+    // Nudge away from previously placed labels so numbers stay readable
+    if (tooClose(lx, ly)) {
+      lx = Math.max(22, Math.min(RENDER_SIZE - 22, lx + 18));
+      ly = Math.max(16, Math.min(RENDER_SIZE - 16, ly + 14));
+    }
     const text = `${Math.round(level)} m`;
-    ctx.font = "bold 11px system-ui,sans-serif";
+    ctx.font = "bold 12px system-ui,sans-serif";
     const tw = ctx.measureText(text).width;
-    ctx.fillStyle = "rgba(7,24,22,0.85)";
-    ctx.fillRect(best.x - tw / 2 - 3, best.y - 7, tw + 6, 14);
+    ctx.fillStyle = "rgba(7,24,22,0.92)";
+    ctx.fillRect(lx - tw / 2 - 4, ly - 8, tw + 8, 16);
+    ctx.strokeStyle = "rgba(232,201,138,0.55)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(lx - tw / 2 - 4, ly - 8, tw + 8, 16);
     ctx.fillStyle = "#e8c98a";
-    ctx.fillText(text, best.x, best.y);
+    ctx.fillText(text, lx, ly);
+    placed.push({ x: lx, y: ly });
   }
 }
 
@@ -175,6 +200,9 @@ export function createContourTopoLayer(L: LeafletNS) {
             gw = 256;
             gh = 256;
           }
+
+          // Soften DEM stair-steps before isolines
+          grid = smoothElevGrid(grid, gw, gh, scale > 1 ? 3 : 2);
 
           const { min, max } = elevRange(grid);
           const interval = contourInterval(coords.z, max - min);
