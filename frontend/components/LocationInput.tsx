@@ -8,16 +8,14 @@ import {
   formatSideMeters,
   mapsLinkFromCoords,
   parseCoords,
-  ringCornerPoints,
   ringEdgeDimensions,
-  ringInteriorCentroid,
   ringOrientedExtents,
   type Coords,
 } from "@/lib/mapCoords";
 import { ParcelSideView, type ParcelSideViewHandle } from "@/components/ParcelSideView";
 import { MapFullscreenPortal } from "@/components/MapFullscreenPortal";
 import type { BlueprintMeta } from "@/lib/parcelBlueprint";
-import { parcelDimDivIcon, parcelNumberDivIcon } from "@/lib/mapLabelIcons";
+import { createParcelCanvasLayer, type ParcelCanvasOpts } from "@/lib/parcelCanvasLayer";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
@@ -274,13 +272,11 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [basemap, setBasemap] = useState<Basemap>("map");
   const [drawDimensions, setDrawDimensions] = useState(true);
   const [mapFullscreen, setMapFullscreen] = useState(false);
-  const [dimsEpoch, setDimsEpoch] = useState(0);
   const mapShellRef = useRef<HTMLDivElement>(null);
   const mapDivRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const markerRef = useRef<import("leaflet").Marker | null>(null);
-  const polygonRef = useRef<import("leaflet").LayerGroup | null>(null);
-  const cornerGlowRef = useRef<import("leaflet").LayerGroup | null>(null);
+  const polygonRef = useRef<import("leaflet").Layer | null>(null);
   const dimensionLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const osmLayerRef = useRef<import("leaflet").TileLayer | null>(null);
   const satLayerRef = useRef<import("leaflet").TileLayer | null>(null);
@@ -389,7 +385,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       dimensionLayerRef.current = null;
       osmLayerRef.current = null;
       satLayerRef.current = null;
-      cornerGlowRef.current = null;
     };
     // Leaflet must be initialized once per container; lockEditing toggles via effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -461,7 +456,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     }
   }
 
-  // Sync pin + polygon whenever selection or outline changes.
+  // Sync pin + parcel canvas (outline + dims + parcel no in one paint pass).
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     void import("leaflet").then((L) => {
@@ -472,67 +467,29 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         map.removeLayer(polygonRef.current);
         polygonRef.current = null;
       }
-      if (cornerGlowRef.current) {
-        map.removeLayer(cornerGlowRef.current);
-        cornerGlowRef.current = null;
-      }
-      // Do not clear dimension labels here — that races the dimensions effect and
-      // leaves the "on by default" toggle with nothing drawn on the map.
 
       if (polygon && polygon.length > 0) {
-        // Dual-stroke parcel: soft gold fill + outer glow stroke + crisp inner edge
-        const glowPoly = L.polygon(polygon, {
-          color: "#caa064",
-          weight: 8,
-          opacity: 0.35,
-          fillColor: "#caa064",
-          fillOpacity: 0.2,
-          interactive: false,
-          lineJoin: "round",
-          lineCap: "round",
-        });
-        const layer = L.polygon(polygon, {
-          color: "#0f342f",
-          weight: 2.5,
-          opacity: 1,
-          fill: false,
-          interactive: false,
-          lineJoin: "round",
-          lineCap: "round",
-        });
-        polygonRef.current = L.layerGroup([glowPoly, layer]).addTo(map);
+        const opts: ParcelCanvasOpts = {
+          rings: polygon as [number, number][][],
+          showDimensions: Boolean(drawDimensions && showDimensions),
+          perimeterM,
+          lang,
+          parcelNumber: blueprint?.parcel?.trim() || null,
+          parcelLabel: lp.blueprintParcel,
+        };
+        const layer = createParcelCanvasLayer(L, opts);
+        layer.addTo(map);
+        polygonRef.current = layer;
 
-        // Refined corner dots — small, readable, not noisy
-        const glow = L.layerGroup().addTo(map);
-        const ring = polygon[0] ?? [];
-        const hard = new Set(
-          ringCornerPoints(ring).map((c) => `${c.lat.toFixed(7)},${c.lng.toFixed(7)}`)
-        );
-        const seen = new Set<string>();
-        for (const [lat, lng] of ring) {
-          const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const isHard = hard.has(key);
-          L.circleMarker([lat, lng], {
-            radius: isHard ? 5 : 3.5,
-            color: "#f5e6c8",
-            weight: 1.5,
-            fillColor: "#caa064",
-            fillOpacity: 1,
-            opacity: 1,
-            interactive: false,
-            className: "parcel-corner-glow",
-          }).addTo(glow);
+        try {
+          map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 19, animate: false });
+        } catch {
+          /* ignore */
         }
-        cornerGlowRef.current = glow;
-
-        map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 19, animate: false });
         if (markerRef.current) {
           map.removeLayer(markerRef.current);
           markerRef.current = null;
         }
-        window.setTimeout(() => setDimsEpoch((n) => n + 1), 0);
         return;
       }
 
@@ -547,58 +504,21 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, polygon, locked, mapReady]);
 
-  // Draw edge length labels on the parcel outline when enabled.
+  // Keep canvas annotations in sync when only labels/toggle change (layer already mounted).
   useEffect(() => {
-    if (!mapReady || !mapRef.current) return;
-    void import("leaflet").then((L) => {
-      const map = mapRef.current;
-      if (!map) return;
-      if (dimensionLayerRef.current) {
-        map.removeLayer(dimensionLayerRef.current);
-        dimensionLayerRef.current = null;
-      }
-      if (!polygon?.[0]?.length) return;
-
-      const group = L.layerGroup().addTo(map);
-
-      // Parcel number centered inside the land (area centroid + true icon center)
-      const parcelNo = blueprint?.parcel?.trim();
-      if (parcelNo) {
-        const center = ringInteriorCentroid(polygon[0]);
-        if (center) {
-          L.marker([center.lat, center.lng], {
-            icon: parcelNumberDivIcon(L, lp.blueprintParcel, parcelNo),
-            interactive: false,
-            keyboard: false,
-            zIndexOffset: 600,
-          }).addTo(group);
-        }
-      }
-
-      if (drawDimensions && showDimensions) {
-        const rawEdges = ringEdgeDimensions(polygon[0]);
-        const sum = rawEdges.reduce((s, e) => s + e.lengthM, 0);
-        const scale =
-          perimeterM != null &&
-          perimeterM > 0 &&
-          sum > 0 &&
-          Math.abs(perimeterM - sum) / perimeterM <= 0.05
-            ? perimeterM / sum
-            : 1;
-        for (const edge of rawEdges) {
-          const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
-          L.marker([edge.mid.lat, edge.mid.lng], {
-            icon: parcelDimDivIcon(L, label, edge.bearingDeg),
-            interactive: false,
-            keyboard: false,
-            zIndexOffset: 400,
-          }).addTo(group);
-        }
-      }
-
-      dimensionLayerRef.current = group;
+    const layer = polygonRef.current as
+      | (import("leaflet").Layer & { setParcelOptions?: (o: ParcelCanvasOpts) => void })
+      | null;
+    if (!layer?.setParcelOptions || !polygon?.[0]?.length) return;
+    layer.setParcelOptions({
+      rings: polygon as [number, number][][],
+      showDimensions: Boolean(drawDimensions && showDimensions),
+      perimeterM,
+      lang,
+      parcelNumber: blueprint?.parcel?.trim() || null,
+      parcelLabel: lp.blueprintParcel,
     });
-  }, [drawDimensions, showDimensions, polygon, mapReady, lang, perimeterM, dimsEpoch, blueprint?.parcel]);
+  }, [drawDimensions, showDimensions, perimeterM, lang, blueprint?.parcel, polygon, lp.blueprintParcel]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -687,10 +607,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     if (polygonRef.current && mapRef.current) {
       mapRef.current.removeLayer(polygonRef.current);
       polygonRef.current = null;
-    }
-    if (cornerGlowRef.current && mapRef.current) {
-      mapRef.current.removeLayer(cornerGlowRef.current);
-      cornerGlowRef.current = null;
     }
     if (dimensionLayerRef.current && mapRef.current) {
       mapRef.current.removeLayer(dimensionLayerRef.current);

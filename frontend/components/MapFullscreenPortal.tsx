@@ -2,15 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import {
-  formatMeters,
-  formatSideMeters,
-  ringCornerPoints,
-  ringEdgeDimensions,
-  ringInteriorCentroid,
-  type Coords,
-} from "@/lib/mapCoords";
-import { parcelDimDivIcon, parcelNumberDivIcon } from "@/lib/mapLabelIcons";
+import { formatMeters, type Coords } from "@/lib/mapCoords";
+import { createParcelCanvasLayer, type ParcelCanvasOpts } from "@/lib/parcelCanvasLayer";
 import type { ParcelRing } from "@/components/LocationInput";
 import "leaflet/dist/leaflet.css";
 
@@ -142,50 +135,22 @@ export function MapFullscreenPortal({
       mapRef.current = map;
 
       if (polygon && polygon.length > 0) {
-        const glowPoly = L.polygon(polygon, {
-          color: "#caa064",
-          weight: 8,
-          opacity: 0.35,
-          fillColor: "#caa064",
-          fillOpacity: 0.2,
-          interactive: false,
-          lineJoin: "round",
-          lineCap: "round",
-        });
-        const layer = L.polygon(polygon, {
-          color: "#0f342f",
-          weight: 2.5,
-          opacity: 1,
-          fill: false,
-          interactive: false,
-          lineJoin: "round",
-          lineCap: "round",
-        });
-        L.layerGroup([glowPoly, layer]).addTo(map);
-        polyRef.current = layer;
-
-        const ring = polygon[0] ?? [];
-        const hard = new Set(
-          ringCornerPoints(ring).map((c) => `${c.lat.toFixed(7)},${c.lng.toFixed(7)}`)
-        );
-        const seen = new Set<string>();
-        for (const [lat, lng] of ring) {
-          const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const isHard = hard.has(key);
-          L.circleMarker([lat, lng], {
-            radius: isHard ? 5 : 3.5,
-            color: "#f5e6c8",
-            weight: 1.5,
-            fillColor: "#caa064",
-            fillOpacity: 1,
-            interactive: false,
-            className: "parcel-corner-glow",
-          }).addTo(map);
+        const opts: ParcelCanvasOpts = {
+          rings: polygon as [number, number][][],
+          showDimensions: Boolean(drawDimensions && showDimensions),
+          perimeterM,
+          lang,
+          parcelNumber,
+          parcelLabel,
+        };
+        const layer = createParcelCanvasLayer(L, opts);
+        layer.addTo(map);
+        polyRef.current = layer as unknown as import("leaflet").Polygon;
+        try {
+          map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 19, animate: false });
+        } catch {
+          /* ignore */
         }
-
-        map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 19, animate: false });
       } else if (selected) {
         const icon = L.divIcon({
           className: "",
@@ -236,52 +201,20 @@ export function MapFullscreenPortal({
     if (!map.hasLayer(active)) active.addTo(map);
   }, [basemap, open]);
 
-  // Dimension labels + parcel badge on the overlay instance
+  // Keep canvas annotations (dims + parcel no) in sync with toggles
   useEffect(() => {
     if (!open) return;
-    void import("leaflet").then((L) => {
-      const map = mapRef.current;
-      if (!map) return;
-      if (dimsRef.current) {
-        map.removeLayer(dimsRef.current);
-        dimsRef.current = null;
-      }
-      if (!polygon?.[0]?.length) return;
-      const group = L.layerGroup().addTo(map);
-
-      if (parcelNumber) {
-        const center = ringInteriorCentroid(polygon[0]);
-        if (center) {
-          L.marker([center.lat, center.lng], {
-            icon: parcelNumberDivIcon(L, parcelLabel, parcelNumber),
-            interactive: false,
-            keyboard: false,
-            zIndexOffset: 600,
-          }).addTo(group);
-        }
-      }
-
-      if (drawDimensions && showDimensions) {
-        const rawEdges = ringEdgeDimensions(polygon[0]);
-        const sum = rawEdges.reduce((s, e) => s + e.lengthM, 0);
-        const scale =
-          perimeterM != null &&
-          perimeterM > 0 &&
-          sum > 0 &&
-          Math.abs(perimeterM - sum) / perimeterM <= 0.05
-            ? perimeterM / sum
-            : 1;
-        for (const edge of rawEdges) {
-          const label = formatSideMeters(edge.lengthM * scale, lang, edge.kind);
-          L.marker([edge.mid.lat, edge.mid.lng], {
-            icon: parcelDimDivIcon(L, label, edge.bearingDeg),
-            interactive: false,
-            keyboard: false,
-            zIndexOffset: 400,
-          }).addTo(group);
-        }
-      }
-      dimsRef.current = group;
+    const layer = polyRef.current as unknown as
+      | { setParcelOptions?: (o: ParcelCanvasOpts) => void }
+      | null;
+    if (!layer?.setParcelOptions || !polygon?.[0]?.length) return;
+    layer.setParcelOptions({
+      rings: polygon as [number, number][][],
+      showDimensions: Boolean(drawDimensions && showDimensions),
+      perimeterM,
+      lang,
+      parcelNumber,
+      parcelLabel,
     });
   }, [open, drawDimensions, showDimensions, polygon, perimeterM, lang, parcelNumber, parcelLabel]);
 
