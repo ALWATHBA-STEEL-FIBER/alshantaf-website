@@ -1,0 +1,19 @@
+-- AlterTable
+ALTER TABLE "LandCheck" ALTER COLUMN "governorate" DROP NOT NULL;
+ALTER TABLE "LandCheck" ALTER COLUMN "directorate" DROP NOT NULL;
+ALTER TABLE "LandCheck" ALTER COLUMN "village" DROP NOT NULL;
+ALTER TABLE "LandCheck" ALTER COLUMN "basin" DROP NOT NULL;
+ALTER TABLE "LandCheck" ALTER COLUMN "neighborhood" DROP NOT NULL;
+ALTER TABLE "LandCheck" ALTER COLUMN "parcel" DROP NOT NULL;
+
+-- AlterTable
+ALTER TABLE "LandCheck" ADD COLUMN IF NOT EXISTS "clientKey" TEXT;
+ALTER TABLE "LandCheck" ADD COLUMN IF NOT EXISTS "isDraft" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "LandCheck" ADD COLUMN IF NOT EXISTS "perimeterM" DOUBLE PRECISION;
+ALTER TABLE "LandCheck" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "LandCheck_clientKey_key" ON "LandCheck"("clientKey");
+
+-- CreateIndex
+CREATE INDEX IF NOT EXISTS "LandCheck_isDraft_idx" ON "LandCheck"("isDraft");

@@ -1,0 +1,335 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  whatsapp     String?
+  createdAt    DateTime @default(now())
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorEmail String
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+}
+
+enum IndustryType {
+  lightSpecial
+  light
+  mediumSpecial
+  medium
+  agriToIndustrial
+  technical
+  residentialA
+  residentialB
+  residentialC
+  residentialD
+  residentialGreen
+  residentialAgri
+  agriFacilities
+  commercialCentral
+  commercialShowrooms
+  commercialLinear
+  commercialLocal
+  greenWithinA
+  greenWithinB
+  greenWithinC
+  greenWithinD
+  residentialPrivateA
+  residentialPrivateB
+  residentialRural
+  commercialOrdinaryA
+  commercialOrdinaryB
+  commercialOrdinaryC
+  commercialWithinD
+  commercialComplex
+  commercialOutsideCentral
+  commercialOutsideShowrooms
+  commercialOutsideLinear
+  commercialOutsideLocal
+}
+
+enum DealType {
+  sale
+  rent
+  sale_or_rent
+  partnership
+}
+
+enum PropertyStatus {
+  available
+  reserved
+  sold
+  rented
+  canceled
+}
+
+enum PublishStatus {
+  published
+  draft
+  archived
+}
+
+enum PresenterRole {
+  owner
+  presenter
+  broker
+  company
+  other
+}
+
+enum MediaKind {
+  image
+  video
+  document
+}
+
+model Listing {
+  id             String         @id @default(uuid())
+  listingNo      String         @unique
+  title          String
+  area           String
+  propertyType   String?
+  industryType   IndustryType
+  dealType       DealType       @default(sale)
+  size           String?
+  price          String?
+  governorate    String?
+  directorate    String?
+  village        String?
+  basin          String?
+  neighborhood   String?
+  parcel         String?
+  locationUrl    String?
+  latitude       Float?
+  longitude      Float?
+  address        String?
+  administrativeValue       Float?
+  administrativeValueSource String?
+  administrativeValueAt     DateTime?
+  phone          String?
+  status         PropertyStatus @default(available)
+  publishStatus  PublishStatus  @default(draft)
+  featured       Boolean        @default(false)
+  /// Secret code for the owner portal (/my-offer/[code]) — SMS/link access, not public.
+  ownerAccessCode String?       @unique
+  /// When true, milestone/status SMS may be sent to `phone`.
+  smsOptIn       Boolean        @default(true)
+  /// View milestones already SMS-notified (10, 25, 50, …).
+  notifiedMilestones Int[]      @default([])
+  presenterRole  PresenterRole?
+  presenterName  String?
+  showPresenter  Boolean        @default(false)
+  description    String
+  internalNotes  String?
+  mainImage      String?
+  source         String         @default("admin")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  viewCount      Int            @default(0)
+
+  media       Media[]
+  submissions Submission[]
+  views       ListingView[]
+
+  @@index([area])
+  @@index([publishStatus])
+  @@index([status])
+}
+
+enum LandCheckStatus {
+  new
+  contacted
+  closed
+}
+
+enum ContactRequestStatus {
+  new
+  contacted
+  closed
+}
+
+/// Public contact-form requests (“أرسل تفاصيل طلبك”) for admin follow-up.
+model ContactRequest {
+  id           String               @id @default(uuid())
+  serialNo     String               @unique
+  name         String
+  phone        String
+  requestType  String
+  industryType String?
+  activityType String?
+  details      String
+  status       ContactRequestStatus @default(new)
+  adminNotes   String?
+  reviewer     String?
+  reviewedAt   DateTime?
+  createdAt    DateTime             @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// Public land identity / regulation checks that are NOT listing submissions.
+/// Admins review these for follow-up; nothing here is published as an offer.
+/// Incomplete forms are auto-saved as drafts (isDraft=true) via clientKey.
+model LandCheck {
+  id           String          @id @default(uuid())
+  serialNo     String          @unique
+  /// Browser-stable key so drafts upsert without requiring Save.
+  clientKey    String?         @unique
+  isDraft      Boolean         @default(false)
+  name         String?
+  phone        String?
+  email        String?
+  governorate  String?
+  directorate  String?
+  village      String?
+  basin        String?
+  neighborhood String?
+  parcel       String?
+  coordinates  String?
+  latitude     Float?
+  longitude    Float?
+  address      String?
+  dlsKey       String?
+  areaSqm      Float?
+  areaLabel    String?
+  perimeterM   Float?
+  administrativeValue       Float?
+  administrativeValueSource String?
+  administrativeValueAt     DateTime?
+  estimatedMedian           Float?
+  industryType IndustryType?
+  notes        String?
+  status       LandCheckStatus @default(new)
+  adminNotes   String?
+  reviewer     String?
+  reviewedAt   DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([isDraft])
+  @@index([village, basin, parcel])
+}
+
+/// One row per (listing, visitor) pair so repeat visits from the same browser
+/// don't inflate the view count; the unique constraint is the dedupe mechanism.
+model ListingView {
+  id        String   @id @default(uuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  visitorId String
+  viewedAt  DateTime @default(now())
+
+  @@unique([listingId, visitorId])
+  @@index([listingId])
+}
+
+model Media {
+  id        String    @id @default(uuid())
+  listingId String
+  listing   Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  url       String
+  kind      MediaKind
+  position  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([listingId])
+}
+
+/// Reusable admin-curated images that can be attached during submission approval.
+model StandbyImage {
+  id        String   @id @default(uuid())
+  url       String   @unique
+  title     String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+enum SubmissionSource {
+  owner
+  broker
+}
+
+enum SubmissionStatus {
+  pending
+  duplicate_review
+  needs_info
+  approved
+  rejected
+}
+
+model Submission {
+  id           String           @id @default(uuid())
+  serialNo     String           @unique
+  trackingCode String           @unique
+  source       SubmissionSource
+  applicant    String
+  phone        String
+  office       String?
+  whatsapp     String?
+  email        String?
+  authExpiry   String?
+  governorate  String?
+  directorate  String?
+  village      String?
+  basin        String?
+  parcel       String?
+  neighborhood String?
+  coordinates  String?
+  latitude     Float?
+  longitude    Float?
+  address      String?
+  administrativeValue       Float?
+  administrativeValueSource String?
+  administrativeValueAt     DateTime?
+  dlsKey       String?
+  area         String?
+  price        String?
+  industryType IndustryType?
+  activity     String?
+  details      String
+  images       String[]         @default([])
+  video        String?
+  document     String?
+  duplicate    Boolean          @default(false)
+  status       SubmissionStatus @default(pending)
+  reviewer     String?
+  reviewNote   String?
+  submittedAt  DateTime         @default(now())
+  reviewedAt   DateTime?
+
+  convertedListingId String?
+  convertedListing   Listing? @relation(fields: [convertedListingId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}

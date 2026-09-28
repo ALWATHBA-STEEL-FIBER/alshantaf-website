@@ -1,0 +1,7 @@
+.env
+node_modules/
+backend/dist/
+backend/uploads/*
+!backend/uploads/.gitkeep
+frontend/.next/
+frontend/node_modules/

@@ -1,0 +1,32 @@
+{
+	"light with special laws": {
+		"frontal": "6-8",
+		"back and sides": "3",
+		"build percentage": "60%"
+	},
+	"light": {
+		"frontal": "12",
+		"back and sides": "5",
+		"build percentage": "50%"
+	},
+	"medium with special laws": {
+		"frontal": "6-8",
+		"back and sides": "4",
+		"build percentage": "50%"
+	},
+	"medium": {
+		"frontal": "15",
+		"back and sides": "5",
+		"build percentage": "50%"
+	},
+	"transfare from agricaltural to industrial": {
+		"frontal": "12-15",
+		"back and sides": "5",
+		"build percentage": "50%"
+	},
+	"technical": {
+		"frontal": "on req",
+		"back and sides": "on req",
+		"build percentage": "on req"
+	}
+}
