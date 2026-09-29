@@ -281,7 +281,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [status, setStatus] = useState<"idle" | "loading" | "locating" | "error">("idle");
   const [message, setMessage] = useState("");
   const [mapReady, setMapReady] = useState(false);
-  const [basemap, setBasemap] = useState<Basemap>("map");
+  const [basemap, setBasemap] = useState<Basemap>("satellite");
   const [drawDimensions, setDrawDimensions] = useState(true);
   const [mapFullscreen, setMapFullscreen] = useState(false);
   const mapShellRef = useRef<HTMLDivElement>(null);
@@ -362,7 +362,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           crossOrigin: true,
         }
       );
-      osm.addTo(map);
+      sat.addTo(map);
       osmLayerRef.current = osm;
       satLayerRef.current = sat;
       mapRef.current = map;
