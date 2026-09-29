@@ -10,6 +10,8 @@ type Props = {
   onChange?: (value: IndustryType | "") => void;
   /** When true, show as read-only facts for a fixed industry (offer detail). */
   readOnly?: boolean;
+  /** Hide allowed/restricted/setbacks — select (or title) only. */
+  hideDetails?: boolean;
   /** Land-check shows all zoning; listing/owner forms stay industrial-only. */
   scope?: "all" | "industrial";
   /** Mark the select as required (land-check gate before DLS fetch). */
@@ -34,7 +36,15 @@ function formatSetbackValue(
   return raw;
 }
 
-export function RegulationGuide({ value, onChange, readOnly = false, scope = "all", required = false, className }: Props) {
+export function RegulationGuide({
+  value,
+  onChange,
+  readOnly = false,
+  hideDetails = false,
+  scope = "all",
+  required = false,
+  className,
+}: Props) {
   const { t } = useLanguage();
   const selected = value || null;
   const guide = selected ? t.regulations.types[selected] : null;
@@ -99,7 +109,7 @@ export function RegulationGuide({ value, onChange, readOnly = false, scope = "al
         </div>
       )}
 
-      {guide && setbacks && (
+      {guide && setbacks && !hideDetails && (
         <div className={readOnly ? "" : "mt-4 pt-4 border-t border-line"}>
           {readOnly && (
             <p className="text-xs font-bold text-green mb-3">{t.regulations.panelTitle}</p>

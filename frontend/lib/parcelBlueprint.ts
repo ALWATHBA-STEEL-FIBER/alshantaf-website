@@ -89,8 +89,13 @@ function fmtElev(m: number, lang: "ar" | "en") {
   return lang === "ar" ? `${n} م` : `${n} m`;
 }
 
+/** Keep ASCII parentheses from jumping to the start of RTL lines. */
+function stabilizeRtlAsciiPunct(text: string): string {
+  return text.replace(/\(([^)]*)\)/g, "\u2068($1)\u2069");
+}
+
 function escapeHtml(s: string) {
-  return s
+  return stabilizeRtlAsciiPunct(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -720,14 +725,18 @@ function drawTexturedTri(
   ctx.restore();
 }
 
-/** Load brand mark as PNG data URL for the white official letterhead. */
+/** Load green brand favicon for the official letterhead (larger mark at top center). */
 export async function loadPrintLogoPngDataUrl(): Promise<string | null> {
   try {
     let img: HTMLImageElement;
     try {
-      img = await loadImage("/logo-mark.png");
+      img = await loadImage("/icon-192.png");
     } catch {
-      img = await loadImage("/logo-mark.webp");
+      try {
+        img = await loadImage("/icon.png");
+      } catch {
+        img = await loadImage("/logo-mark.png");
+      }
     }
     const size = Math.max(img.naturalWidth || 256, 256);
     const c = document.createElement("canvas");
@@ -856,6 +865,7 @@ async function composeBlueprintA4Jpeg(opts: {
 }): Promise<string> {
   const W = 1240;
   const H = 1754;
+  const GREEN = "#0f342f";
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
@@ -864,59 +874,89 @@ async function composeBlueprintA4Jpeg(opts: {
 
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = "#111111";
-  ctx.lineWidth = 3;
-  ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
 
-  const padX = 36;
-  const padTop = 28;
+  // Green page edge that merges into the top-center icon badge
+  const edge = 18;
+  ctx.strokeStyle = GREEN;
+  ctx.lineWidth = edge;
+  ctx.strokeRect(edge / 2, edge / 2, W - edge, H - edge);
+
+  const padX = 44;
+  const padTop = 36;
   let y = padTop;
 
-  // Header
-  const headerH = 110;
-  const logoSize = 88;
-  const colW = (W - padX * 2 - logoSize - 40) / 2;
+  // Header: motto | logo | title (symmetric columns; logo sits in green badge)
+  const logoSize = 118;
+  const headerH = 128;
+  const colW = (W - padX * 2 - logoSize - 48) / 2;
+  const logoX = (W - logoSize) / 2;
+  const logoY = y + (headerH - logoSize) / 2 - 4;
+
+  // Green badge behind logo, merging with top edge
+  ctx.fillStyle = GREEN;
+  const badgePad = 10;
+  const badgeR = logoSize / 2 + badgePad;
+  ctx.beginPath();
+  ctx.arc(W / 2, edge / 2, badgeR + 8, Math.PI, 0, true);
+  ctx.lineTo(W / 2 + badgeR + 8, logoY + logoSize + badgePad);
+  ctx.arc(W / 2, logoY + logoSize / 2, badgeR + 8, 0, Math.PI, false);
+  ctx.closePath();
+  ctx.fill();
+
+  // Soft white inset so the favicon reads cleanly
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(W / 2, logoY + logoSize / 2, logoSize / 2 + 4, 0, Math.PI * 2);
+  ctx.fill();
 
   ctx.fillStyle = "#222222";
-  ctx.font = '600 22px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.font = '600 20px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.textBaseline = "middle";
+  const mottoLines = wrapCanvasText(ctx, stabilizeRtlAsciiPunct(opts.motto), colW - 8);
+  const mottoBlockH = Math.min(mottoLines.length, 4) * 24;
+  const mottoStartY = y + (headerH - mottoBlockH) / 2;
   ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  const mottoLines = wrapCanvasText(ctx, opts.motto, colW - 8);
   mottoLines.slice(0, 4).forEach((line, i) => {
-    ctx.fillText(line, padX, y + 8 + i * 26);
+    ctx.fillText(line, padX, mottoStartY + i * 24 + 10);
   });
 
   if (opts.logoDataUrl) {
     try {
       const logo = await loadImage(opts.logoDataUrl);
-      ctx.drawImage(logo, (W - logoSize) / 2, y + (headerH - logoSize) / 2, logoSize, logoSize);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(W / 2, logoY + logoSize / 2, logoSize / 2, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(logo, logoX, logoY, logoSize, logoSize);
+      ctx.restore();
     } catch {
       /* skip logo */
     }
   }
 
-  ctx.fillStyle = "#0f342f";
-  ctx.font = '800 34px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.fillStyle = GREEN;
+  ctx.font = '700 22px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
   ctx.textAlign = "right";
-  ctx.fillText(opts.brandName, W - padX, y + 18, colW);
-  ctx.fillStyle = "#222222";
-  ctx.font = '600 24px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
-  const titleLines = wrapCanvasText(ctx, opts.sheetTitle, colW - 8);
-  titleLines.slice(0, 2).forEach((line, i) => {
-    ctx.fillText(line, W - padX, y + 58 + i * 28, colW);
+  const titleLines = wrapCanvasText(ctx, stabilizeRtlAsciiPunct(opts.sheetTitle), colW - 8);
+  const titleBlockH = Math.min(titleLines.length, 3) * 26;
+  const titleStartY = y + (headerH - titleBlockH) / 2;
+  titleLines.slice(0, 3).forEach((line, i) => {
+    ctx.fillText(line, W - padX, titleStartY + i * 26 + 11, colW);
   });
 
   y += headerH;
-  ctx.strokeStyle = "#111111";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = GREEN;
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
   ctx.moveTo(padX, y);
+  ctx.lineTo(logoX - 12, y);
+  ctx.moveTo(logoX + logoSize + 12, y);
   ctx.lineTo(W - padX, y);
   ctx.stroke();
   y += 16;
 
   // Top: params + context map
-  const topH = 680;
+  const topH = 640;
   const paramsW = 400;
   const gap = 16;
   const mapW = W - padX * 2 - paramsW - gap;
@@ -943,19 +983,19 @@ async function composeBlueprintA4Jpeg(opts: {
     if (rowY > y + topH - 90) break;
     ctx.fillStyle = "#444444";
     ctx.textAlign = rtl ? "right" : "left";
-    ctx.fillText(lab, paramsTitleX, rowY, paramsW * 0.42);
+    ctx.fillText(stabilizeRtlAsciiPunct(lab), paramsTitleX, rowY, paramsW * 0.42);
     ctx.fillStyle = "#111111";
     ctx.font = '600 20px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
     ctx.textAlign = rtl ? "left" : "right";
     const valX = rtl ? padX + 14 : padX + paramsW - 14;
-    ctx.fillText(val, valX, rowY, paramsW * 0.52);
+    ctx.fillText(stabilizeRtlAsciiPunct(val), valX, rowY, paramsW * 0.52);
     ctx.font = '700 18px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
     rowY += 28;
   }
   ctx.fillStyle = "#555555";
   ctx.font = '500 15px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
   ctx.textAlign = rtl ? "right" : "left";
-  const noteLines = wrapCanvasText(ctx, opts.approxNote, paramsW - 28);
+  const noteLines = wrapCanvasText(ctx, stabilizeRtlAsciiPunct(opts.approxNote), paramsW - 28);
   let noteY = y + topH - 14 - noteLines.slice(0, 3).length * 18;
   noteLines.slice(0, 3).forEach((line) => {
     ctx.fillText(line, paramsTitleX, noteY, paramsW - 28);
@@ -995,8 +1035,8 @@ async function composeBlueprintA4Jpeg(opts: {
   y += topH + 16;
 
   // Topo panel
-  const footerReserve = 120;
-  const topoH = H - y - footerReserve - 20;
+  const footerReserve = 110;
+  const topoH = H - y - footerReserve - edge - 12;
   ctx.strokeStyle = "#222222";
   ctx.lineWidth = 2;
   ctx.strokeRect(padX, y, W - padX * 2, topoH);
@@ -1025,40 +1065,41 @@ async function composeBlueprintA4Jpeg(opts: {
   }
 
   y += topoH + 12;
-  ctx.strokeStyle = "#111111";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = GREEN;
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
   ctx.moveTo(padX, y);
   ctx.lineTo(W - padX, y);
   ctx.stroke();
-  y += 14;
+  y += 12;
 
-  // Footer
-  ctx.fillStyle = "#0f342f";
-  ctx.font = '800 24px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  // Footer — site left, both engineer contacts side-by-side on the right
+  ctx.fillStyle = GREEN;
+  ctx.font = '800 22px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
   ctx.textAlign = "left";
+  ctx.textBaseline = "top";
   ctx.fillText(BLUEPRINT_SITE_URL, padX, y);
   ctx.fillStyle = "#333333";
-  ctx.font = '600 18px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText(opts.location, padX, y + 28, W * 0.5);
+  ctx.font = '600 16px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  ctx.fillText(stabilizeRtlAsciiPunct(opts.location), padX, y + 26, W * 0.42);
   ctx.fillStyle = "#666666";
-  ctx.font = '500 14px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
-  const footNote = wrapCanvasText(ctx, opts.footerNote, W * 0.52);
+  ctx.font = '500 13px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+  const footNote = wrapCanvasText(ctx, stabilizeRtlAsciiPunct(opts.footerNote), W * 0.42);
   footNote.slice(0, 2).forEach((line, i) => {
-    ctx.fillText(line, padX, y + 52 + i * 16, W * 0.52);
+    ctx.fillText(line, padX, y + 48 + i * 15, W * 0.42);
   });
 
-  let contactY = y;
-  for (const c of BLUEPRINT_CONTACTS) {
+  const contactColW = 230;
+  BLUEPRINT_CONTACTS.forEach((c, i) => {
+    const cx = W - padX - (BLUEPRINT_CONTACTS.length - 1 - i) * (contactColW + 16);
     ctx.fillStyle = "#111111";
-    ctx.font = '700 18px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+    ctx.font = '700 16px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
     ctx.textAlign = "right";
-    ctx.fillText(c.name, W - padX, contactY);
-    ctx.fillStyle = "#0f342f";
-    ctx.font = '800 22px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
-    ctx.fillText(c.phone, W - padX, contactY + 24);
-    contactY += 56;
-  }
+    ctx.fillText(c.name, cx, y);
+    ctx.fillStyle = GREEN;
+    ctx.font = '800 20px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+    ctx.fillText(c.phone, cx, y + 24);
+  });
 
   return canvas.toDataURL("image/jpeg", 0.92);
 }
@@ -1323,13 +1364,13 @@ export async function printParcelBlueprint(opts: {
   const logo = await loadPrintLogoPngDataUrl();
   const motto = meta.lang === "ar" ? BLUEPRINT_MOTTO_AR : BLUEPRINT_MOTTO_EN;
   const location = meta.lang === "ar" ? BLUEPRINT_LOCATION_AR : BLUEPRINT_LOCATION_EN;
-  const contactsHtml = BLUEPRINT_CONTACTS.map(
+  const contactsHtml = `<div class="contacts">${BLUEPRINT_CONTACTS.map(
     (c) => `
       <div class="contact-row">
         <span class="contact-name">${escapeHtml(c.name)}</span>
         <span class="contact-phone" dir="ltr">${escapeHtml(c.phone)}</span>
       </div>`
-  ).join("");
+  ).join("")}</div>`;
 
   const rows: Array<[string, string]> = [];
   const push = (label: string, value?: string | null) => {
@@ -1357,7 +1398,7 @@ export async function printParcelBlueprint(opts: {
   push(meta.contourStepLabel, fmtElev(opts.contourIntervalM, meta.lang));
   if (meta.industryLabel && meta.industryValue) {
     const shortChose =
-      meta.lang === "ar" ? "اختيار المستخدم (إرشادي)" : "User-selected (advisory)";
+      meta.lang === "ar" ? "اختيار المستخدم \u2068(إرشادي)\u2069" : "User-selected (advisory)";
     const zoning = meta.industryUserChoseNote
       ? `${meta.industryValue} — ${shortChose}`
       : meta.industryValue;
@@ -1379,7 +1420,7 @@ export async function printParcelBlueprint(opts: {
 <html lang="${meta.lang}" dir="${rtl ? "rtl" : "ltr"}">
 <head>
 <meta charset="utf-8" />
-<title>${escapeHtml(meta.brandName)} — ${escapeHtml(meta.sheetTitle)}</title>
+<title>${escapeHtml(meta.sheetTitle)}</title>
 <style>
   /* Official A4 letterhead — clipped to one page (iOS Safari safe). */
   @page { size: 210mm 297mm; margin: 0; }
@@ -1396,71 +1437,87 @@ export async function printParcelBlueprint(opts: {
     print-color-adjust: exact;
   }
   .sheet {
+    --green: #0f342f;
     width: 210mm;
     height: 297mm;
     max-height: 297mm;
-    padding: 5mm 6mm 4mm;
+    padding: 7mm 7mm 5mm;
     display: grid;
-    grid-template-rows: 22mm minmax(0, 1.2fr) minmax(0, 1.1fr) 14mm;
+    grid-template-rows: 28mm minmax(0, 1.15fr) minmax(0, 1.05fr) 16mm;
     gap: 2.5mm;
     overflow: hidden;
     page-break-after: avoid;
     page-break-inside: avoid;
     break-after: avoid;
     break-inside: avoid;
-    border: 0.3mm solid #111111;
+    border: 2.2mm solid var(--green);
+    position: relative;
   }
   .header {
     direction: ltr;
     display: grid;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    gap: 2mm;
-    height: 22mm;
-    max-height: 22mm;
+    gap: 3mm;
+    height: 28mm;
+    max-height: 28mm;
     min-height: 0;
     padding: 0 0 1.5mm;
-    border-bottom: 0.4mm solid #111111;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
+  }
+  .header::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 0.45mm;
+    background: var(--green);
   }
   .header .motto {
     text-align: left;
-    font-size: 6.5pt;
+    font-size: 7pt;
     font-weight: 600;
-    line-height: 1.3;
+    line-height: 1.35;
     color: #222222;
-    max-width: 56mm;
+    max-width: 58mm;
     justify-self: start;
+    align-self: center;
   }
   .header .logo-wrap {
     display: flex;
     align-items: center;
     justify-content: center;
     justify-self: center;
+    width: 26mm;
+    height: 26mm;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 2.2mm var(--green);
+    overflow: hidden;
+    position: relative;
+    z-index: 2;
+    margin-top: -3mm;
   }
   .header .logo-wrap img {
-    width: 18mm;
-    height: 18mm;
-    object-fit: contain;
+    width: 24mm;
+    height: 24mm;
+    object-fit: cover;
     display: block;
+    border-radius: 50%;
   }
   .header .title-block {
     text-align: right;
     justify-self: end;
-    max-width: 60mm;
-  }
-  .header .brand {
-    font-weight: 800;
-    font-size: 11pt;
-    color: #0f342f;
-    line-height: 1.1;
+    align-self: center;
+    max-width: 62mm;
   }
   .header .sub {
-    font-size: 7.5pt;
-    font-weight: 600;
-    color: #222222;
-    margin-top: 0.5mm;
-    line-height: 1.2;
+    font-size: 8pt;
+    font-weight: 700;
+    color: var(--green);
+    line-height: 1.3;
   }
   .top {
     display: grid;
@@ -1545,6 +1602,7 @@ export async function printParcelBlueprint(opts: {
     margin: 0;
     flex: 0 1 auto;
     line-height: 1.2;
+    unicode-bidi: isolate;
   }
   .val {
     font-size: 7pt;
@@ -1554,6 +1612,7 @@ export async function printParcelBlueprint(opts: {
     word-break: break-word;
     text-align: end;
     max-width: 62%;
+    unicode-bidi: plaintext;
   }
   .note {
     margin-top: 0.8mm;
@@ -1563,18 +1622,19 @@ export async function printParcelBlueprint(opts: {
     padding-top: 0.8mm;
     border-top: 0.2mm dashed rgba(17,17,17,0.25);
     flex-shrink: 0;
+    unicode-bidi: plaintext;
   }
   .footer {
     direction: ltr;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1.15fr;
     gap: 3mm;
     align-items: end;
-    height: 14mm;
-    max-height: 14mm;
+    height: 16mm;
+    max-height: 16mm;
     min-height: 0;
     padding-top: 1.5mm;
-    border-top: 0.4mm solid #111111;
+    border-top: 0.45mm solid var(--green);
     overflow: hidden;
   }
   .footer-left {
@@ -1584,7 +1644,7 @@ export async function printParcelBlueprint(opts: {
   .footer-url {
     font-size: 7.5pt;
     font-weight: 800;
-    color: #0f342f;
+    color: var(--green);
     direction: ltr;
     unicode-bidi: isolate;
   }
@@ -1595,6 +1655,7 @@ export async function printParcelBlueprint(opts: {
     color: #333333;
     line-height: 1.2;
     max-width: 88mm;
+    unicode-bidi: plaintext;
   }
   .footer-note {
     margin-top: 0.5mm;
@@ -1602,32 +1663,39 @@ export async function printParcelBlueprint(opts: {
     color: #666666;
     line-height: 1.2;
     max-width: 95mm;
+    unicode-bidi: plaintext;
   }
   .footer-right {
-    text-align: right;
     justify-self: end;
+  }
+  .contacts {
+    display: flex;
+    flex-direction: row;
+    gap: 5mm;
+    justify-content: flex-end;
+    align-items: flex-end;
   }
   .contact-row {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
     gap: 0;
-    margin-bottom: 0.8mm;
   }
-  .contact-row:last-child { margin-bottom: 0; }
   .contact-name {
-    font-size: 6.5pt;
+    font-size: 6pt;
     font-weight: 700;
     color: #111111;
     line-height: 1.15;
+    white-space: nowrap;
   }
   .contact-phone {
     font-size: 7.5pt;
     font-weight: 800;
-    color: #0f342f;
+    color: var(--green);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
     line-height: 1.15;
+    white-space: nowrap;
   }
   @media print {
     html, body, .sheet {
@@ -1650,10 +1718,9 @@ export async function printParcelBlueprint(opts: {
     <header class="header">
       <div class="motto">${escapeHtml(motto)}</div>
       <div class="logo-wrap">
-        ${logo ? `<img src="${logo}" alt="" />` : `<div class="brand">${escapeHtml(meta.brandName)}</div>`}
+        ${logo ? `<img src="${logo}" alt="" />` : ""}
       </div>
       <div class="title-block">
-        <div class="brand">${escapeHtml(meta.brandName)}</div>
         <div class="sub">${escapeHtml(meta.sheetTitle)}</div>
       </div>
     </header>
