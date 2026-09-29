@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { useSettings } from "@/lib/SettingsProvider";
 import { offerWhatsappLink } from "@/lib/whatsapp";
 import { api } from "@/lib/api";
 import { buildSrcSet } from "@/lib/imageSrcSet";
 import { coordsToString, parseCoords } from "@/lib/mapCoords";
+import { codesForSelection, loadDlsLocations } from "@/lib/dlsLocations";
+import { parseAreaSqm } from "@/lib/adminPricing";
 import {
   localizeListingTitle,
   localizePlaceName,
@@ -23,14 +25,64 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   const { t, lang } = useLanguage();
   const settings = useSettings();
   const analyticsAllowed = useAnalyticsAllowed();
+  const lp = t.locationPicker;
+  const [parcelPolygon, setParcelPolygon] = useState<[number, number][][] | null>(null);
+  const [perimeterM, setPerimeterM] = useState<number | null>(null);
+  const [areaSqm, setAreaSqm] = useState<number | null>(() => parseAreaSqm(listing.size));
 
   useEffect(() => {
     if (!analyticsAllowed) return;
     api.recordView(listing.id);
   }, [listing.id, analyticsAllowed]);
+
+  // Load DLS parcel outline so map + 3D match land-check when identity is public.
+  useEffect(() => {
+    let cancelled = false;
+    const { governorate, directorate, village, basin, neighborhood, parcel } = listing;
+    if (!governorate || !directorate || !village || !basin || !neighborhood || !parcel?.trim()) {
+      setParcelPolygon(null);
+      setPerimeterM(null);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      try {
+        const data = await loadDlsLocations();
+        const codes = codesForSelection(data, governorate, directorate, village, basin, neighborhood);
+        if (!codes || cancelled) return;
+        const location = await api.dlsParcelLocationPublic({
+          ...codes,
+          parcelNumber: parcel.trim(),
+        });
+        if (cancelled) return;
+        setParcelPolygon(location.rings);
+        setPerimeterM(location.perimeterM);
+        if (location.areaSqm != null) setAreaSqm(location.areaSqm);
+      } catch {
+        if (!cancelled) {
+          setParcelPolygon(null);
+          setPerimeterM(null);
+        }
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    listing.governorate,
+    listing.directorate,
+    listing.village,
+    listing.basin,
+    listing.neighborhood,
+    listing.parcel,
+  ]);
+
   const images = listing.images.length ? listing.images : [listing.mainImage].filter((x): x is string => Boolean(x));
   const gallery = (images.length ? images : ["/industrial-clean-wide.webp"]).slice(0, 4);
-  const mapCoords = listing.latitude !== null && listing.longitude !== null ? { lat: listing.latitude, lng: listing.longitude } : parseCoords(listing.locationUrl);
+  const mapCoords =
+    listing.latitude !== null && listing.longitude !== null
+      ? { lat: listing.latitude, lng: listing.longitude }
+      : parseCoords(listing.locationUrl);
   const title = localizeListingTitle(listing.title, lang);
   const areaLabel = listing.area ? localizePlaceName(listing.area, lang) : "";
   const propertyType = localizePropertyType(listing.propertyType, lang, t.offers.propertyTypeFallback);
@@ -43,11 +95,10 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           .join(" — ")
       : "";
   const whatsappHref = offerWhatsappLink(listing.phone, listing.listingNo, title, settings.whatsappNumber);
+  const showEstimated = listing.showEstimatedValue !== false;
 
   return (
     <div className="mx-auto max-w-[1100px] px-4 py-12 md:py-16">
-      {/* Mobile: simple full-width vertical stack — never underflows since each
-          image just takes its own row at a fixed aspect ratio. */}
       <div className="sm:hidden grid gap-2 rounded-[1.75rem] overflow-hidden mb-8">
         {gallery.map((src, i) => (
           <div key={src + i} className="relative aspect-[4/3] overflow-hidden">
@@ -64,10 +115,6 @@ export function OfferDetail({ listing }: { listing: Listing }) {
         ))}
       </div>
 
-      {/* Desktop/tablet: a fixed-height hero + side column that always fills
-          the full width/height, whether there are 1, 2, 3 or 4 photos — the
-          side column divides evenly by flex instead of a grid col/row-span
-          that only tiled correctly for exactly 3 images. */}
       <div className="hidden sm:block rounded-[1.75rem] overflow-hidden mb-8">
         {gallery.length === 1 ? (
           <div className="relative h-[420px] lg:h-[500px]">
@@ -121,7 +168,9 @@ export function OfferDetail({ listing }: { listing: Listing }) {
               {listing.listingNo}
             </span>
             {listing.featured && (
-              <span className="text-[10px] font-bold bg-gold text-[#152126] px-2.5 py-1 rounded-full">{t.offers.featured}</span>
+              <span className="text-[10px] font-bold bg-gold text-[#152126] px-2.5 py-1 rounded-full">
+                {t.offers.featured}
+              </span>
             )}
           </div>
           <h1 className="text-3xl md:text-4xl font-bold mt-3 text-balance">{title}</h1>
@@ -142,8 +191,10 @@ export function OfferDetail({ listing }: { listing: Listing }) {
             <DlsPricingHint
               ratePerSqm={listing.administrativeValue}
               sizeLabel={listing.size}
+              areaSqm={areaSqm}
               source={listing.administrativeValueSource}
               retrievedAt={listing.administrativeValueAt}
+              showMedian={showEstimated}
               className="mt-3 rounded-2xl border border-gold/40 bg-gold/10 p-3.5 text-[11px] text-ink-soft leading-relaxed"
             />
           )}
@@ -160,6 +211,22 @@ export function OfferDetail({ listing }: { listing: Listing }) {
               onChange={() => undefined}
               address={listing.address ?? ""}
               readOnly
+              polygon={parcelPolygon}
+              lockEditing={Boolean(parcelPolygon)}
+              perimeterM={perimeterM}
+              areaSqm={areaSqm}
+              areaLabel={sizeLabel || listing.size}
+              showDimensions
+              blueprint={{
+                governorate: listing.governorate ?? undefined,
+                directorate: listing.directorate ?? undefined,
+                village: listing.village ?? undefined,
+                basin: listing.basin ?? undefined,
+                neighborhood: listing.neighborhood ?? undefined,
+                parcel: listing.parcel ?? undefined,
+                industryLabel: t.offers.industryLabel,
+                industryValue: t.offers.industry[listing.industryType],
+              }}
             />
           </div>
 
@@ -183,7 +250,9 @@ export function OfferDetail({ listing }: { listing: Listing }) {
 
         <aside className="lg:sticky lg:top-[calc(var(--header-h)+1rem)] rounded-3xl border border-line bg-white p-6 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)] min-w-0">
           <p className="text-xs font-bold text-ink-soft">{t.offers.price}</p>
-          <p className="text-2xl font-bold text-green mt-1 [overflow-wrap:anywhere]">{listing.price || t.offers.onRequest}</p>
+          <p className="text-2xl font-bold text-green mt-1 [overflow-wrap:anywhere]">
+            {listing.price || t.offers.onRequest}
+          </p>
           {sizeLabel && (
             <p className="text-sm text-ink-soft mt-2 [overflow-wrap:anywhere]">
               {t.offers.size}: <span className="font-bold text-ink">{sizeLabel}</span>

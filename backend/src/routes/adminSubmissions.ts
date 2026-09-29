@@ -8,6 +8,7 @@ import { notifyListingOwner, smsPublished } from "../lib/listingNotify";
 import { audit } from "../lib/audit";
 import { asyncHandler } from "../lib/asyncHandler";
 import { INDUSTRY_TYPES, type IndustryTypeKey } from "../lib/industryTypes";
+import { westernDigitsString } from "../lib/arabicDigits";
 
 export const adminSubmissionsRouter = Router();
 adminSubmissionsRouter.use(requireAdmin);
@@ -85,7 +86,23 @@ const approveSchema = z.object({
   includePrice: z.boolean().default(true),
   includeDocument: z.boolean().default(false),
   includeVideo: z.boolean().default(true),
+  /** When false, public offer hides DLS mid-range estimate (rate × area). */
+  showEstimatedValue: z.boolean().default(true),
   imageUrls: z.array(z.string()).default([]),
+  /** Optional overrides applied before the listing is created. */
+  edits: z
+    .object({
+      title: z.string().min(1).max(120).optional(),
+      price: westernDigitsString(z.string().max(80).optional()),
+      description: z.string().min(1).max(1800).optional(),
+      phone: westernDigitsString(z.string().max(40).optional()),
+      size: westernDigitsString(z.string().max(80).optional()),
+      village: z.string().max(120).optional(),
+      basin: z.string().max(120).optional(),
+      neighborhood: z.string().max(120).optional(),
+      parcel: westernDigitsString(z.string().max(40).optional()),
+    })
+    .optional(),
 });
 
 adminSubmissionsRouter.post(
@@ -108,7 +125,9 @@ adminSubmissionsRouter.post(
     const allowed = new Set<string>([...submission.images, ...standby.map((s) => s.url)]);
     const images = input.imageUrls.filter((url) => allowed.has(url));
 
-    const area = submission.village || "منطقة أخرى";
+    const edits = input.edits ?? {};
+    const village = edits.village?.trim() || submission.village;
+    const area = village || "منطقة أخرى";
     const listingNo = await nextListingNo(prisma, area);
     const ownerAccessCode = await nextOwnerAccessCode(prisma);
     const industryType = submission.industryType
@@ -129,19 +148,23 @@ adminSubmissionsRouter.post(
     const listing = await prisma.listing.create({
       data: {
         listingNo,
-        title: submission.village ? `أرض صناعية في ${submission.village}` : "عرض عقاري جديد",
+        title:
+          edits.title?.trim() ||
+          (village ? `أرض صناعية في ${village}` : "عرض عقاري جديد"),
         area,
         propertyType: "أرض صناعية",
         industryType,
         dealType: "sale",
-        size: submission.area,
-        price: input.includePrice ? submission.price : null,
+        size: edits.size?.trim() || submission.area,
+        price: input.includePrice ? edits.price?.trim() || submission.price : null,
         governorate: submission.governorate,
         directorate: submission.directorate,
-        village: submission.village,
-        neighborhood: input.includeParcel ? submission.neighborhood : null,
-        basin: input.includeParcel ? submission.basin : null,
-        parcel: input.includeParcel ? submission.parcel : null,
+        village,
+        neighborhood: input.includeParcel
+          ? edits.neighborhood?.trim() || submission.neighborhood
+          : null,
+        basin: input.includeParcel ? edits.basin?.trim() || submission.basin : null,
+        parcel: input.includeParcel ? edits.parcel?.trim() || submission.parcel : null,
         locationUrl: input.includeParcel ? submission.coordinates : null,
         latitude: input.includeParcel ? structuredSubmission.latitude : null,
         longitude: input.includeParcel ? structuredSubmission.longitude : null,
@@ -149,7 +172,8 @@ adminSubmissionsRouter.post(
         administrativeValue: structuredSubmission.administrativeValue,
         administrativeValueSource: structuredSubmission.administrativeValueSource,
         administrativeValueAt: structuredSubmission.administrativeValueAt,
-        phone: submission.phone,
+        showEstimatedValue: input.showEstimatedValue,
+        phone: edits.phone?.trim() || submission.phone,
         status: "available",
         publishStatus: input.publish ? "published" : "draft",
         featured: false,
@@ -158,7 +182,7 @@ adminSubmissionsRouter.post(
         presenterRole: submission.source === "broker" ? "broker" : "owner",
         presenterName: submission.applicant,
         showPresenter: false,
-        description: submission.details,
+        description: edits.description?.trim() || submission.details,
         internalNotes: `تم إنشاء العرض من طلب المراجعة ${submission.id}`,
         source: "review",
         mainImage: images[0] ?? null,

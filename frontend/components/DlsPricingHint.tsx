@@ -11,13 +11,23 @@ type Props = {
   source?: string | null;
   retrievedAt?: string | null;
   className?: string;
+  /** When false, hide the mid-range (rate × area) total on public offers. */
+  showMedian?: boolean;
 };
 
 /** Official DLS rate + optional median estimate (rate × area). */
-export function DlsPricingHint({ ratePerSqm, areaSqm, sizeLabel, source, retrievedAt, className }: Props) {
+export function DlsPricingHint({
+  ratePerSqm,
+  areaSqm,
+  sizeLabel,
+  source,
+  retrievedAt,
+  className,
+  showMedian = true,
+}: Props) {
   const { t, lang } = useLanguage();
   const effectiveArea = areaSqm && areaSqm > 0 ? areaSqm : parseAreaSqm(sizeLabel);
-  const median = effectiveArea ? adminMedianEstimate(ratePerSqm, effectiveArea) : null;
+  const median = showMedian && effectiveArea ? adminMedianEstimate(ratePerSqm, effectiveArea) : null;
   const currency = t.owners.dlsHintCurrency;
 
   return (
@@ -29,20 +39,22 @@ export function DlsPricingHint({ ratePerSqm, areaSqm, sizeLabel, source, retriev
         </span>{" "}
         {t.owners.dlsHintPerSqm}
       </p>
-      {median != null && effectiveArea != null ? (
-        <p className="font-bold text-green mt-1.5">
-          {t.owners.dlsHintMedianPrefix}{" "}
-          <span className="tabular-nums" dir="ltr">
-            {formatMoney(median, lang)} {currency}
-          </span>
-          <span className="font-normal text-ink-soft">
-            {" "}
-            ({formatAreaSqm(effectiveArea, lang)} × {formatMoney(ratePerSqm, lang)})
-          </span>
-        </p>
-      ) : (
-        <p className="mt-1.5">{t.owners.dlsHintMedianWaiting}</p>
-      )}
+      {showMedian ? (
+        median != null && effectiveArea != null ? (
+          <p className="font-bold text-green mt-1.5">
+            {t.owners.dlsHintMedianPrefix}{" "}
+            <span className="tabular-nums" dir="ltr">
+              {formatMoney(median, lang)} {currency}
+            </span>
+            <span className="font-normal text-ink-soft">
+              {" "}
+              ({formatAreaSqm(effectiveArea, lang)} × {formatMoney(ratePerSqm, lang)})
+            </span>
+          </p>
+        ) : (
+          <p className="mt-1.5">{t.owners.dlsHintMedianWaiting}</p>
+        )
+      ) : null}
       <p className="mt-1.5">{t.owners.dlsHintNote}</p>
       {(source || retrievedAt) && (
         <p className="mt-1 text-[10px]" dir="ltr">

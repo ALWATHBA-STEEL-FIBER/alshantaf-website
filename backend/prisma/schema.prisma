@@ -145,6 +145,8 @@ model Listing {
   presenterRole  PresenterRole?
   presenterName  String?
   showPresenter  Boolean        @default(false)
+  /// When false, public offer hides the DLS mid-range (rate × area) estimate.
+  showEstimatedValue Boolean    @default(true)
   description    String
   internalNotes  String?
   mainImage      String?

@@ -63,6 +63,7 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
     presenterRole: listing?.presenterRole ?? "",
     presenterName: listing?.presenterName ?? "",
     showPresenter: listing?.showPresenter ?? false,
+    showEstimatedValue: listing?.showEstimatedValue ?? true,
     description: listing?.description ?? "",
     internalNotes: listing?.internalNotes ?? "",
   });
@@ -449,6 +450,15 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
           <label className="sm:col-span-2 flex items-center gap-2 text-sm">
             <input type="checkbox" checked={fields.showPresenter} onChange={update("showPresenter")} className="accent-green w-4 h-4" />
             {lf.showPresenter}
+          </label>
+          <label className="sm:col-span-2 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={fields.showEstimatedValue}
+              onChange={update("showEstimatedValue")}
+              className="accent-green w-4 h-4"
+            />
+            {lf.showEstimatedValue}
           </label>
           <div className="sm:col-span-2">
             <label className={labelClass}>{lf.description}</label>

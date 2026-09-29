@@ -219,7 +219,19 @@ export const api = {
       includePrice: boolean;
       includeDocument: boolean;
       includeVideo: boolean;
+      showEstimatedValue?: boolean;
       imageUrls: string[];
+      edits?: {
+        title?: string;
+        price?: string;
+        description?: string;
+        phone?: string;
+        size?: string;
+        village?: string;
+        basin?: string;
+        neighborhood?: string;
+        parcel?: string;
+      };
     }
   ) => clientFetch<Listing>(`/admin/submissions/${id}/approve`, { method: "POST", body: JSON.stringify(data) }),
 

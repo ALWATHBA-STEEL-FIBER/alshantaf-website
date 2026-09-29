@@ -621,15 +621,28 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
   // Body scroll lock + Escape while portal fullscreen is open
   useEffect(() => {
     if (!fullscreen) return;
-    const prev = document.body.style.overflow;
+    const prevOverflow = document.body.style.overflow;
+    const prevTouchAction = document.body.style.touchAction;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    document.documentElement.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setFullscreen(false);
     };
+    const onTouchMove = (e: TouchEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest?.(".parcel-side-mount, .parcel-fs-portal-toolbar")) return;
+      e.preventDefault();
+    };
     window.addEventListener("keydown", onKey);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
     return () => {
-      document.body.style.overflow = prev;
+      document.body.style.overflow = prevOverflow;
+      document.body.style.touchAction = prevTouchAction;
+      document.documentElement.style.overflow = prevHtmlOverflow;
       window.removeEventListener("keydown", onKey);
+      document.removeEventListener("touchmove", onTouchMove);
     };
   }, [fullscreen]);
 
@@ -640,7 +653,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
 
   const toolbar = (fs: boolean) => (
     <div
-      className={`shrink-0 flex flex-wrap items-center justify-end gap-2 px-2 py-2 ${
+      className={`${fs ? "parcel-fs-portal-toolbar" : ""} shrink-0 flex flex-wrap items-center justify-end gap-2 px-2 py-2 ${
         fs ? "bg-[#0f342f] border-b border-gold/35" : "bg-[#0a1f1c] border-b border-gold/25"
       }`}
     >
@@ -685,7 +698,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       ref={fs ? shellRef : undefined}
       className={
         fs
-          ? "parcel-fs-portal fixed inset-0 z-[10000] flex flex-col gap-2 bg-[#0a1f1c] p-3"
+          ? "parcel-fs-portal fixed inset-0 z-[10000] flex flex-col gap-2 bg-[#0a1f1c] p-3 overflow-hidden"
           : "parcel-side-shell mt-2 rounded-lg overflow-hidden border border-gold/30 bg-[#071816] flex flex-col gap-0 p-0"
       }
       role={fs ? "dialog" : undefined}

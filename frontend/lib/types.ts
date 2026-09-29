@@ -69,6 +69,8 @@ export interface Listing {
   presenterRole: PresenterRole | null;
   presenterName: string | null;
   showPresenter: boolean;
+  /** When false, public offer hides DLS mid-range (rate × area) estimate. */
+  showEstimatedValue: boolean;
   description: string;
   internalNotes: string | null;
   mainImage: string | null;

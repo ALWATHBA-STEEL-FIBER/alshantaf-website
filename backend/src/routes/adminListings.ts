@@ -54,6 +54,7 @@ const listingBaseSchema = z.object({
   presenterRole: z.enum(["owner", "presenter", "broker", "company", "other"]).optional().nullable(),
   presenterName: z.string().optional(),
   showPresenter: z.boolean().default(false),
+  showEstimatedValue: z.boolean().default(true),
   description: z.string().min(1).max(1800),
   internalNotes: z.string().optional(),
   media: z.array(mediaItemSchema).default([]),

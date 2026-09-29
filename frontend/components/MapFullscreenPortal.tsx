@@ -78,18 +78,31 @@ export function MapFullscreenPortal({
   const basemapRef = useRef(basemap);
   basemapRef.current = basemap;
 
-  // Body scroll lock + Escape
+  // Body scroll lock + Escape; block iOS rubber-band scroll outside the map pane
   useEffect(() => {
     if (!open) return;
-    const prev = document.body.style.overflow;
+    const prevOverflow = document.body.style.overflow;
+    const prevTouchAction = document.body.style.touchAction;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    document.documentElement.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
+    const onTouchMove = (e: TouchEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest?.(".map-fs-portal-pane, .map-fs-portal-toolbar")) return;
+      e.preventDefault();
+    };
     window.addEventListener("keydown", onKey);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
     return () => {
-      document.body.style.overflow = prev;
+      document.body.style.overflow = prevOverflow;
+      document.body.style.touchAction = prevTouchAction;
+      document.documentElement.style.overflow = prevHtmlOverflow;
       window.removeEventListener("keydown", onKey);
+      document.removeEventListener("touchmove", onTouchMove);
     };
   }, [open, onClose]);
 
@@ -225,12 +238,12 @@ export function MapFullscreenPortal({
 
   return createPortal(
     <div
-      className="map-fs-portal fixed inset-0 z-[10000] flex flex-col gap-2 bg-[#0a1f1c] p-3"
+      className={`map-fs-portal fixed inset-0 z-[10000] flex flex-col gap-2 bg-[#0a1f1c] p-3 overflow-hidden`}
       role="dialog"
       aria-modal="true"
       aria-label={lp.exitFullscreen}
     >
-      <div className="shrink-0 flex flex-wrap items-center justify-end gap-2 rounded-xl border border-gold/40 bg-[#0f342f] px-2 py-2">
+      <div className="map-fs-portal-toolbar shrink-0 flex flex-wrap items-center justify-end gap-2 rounded-xl border border-gold/40 bg-[#0f342f] px-2 py-2">
         <div
           className="inline-flex rounded-full border border-gold/35 bg-[#0a1f1c] p-0.5"
           role="group"
