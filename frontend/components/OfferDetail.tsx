@@ -37,6 +37,22 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   const [areaSqm, setAreaSqm] = useState<number | null>(() => parseAreaSqm(listing.size));
   const [activePhoto, setActivePhoto] = useState(0);
   const [photoFsOpen, setPhotoFsOpen] = useState(false);
+  const expectsParcel = Boolean(
+    listing.governorate &&
+      listing.directorate &&
+      listing.village &&
+      listing.basin &&
+      listing.neighborhood &&
+      listing.parcel?.trim()
+  );
+  const expectsMap = Boolean(
+    (listing.latitude !== null && listing.longitude !== null) ||
+      parseCoords(listing.locationUrl) ||
+      expectsParcel
+  );
+  const [geoLoading, setGeoLoading] = useState(expectsParcel);
+  const [mapReady, setMapReady] = useState(!expectsMap);
+  const [topoReady, setTopoReady] = useState(!expectsParcel);
   const thumbRailRef = useRef<HTMLDivElement>(null);
   const stageRailRef = useRef<HTMLDivElement>(null);
 
@@ -47,30 +63,44 @@ export function OfferDetail({ listing }: { listing: Listing }) {
 
   useEffect(() => {
     let cancelled = false;
-    const { governorate, directorate, village, basin, neighborhood, parcel } = listing;
-    if (!governorate || !directorate || !village || !basin || !neighborhood || !parcel?.trim()) {
+    if (!expectsParcel) {
       setParcelPolygon(null);
       setPerimeterM(null);
+      setGeoLoading(false);
+      setTopoReady(true);
       return;
     }
+    setGeoLoading(true);
+    setTopoReady(false);
     const timer = window.setTimeout(async () => {
       try {
         const data = await loadDlsLocations();
-        const codes = codesForSelection(data, governorate, directorate, village, basin, neighborhood);
+        const codes = codesForSelection(
+          data,
+          listing.governorate!,
+          listing.directorate!,
+          listing.village!,
+          listing.basin!,
+          listing.neighborhood!
+        );
         if (!codes || cancelled) return;
         const location = await api.dlsParcelLocationPublic({
           ...codes,
-          parcelNumber: parcel.trim(),
+          parcelNumber: listing.parcel!.trim(),
         });
         if (cancelled) return;
         setParcelPolygon(location.rings);
         setPerimeterM(location.perimeterM);
         if (location.areaSqm != null) setAreaSqm(location.areaSqm);
+        setTopoReady(!(location.rings?.[0]?.length));
       } catch {
         if (!cancelled) {
           setParcelPolygon(null);
           setPerimeterM(null);
+          setTopoReady(true);
         }
+      } finally {
+        if (!cancelled) setGeoLoading(false);
       }
     }, 200);
     return () => {
@@ -78,6 +108,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
       window.clearTimeout(timer);
     };
   }, [
+    expectsParcel,
     listing.governorate,
     listing.directorate,
     listing.village,
@@ -85,6 +116,10 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     listing.neighborhood,
     listing.parcel,
   ]);
+
+  useEffect(() => {
+    if (!expectsMap) setMapReady(true);
+  }, [expectsMap]);
 
   useEffect(() => {
     if (!photoFsOpen) return;
@@ -133,6 +168,14 @@ export function OfferDetail({ listing }: { listing: Listing }) {
       ? adminMedianEstimate(pricePerSqm, effectiveArea)
       : null;
   const currency = t.owners.dlsHintCurrency;
+  const spatialLoading =
+    geoLoading || (expectsMap && !mapReady) || (hasParcelOutline && !topoReady);
+  const spatialLoadingLabel =
+    geoLoading || (expectsMap && !mapReady && hasParcelOutline && !topoReady)
+      ? t.offers.mapTopoLoading
+      : expectsMap && !mapReady
+        ? t.offers.mapLoading
+        : t.offers.topoLoading;
 
   const locationShared = {
     value: mapCoords ? coordsToString(mapCoords) : "",
@@ -374,7 +417,29 @@ export function OfferDetail({ listing }: { listing: Listing }) {
 
           <div className="mt-6">
             <h2 className="text-[11px] font-bold text-gold tracking-wide mb-3">{t.offers.mapTitle}</h2>
-            <LocationInput {...locationShared} showMap showTopo={false} />
+            {spatialLoading && (
+              <div
+                className="mb-3 flex items-center gap-2.5 rounded-2xl border border-green/20 bg-green/5 px-3.5 py-3 text-sm font-bold text-green"
+                role="status"
+                aria-live="polite"
+              >
+                <span
+                  className="inline-block h-4 w-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
+                  aria-hidden
+                />
+                {spatialLoadingLabel}
+              </div>
+            )}
+            {expectsMap ? (
+              <LocationInput
+                {...locationShared}
+                showMap
+                showTopo={false}
+                loading={geoLoading || !mapReady}
+                loadingLabel={spatialLoadingLabel}
+                onMapReadyChange={setMapReady}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -413,11 +478,30 @@ export function OfferDetail({ listing }: { listing: Listing }) {
             className="rounded-2xl border border-line bg-white/90 p-4"
           />
 
-          {hasParcelOutline && (
+          {(geoLoading && expectsParcel) || hasParcelOutline ? (
             <div>
-              <LocationInput {...locationShared} showMap={false} showTopo />
+              {geoLoading && !hasParcelOutline ? (
+                <div
+                  className="rounded-2xl border-2 border-white bg-gradient-to-br from-[#0a1f1c] via-[#0f342f] to-[#0a1f1c] p-6 min-h-[280px] flex flex-col items-center justify-center gap-3 text-gold"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span
+                    className="inline-block h-6 w-6 rounded-full border-2 border-gold/25 border-t-gold animate-spin"
+                    aria-hidden
+                  />
+                  <p className="text-xs font-bold text-center px-2">{t.offers.topoLoading}</p>
+                </div>
+              ) : (
+                <LocationInput
+                  {...locationShared}
+                  showMap={false}
+                  showTopo
+                  onTopoSettledChange={() => setTopoReady(true)}
+                />
+              )}
             </div>
-          )}
+          ) : null}
         </aside>
       </div>
     </div>

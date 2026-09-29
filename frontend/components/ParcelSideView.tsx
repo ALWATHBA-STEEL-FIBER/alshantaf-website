@@ -47,6 +47,8 @@ type Props = {
   lang: "ar" | "en";
   blueprintMeta?: BlueprintMeta;
   onReadyChange?: (ready: boolean) => void;
+  /** Fires once when elevation load finishes (success or failure). */
+  onSettledChange?: () => void;
   /** When true, omit outer card chrome (parent section already provides it). */
   embedded?: boolean;
 };
@@ -159,6 +161,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     lang,
     blueprintMeta,
     onReadyChange,
+    onSettledChange,
     embedded = false,
   },
   ref
@@ -269,6 +272,10 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
   useEffect(() => {
     onReadyChange?.(status === "ready");
   }, [status, onReadyChange]);
+
+  useEffect(() => {
+    if (status === "ready" || status === "failed") onSettledChange?.();
+  }, [status, onSettledChange]);
 
   useEffect(() => {
     if (!model || !mountRef.current) {

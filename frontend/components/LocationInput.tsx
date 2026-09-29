@@ -63,6 +63,10 @@ interface Props {
     industryUserChoseNote?: string;
   } | null;
   onBlueprintReadyChange?: (ready: boolean) => void;
+  /** Fires when 3D topo load finishes (success or failure). */
+  onTopoSettledChange?: () => void;
+  /** Fires when the Leaflet map instance is ready (or torn down). */
+  onMapReadyChange?: (ready: boolean) => void;
   /** When false, omit the 2D map block (offer page can place map/topo in separate columns). */
   showMap?: boolean;
   /** When false, omit the 3D topography block. */
@@ -99,6 +103,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   showDimensions = true,
   blueprint = null,
   onBlueprintReadyChange,
+  onTopoSettledChange,
+  onMapReadyChange,
   showMap = true,
   showTopo = true,
 }: Props,
@@ -288,6 +294,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const satLayerRef = useRef<import("leaflet").TileLayer | null>(null);
   const basemapRef = useRef<Basemap>(basemap);
   basemapRef.current = basemap;
+  const onMapReadyChangeRef = useRef(onMapReadyChange);
+  onMapReadyChangeRef.current = onMapReadyChange;
 
   const extents = useMemo(() => {
     if (!polygon?.[0]?.length) return null;
@@ -373,15 +381,20 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         window.setTimeout(() => map.invalidateSize({ animate: false }), 400);
       });
       setMapReady(true);
+      onMapReadyChangeRef.current?.(true);
     };
 
     boot().catch(() => {
       setStatus("error");
       setMessage(lp.loading);
+      // Unblock parents waiting on map readiness even if boot failed.
+      setMapReady(true);
+      onMapReadyChangeRef.current?.(true);
     });
     return () => {
       cancelled = true;
       setMapReady(false);
+      onMapReadyChangeRef.current?.(false);
       const map = mapRef.current;
       if (map && clickHandler) map.off("click", clickHandler);
       map?.remove();
@@ -899,6 +912,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             exitFullscreenLabel={lp.exitFullscreen}
             lang={lang}
             onReadyChange={handleReadyChange}
+            onSettledChange={onTopoSettledChange}
             embedded
             blueprintMeta={{
               lang,
