@@ -175,7 +175,7 @@ export function LiveOffersGrid({
         </div>
       ) : (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {sorted.map((offer, index) => {
+          {sorted.map((offer) => {
             const industryLabel = t.offers.industry[offer.industryType];
             const statusLabel = t.offers.status[offer.status];
             const title = localizeListingTitle(offer.title, lang);
@@ -183,15 +183,14 @@ export function LiveOffersGrid({
             const propertyType = localizePropertyType(offer.propertyType, lang, t.offers.propertyTypeFallback);
             const sizeLabel = localizeSizeLabel(offer.size, lang);
             const sold = offer.status === "sold";
-            const wide = Boolean(offer.featured && index === 0 && !sold);
             return (
               <article
                 key={offer.id}
                 className={`group overflow-hidden flex flex-col rounded-3xl border bg-white transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_28px_50px_-28px_rgba(15,52,47,0.45)] ${
                   offer.featured ? "border-gold/60" : "border-line hover:border-green/25"
-                } ${wide ? "sm:col-span-2 lg:col-span-2 lg:flex-row" : ""} ${sold ? "opacity-90" : ""}`}
+                } ${sold ? "opacity-90" : ""}`}
               >
-                <div className={`relative overflow-hidden ${wide ? "h-64 lg:h-auto lg:w-[48%] shrink-0" : "h-52"}`}>
+                <div className="relative overflow-hidden h-52">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={offer.mainImage || "/industrial-clean-wide.webp"}
@@ -219,7 +218,7 @@ export function LiveOffersGrid({
                     </span>
                   )}
                 </div>
-                <div className={`p-5 flex flex-col gap-2 flex-1 ${wide ? "lg:p-7 lg:justify-center" : ""}`}>
+                <div className="p-5 flex flex-col gap-2 flex-1">
                   <div className="flex justify-between text-[11px] text-ink-soft gap-3">
                     <span>
                       {propertyType} • {offer.dealType || t.offers.dealTypeFallback}
@@ -229,10 +228,8 @@ export function LiveOffersGrid({
                     </span>
                   </div>
                   {industryLabel && <span className="text-[10px] font-bold text-gold tracking-wide">{industryLabel}</span>}
-                  <h3 className={`font-bold leading-snug group-hover:text-green transition-colors ${wide ? "text-2xl" : "text-lg"}`}>
-                    {title}
-                  </h3>
-                  <p className={`text-sm text-ink-soft ${wide ? "line-clamp-4" : "line-clamp-3"}`}>{offer.description}</p>
+                  <h3 className="font-bold leading-snug text-lg group-hover:text-green transition-colors">{title}</h3>
+                  <p className="text-sm text-ink-soft line-clamp-3">{offer.description}</p>
                   <div className="grid grid-cols-2 gap-3 mt-2 pt-3 border-t border-line">
                     <div className="min-w-0">
                       <small className="block text-[10px] text-ink-soft">{t.offers.size}</small>
@@ -243,7 +240,7 @@ export function LiveOffersGrid({
                       <b className="block text-sm [overflow-wrap:anywhere]">{offer.price || t.offers.onRequest}</b>
                     </div>
                   </div>
-                  <div className={`mt-auto pt-4 grid gap-2 ${wide ? "sm:grid-cols-2 max-w-md" : "grid-cols-2"}`}>
+                  <div className="mt-auto pt-4 grid grid-cols-2 gap-2">
                     <Link
                       href={`/offers/${offer.id}`}
                       className="h-11 rounded-full bg-surface-2 text-xs font-bold flex items-center justify-center hover:bg-line/50 transition-colors"
