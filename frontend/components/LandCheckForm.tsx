@@ -12,6 +12,7 @@ import { toWesternDigits } from "@/lib/arabicDigits";
 import { adminMedianEstimate } from "@/lib/adminPricing";
 import { parseCoords, coordsToString, formatDlsArea } from "@/lib/mapCoords";
 import { loadDlsLocations, codesForSelection } from "@/lib/dlsLocations";
+import { CheckIcon } from "@/components/icons";
 import { useJourney } from "@/lib/journey/JourneyProvider";
 import type { IndustryType } from "@/lib/types";
 
@@ -43,32 +44,29 @@ function clearClientKey() {
   }
 }
 
-const emptyFields = {
-  name: "",
-  phone: "",
-  email: "",
-  governorate: "",
-  directorate: "",
-  village: "",
-  basin: "",
-  neighborhood: "",
-  parcel: "",
-  coordinates: "",
-  address: "",
-  areaLabel: "",
-  notes: "",
-};
-
 export function LandCheckForm() {
   const { t, lang } = useLanguage();
   const { state: journey, patch: patchJourney } = useJourney();
   const clientKeyRef = useRef<string>("");
   const locationRef = useRef<LocationInputHandle>(null);
-  const [phase, setPhase] = useState<"form" | "results">("form");
   const [blueprintReady, setBlueprintReady] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
-  const [fields, setFields] = useState(emptyFields);
+  const [fields, setFields] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    governorate: "",
+    directorate: "",
+    village: "",
+    basin: "",
+    neighborhood: "",
+    parcel: "",
+    coordinates: "",
+    address: "",
+    areaLabel: "",
+    notes: "",
+  });
   const [industryType, setIndustryType] = useState<IndustryType | "">("");
   const [areaSqm, setAreaSqm] = useState<number | null>(null);
   const [perimeterM, setPerimeterM] = useState<number | null>(null);
@@ -250,57 +248,6 @@ export function LandCheckForm() {
     };
   }, [fields.governorate, fields.directorate, fields.village, fields.basin, fields.neighborhood, fields.parcel, industryType, lang]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    if (!industryType) {
-      setError(t.landCheck.regulationRequired);
-      return;
-    }
-    if (!fields.governorate || !fields.directorate || !fields.village || !fields.basin || !fields.neighborhood || !fields.parcel) {
-      setError(t.landCheck.requiredError);
-      return;
-    }
-    // Returning from "edit details" — keep the same saved check.
-    if (serialNo) {
-      setPhase("results");
-      setPrintError("");
-      return;
-    }
-    if (!clientKeyRef.current) clientKeyRef.current = getOrCreateClientKey();
-    setSubmitting(true);
-    try {
-      const result = await api.createLandCheck(buildPayload(true));
-      clearClientKey();
-      clientKeyRef.current = "";
-      setSerialNo(result.serialNo);
-      setPhase("results");
-      setPrintError("");
-      if (industryType) patchJourney({ industryType, landCheckDone: true });
-      else patchJourney({ landCheckDone: true });
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : t.owners.genericError);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  function resetAll() {
-    setPhase("form");
-    setSerialNo(null);
-    clientKeyRef.current = getOrCreateClientKey();
-    setFields(emptyFields);
-    setIndustryType("");
-    setDlsHint(null);
-    setAreaSqm(null);
-    setPerimeterM(null);
-    setParcelPolygon(null);
-    setDraftStatus("idle");
-    setBlueprintReady(false);
-    setPrintError("");
-    setError("");
-  }
-
   function handlePrint() {
     setPrintError("");
     setPrinting(true);
@@ -332,208 +279,128 @@ export function LandCheckForm() {
       .finally(() => setPrinting(false));
   }
 
-  if (phase === "results") {
-    return (
-      <section className="py-16 md:py-20">
-        <div className="mx-auto max-w-[1240px] px-4 flex flex-col gap-8">
-          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-            <div>
-              <span className="text-gold text-xs font-bold tracking-wide">{t.landCheck.eyebrow}</span>
-              <h1 className="text-3xl md:text-4xl font-bold mt-2 text-balance">{t.landCheck.resultTitle}</h1>
-              <p className="text-ink-soft mt-2 text-sm leading-relaxed max-w-2xl">{t.landCheck.resultNote}</p>
-            </div>
-            {serialNo && (
-              <div className="bg-white rounded-2xl border border-line px-5 py-3 text-center shrink-0">
-                <small className="block text-[10px] text-ink-soft">{t.landCheck.resultSerial}</small>
-                <b className="text-sm font-mono" dir="ltr">
-                  {serialNo}
-                </b>
-              </div>
-            )}
-          </div>
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (!industryType) {
+      setError(t.landCheck.regulationRequired);
+      return;
+    }
+    if (!fields.governorate || !fields.directorate || !fields.village || !fields.basin || !fields.neighborhood || !fields.parcel) {
+      setError(t.landCheck.requiredError);
+      return;
+    }
+    if (!clientKeyRef.current) clientKeyRef.current = getOrCreateClientKey();
+    setSubmitting(true);
+    try {
+      const result = await api.createLandCheck(buildPayload(true));
+      clearClientKey();
+      clientKeyRef.current = "";
+      setSerialNo(result.serialNo);
+      if (industryType) patchJourney({ industryType, landCheckDone: true });
+      else patchJourney({ landCheckDone: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t.owners.genericError);
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
-          <div className="grid lg:grid-cols-2 gap-6">
-            <RegulationGuide value={industryType} readOnly scope="all" />
-
-            <div className="rounded-2xl border border-line bg-white p-4 sm:p-5 flex flex-col gap-3">
-              <p className="text-xs font-bold text-green">{t.landCheck.resultPricingTitle}</p>
-              {fields.areaLabel && (
-                <div className="rounded-xl border border-line bg-surface-2/80 px-3.5 py-2.5">
-                  <small className="block text-[10px] text-ink-soft">{t.owners.area}</small>
-                  <b className="text-sm">{fields.areaLabel}</b>
-                  {dlsMapStatus === "ready" && (
-                    <p className="text-[11px] text-ink-soft mt-1">{t.owners.areaDlsNote}</p>
-                  )}
-                </div>
-              )}
-              {dlsHintStatus === "loading" && (
-                <div className="flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[11px] text-ink-soft">
-                  <span
-                    className="inline-block w-4 h-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
-                    aria-hidden
-                  />
-                  <span>{t.owners.dlsHintLoading}</span>
-                </div>
-              )}
-              {dlsHintStatus === "missing" && (
-                <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 leading-relaxed">
-                  {t.owners.dlsHintMissing}
-                </p>
-              )}
-              {dlsHintStatus === "failed" && (
-                <p className="text-[11px] text-ink-soft">{t.owners.dlsHintFailed}</p>
-              )}
-              {dlsHint && (
-                <DlsPricingHint
-                  ratePerSqm={dlsHint.value}
-                  areaSqm={areaSqm}
-                  sizeLabel={fields.areaLabel}
-                  source={dlsHint.source}
-                  retrievedAt={dlsHint.retrievedAt}
-                />
-              )}
-              {!dlsHint && dlsHintStatus === "idle" && !fields.areaLabel && (
-                <p className="text-[11px] text-ink-soft leading-relaxed">{t.owners.dlsMapIdle}</p>
-              )}
-              {(fields.governorate || fields.village || fields.parcel) && (
-                <div className="mt-1 grid grid-cols-2 gap-2 text-sm">
-                  {fields.governorate && (
-                    <div>
-                      <small className="block text-[10px] text-ink-soft">{t.owners.governorate}</small>
-                      <span>{fields.governorate}</span>
-                    </div>
-                  )}
-                  {fields.village && (
-                    <div>
-                      <small className="block text-[10px] text-ink-soft">{t.owners.village}</small>
-                      <span>{fields.village}</span>
-                    </div>
-                  )}
-                  {fields.basin && (
-                    <div>
-                      <small className="block text-[10px] text-ink-soft">{t.owners.basin}</small>
-                      <span>{fields.basin}</span>
-                    </div>
-                  )}
-                  {fields.parcel && (
-                    <div>
-                      <small className="block text-[10px] text-ink-soft">{t.owners.parcel}</small>
-                      <span dir="ltr">{fields.parcel}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-line bg-white p-3 sm:p-5 flex flex-col gap-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold text-green">{t.landCheck.resultMapTitle}</p>
-                <p className="text-[11px] text-ink-soft mt-0.5 leading-relaxed">
-                  {dlsMapStatus === "loading"
-                    ? t.owners.dlsMapLoading
-                    : dlsMapStatus === "ready"
-                      ? t.owners.dlsMapReady
-                      : dlsMapStatus === "missing"
-                        ? t.owners.dlsMapMissing
-                        : dlsMapStatus === "failed"
-                          ? t.owners.dlsMapFailed
-                          : t.owners.dlsMapIdle}
-                </p>
-              </div>
-              {dlsMapStatus === "loading" && (
-                <span
-                  className="inline-block w-5 h-5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
-                  aria-hidden
-                />
-              )}
-            </div>
-            <LocationInput
-              ref={locationRef}
-              value={fields.coordinates}
-              onChange={(v) => setFields((f) => ({ ...f, coordinates: v }))}
-              address={fields.address}
-              onAddressChange={(address) => setFields((f) => ({ ...f, address }))}
-              polygon={parcelPolygon}
-              lockEditing={dlsMapStatus === "ready"}
-              loading={dlsMapStatus === "loading"}
-              loadingLabel={t.owners.dlsMapLoading}
-              statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReady : undefined}
-              idleNote={t.owners.dlsMapIdle}
-              areaLabel={fields.areaLabel}
-              areaSqm={areaSqm}
-              perimeterM={perimeterM}
-              showDimensions
-              onBlueprintReadyChange={setBlueprintReady}
-              blueprint={{
-                governorate: fields.governorate,
-                directorate: fields.directorate,
-                village: fields.village,
-                basin: fields.basin,
-                neighborhood: fields.neighborhood,
-                parcel: fields.parcel,
-                notes: fields.notes,
-                industryLabel: t.regulations.selectLabel,
-                industryValue: industryType
-                  ? (t.offers.industry as Record<string, string>)[industryType] || industryType
-                  : undefined,
-              }}
-            />
-          </div>
-
-          {printError && <p className="text-sm text-red-600">{printError}</p>}
-
-          <div className="flex flex-col sm:flex-row flex-wrap gap-3">
-            <button
-              type="button"
-              disabled={!blueprintReady || printing || !parcelPolygon?.[0]?.length}
-              onClick={handlePrint}
-              className="h-12 px-6 rounded-full bg-gold text-green font-bold hover:bg-gold-2 transition-colors disabled:opacity-50 sm:flex-1"
-            >
-              {printing ? t.locationPicker.sideViewPrinting : t.locationPicker.sideViewPrint}
-            </button>
-            {journey.intent === "build_hangar" && journey.hasLand && (
-              <Link
-                href="/journey"
-                className="h-12 px-6 rounded-full bg-green text-white text-sm font-bold flex items-center justify-center hover:bg-green-2 transition-colors sm:flex-1"
-              >
-                {t.journey.hangarSpecsTitle}
-              </Link>
-            )}
-            <Link
-              href="/request-publish"
-              className={`h-12 px-6 rounded-full text-sm font-bold flex items-center justify-center transition-colors sm:flex-1 ${
-                journey.intent === "build_hangar" && journey.hasLand
-                  ? "border border-line hover:bg-surface-2"
-                  : "bg-green text-white hover:bg-green-2"
-              }`}
-            >
-              {t.landCheck.resultListCta}
-            </Link>
-            <button
-              type="button"
-              onClick={() => setPhase("form")}
-              className="h-12 px-6 rounded-full border border-line text-sm font-bold hover:bg-surface-2 transition-colors"
-            >
-              {t.landCheck.resultEdit}
-            </button>
-            <button
-              type="button"
-              onClick={resetAll}
-              className="h-12 px-6 rounded-full border border-line text-sm font-bold hover:bg-surface-2 transition-colors"
-            >
-              {t.landCheck.resultAgain}
-            </button>
-          </div>
-        </div>
-      </section>
-    );
+  function resetAll() {
+    setSerialNo(null);
+    clientKeyRef.current = getOrCreateClientKey();
+    setFields({
+      name: "",
+      phone: "",
+      email: "",
+      governorate: "",
+      directorate: "",
+      village: "",
+      basin: "",
+      neighborhood: "",
+      parcel: "",
+      coordinates: "",
+      address: "",
+      areaLabel: "",
+      notes: "",
+    });
+    setIndustryType("");
+    setDlsHint(null);
+    setAreaSqm(null);
+    setPerimeterM(null);
+    setParcelPolygon(null);
+    setDraftStatus("idle");
+    setBlueprintReady(false);
+    setPrintError("");
+    setError("");
   }
 
   return (
     <section className="py-16 md:py-20">
-      <div className="mx-auto max-w-[1240px] px-4 grid lg:grid-cols-[1fr_1.3fr] gap-10">
+      {serialNo && (
+        <div className="mx-auto max-w-[640px] px-4 mb-10">
+          <div className="bg-white rounded-[1.75rem] border border-line p-8 md:p-10 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]">
+            <div className="w-12 h-12 rounded-full bg-green/10 text-green flex items-center justify-center mx-auto">
+              <CheckIcon />
+            </div>
+            <h2 className="text-2xl font-bold text-center mt-4">{t.landCheck.resultTitle}</h2>
+            <div className="mt-6 bg-surface-2 rounded-xl p-4 text-center">
+              <small className="block text-[10px] text-ink-soft">{t.landCheck.resultSerial}</small>
+              <b className="text-sm font-mono" dir="ltr">
+                {serialNo}
+              </b>
+            </div>
+            <p className="text-sm text-ink-soft text-center mt-4 leading-relaxed">{t.landCheck.resultNote}</p>
+            {printError && <p className="text-sm text-red-600 text-center mt-3">{printError}</p>}
+            <div className="mt-6 flex flex-col gap-3">
+              <button
+                type="button"
+                disabled={!blueprintReady || printing || !parcelPolygon?.[0]?.length}
+                onClick={handlePrint}
+                className="h-11 rounded-full bg-gold text-green text-sm font-bold hover:bg-gold-2 transition-colors disabled:opacity-50"
+              >
+                {printing ? t.locationPicker.sideViewPrinting : t.locationPicker.sideViewPrint}
+              </button>
+              <div className="flex flex-col sm:flex-row gap-3">
+                {journey.intent === "build_hangar" && journey.hasLand && (
+                  <Link
+                    href="/journey"
+                    className="h-11 rounded-full bg-green text-white text-sm font-bold flex items-center justify-center hover:bg-green-2 transition-colors sm:flex-1"
+                  >
+                    {t.journey.hangarSpecsTitle}
+                  </Link>
+                )}
+                <Link
+                  href="/request-publish"
+                  className={`h-11 rounded-full text-sm font-bold flex items-center justify-center transition-colors sm:flex-1 ${
+                    journey.intent === "build_hangar" && journey.hasLand
+                      ? "border border-line hover:bg-surface-2"
+                      : "bg-green text-white hover:bg-green-2"
+                  }`}
+                >
+                  {t.landCheck.resultListCta}
+                </Link>
+                <button
+                  type="button"
+                  onClick={resetAll}
+                  className="h-11 rounded-full border border-line text-sm font-bold hover:bg-surface-2 transition-colors sm:flex-1"
+                >
+                  {t.landCheck.resultAgain}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div
+        className={
+          serialNo
+            ? "fixed top-0 left-[-200vw] w-[1100px] opacity-0 pointer-events-none"
+            : "mx-auto max-w-[1240px] px-4 grid lg:grid-cols-[1fr_1.3fr] gap-10"
+        }
+        aria-hidden={serialNo ? true : undefined}
+      >
         <div>
           <span className="text-gold text-xs font-bold tracking-wide">{t.landCheck.eyebrow}</span>
           <h1 className="text-3xl md:text-4xl font-bold mt-2 text-balance">{t.landCheck.title}</h1>
@@ -640,11 +507,129 @@ export function LandCheckForm() {
           <p className="text-xs font-bold text-green">{t.landCheck.regulationSection}</p>
           <RegulationGuide
             value={industryType}
-            onChange={setIndustryType}
+            onChange={(key) => {
+              setIndustryType(key);
+            }}
             scope="all"
             required
-            hideDetails
           />
+
+          <div className="rounded-2xl border border-line bg-white/60 p-3 sm:p-4 flex flex-col gap-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-green">{t.owners.dlsMapSection}</p>
+                <p className="text-[11px] text-ink-soft mt-0.5 leading-relaxed">
+                  {!industryType
+                    ? t.owners.dlsMapNeedRegulation
+                    : dlsMapStatus === "loading"
+                      ? t.owners.dlsMapLoading
+                      : dlsMapStatus === "ready"
+                        ? t.owners.dlsMapReady
+                        : dlsMapStatus === "missing"
+                          ? t.owners.dlsMapMissing
+                          : dlsMapStatus === "failed"
+                            ? t.owners.dlsMapFailed
+                            : t.owners.dlsMapIdle}
+                </p>
+              </div>
+              {dlsMapStatus === "loading" && (
+                <span
+                  className="inline-block w-5 h-5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
+                  aria-hidden
+                />
+              )}
+            </div>
+            <LocationInput
+              ref={locationRef}
+              value={fields.coordinates}
+              onChange={(v) => setFields((f) => ({ ...f, coordinates: v }))}
+              address={fields.address}
+              onAddressChange={(address) => setFields((f) => ({ ...f, address }))}
+              polygon={parcelPolygon}
+              lockEditing={dlsMapStatus === "ready"}
+              loading={dlsMapStatus === "loading"}
+              loadingLabel={t.owners.dlsMapLoading}
+              statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReady : undefined}
+              idleNote={!industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
+              areaLabel={fields.areaLabel}
+              areaSqm={areaSqm}
+              perimeterM={perimeterM}
+              showDimensions
+              onBlueprintReadyChange={setBlueprintReady}
+              blueprint={{
+                governorate: fields.governorate,
+                directorate: fields.directorate,
+                village: fields.village,
+                basin: fields.basin,
+                neighborhood: fields.neighborhood,
+                parcel: fields.parcel,
+                notes: fields.notes,
+                industryLabel: t.regulations.selectLabel,
+                industryValue: industryType
+                  ? (t.offers.industry as Record<string, string>)[industryType] || industryType
+                  : undefined,
+              }}
+            />
+          </div>
+
+          <p className="text-xs font-bold text-green">{t.landCheck.detailsSection}</p>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass}>{t.owners.area}</label>
+              <input
+                className={inputClass}
+                value={fields.areaLabel}
+                readOnly
+                placeholder={lang === "ar" ? "تُملأ تلقائيًا من دائرة الأراضي" : "Filled automatically from DLS"}
+              />
+              {dlsMapStatus === "ready" && fields.areaLabel && (
+                <p className="text-[11px] text-ink-soft mt-1.5">{t.owners.areaDlsNote}</p>
+              )}
+              {dlsMapStatus === "loading" && !fields.areaLabel && (
+                <div className="mt-2 flex items-center gap-2 text-[11px] text-ink-soft">
+                  <span
+                    className="inline-block w-3.5 h-3.5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
+                    aria-hidden
+                  />
+                  <span>{t.owners.dlsMapLoading}</span>
+                </div>
+              )}
+            </div>
+            <div>
+              <label className={labelClass}>{lang === "ar" ? "القيمة الاسترشادية" : "Guide value"}</label>
+              {dlsHintStatus === "loading" && (
+                <div className="mt-1 flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[11px] text-ink-soft">
+                  <span
+                    className="inline-block w-4 h-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
+                    aria-hidden
+                  />
+                  <span>{t.owners.dlsHintLoading}</span>
+                </div>
+              )}
+              {dlsHintStatus === "missing" && (
+                <p className="text-[11px] text-red-700 mt-1 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 leading-relaxed">
+                  {t.owners.dlsHintMissing}
+                </p>
+              )}
+              {dlsHintStatus === "failed" && (
+                <p className="text-[11px] text-ink-soft mt-1">{t.owners.dlsHintFailed}</p>
+              )}
+              {dlsHint && (
+                <DlsPricingHint
+                  ratePerSqm={dlsHint.value}
+                  areaSqm={areaSqm}
+                  sizeLabel={fields.areaLabel}
+                  source={dlsHint.source}
+                  retrievedAt={dlsHint.retrievedAt}
+                />
+              )}
+              {!dlsHint && dlsHintStatus === "idle" && (
+                <p className="text-[11px] text-ink-soft mt-1 leading-relaxed">
+                  {!industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
+                </p>
+              )}
+            </div>
+          </div>
 
           <div>
             <label className={labelClass} htmlFor="lc-notes">
@@ -660,25 +645,26 @@ export function LandCheckForm() {
             />
           </div>
 
-          {(dlsMapStatus === "loading" || dlsHintStatus === "loading") && (
-            <div className="flex items-center gap-2 text-[11px] text-ink-soft">
-              <span
-                className="inline-block w-3.5 h-3.5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
-                aria-hidden
-              />
-              <span>{t.owners.dlsMapLoading}</span>
-            </div>
-          )}
-
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {printError && <p className="text-sm text-red-600">{printError}</p>}
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="h-12 px-5 rounded-full bg-green text-white font-bold hover:bg-green-2 transition-colors disabled:opacity-60"
-          >
-            {submitting ? t.landCheck.submitting : t.landCheck.submit}
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              type="button"
+              disabled={!blueprintReady || printing || !parcelPolygon?.[0]?.length}
+              onClick={handlePrint}
+              className="h-12 px-5 rounded-full bg-gold text-green font-bold hover:bg-gold-2 transition-colors disabled:opacity-50 sm:flex-1"
+            >
+              {printing ? t.locationPicker.sideViewPrinting : t.locationPicker.sideViewPrint}
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="h-12 px-5 rounded-full bg-green text-white font-bold hover:bg-green-2 transition-colors disabled:opacity-60 sm:flex-1"
+            >
+              {submitting ? t.landCheck.submitting : t.landCheck.submit}
+            </button>
+          </div>
         </form>
       </div>
     </section>
