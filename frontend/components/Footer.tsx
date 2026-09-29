@@ -13,7 +13,7 @@ export function Footer() {
   const team = useTeam();
 
   return (
-    <footer className="relative mt-20 overflow-hidden bg-green text-white/85">
+    <footer className="relative mt-20 overflow-hidden bg-green text-white/85 pb-[env(safe-area-inset-bottom,0px)]">
       <div className="absolute inset-0 opacity-30 pointer-events-none" aria-hidden>
         <div className="absolute -top-24 -end-16 w-72 h-72 rounded-full bg-gold/20 blur-3xl" />
         <div className="absolute bottom-0 start-0 w-80 h-56 bg-[radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.08),transparent_60%)]" />

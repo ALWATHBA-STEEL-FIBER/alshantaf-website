@@ -60,6 +60,12 @@ export function Header() {
 
   return (
     <div ref={wrapperRef} className="fixed top-0 inset-x-0 z-40">
+      {/* Homescreen / notched devices — fill + push chrome below the island */}
+      <div
+        className={`transition-colors duration-300 ${transparent ? "bg-transparent" : "bg-green"}`}
+        style={{ height: "env(safe-area-inset-top, 0px)" }}
+        aria-hidden
+      />
       <MaintenanceBanner />
 
       <div
@@ -220,7 +226,7 @@ export function Header() {
       {drawerOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <button className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} aria-label="close" />
-          <div className="absolute inset-y-0 start-0 w-[82%] max-w-xs bg-white p-5 flex flex-col gap-1 overflow-y-auto shadow-2xl">
+          <div className="absolute inset-y-0 start-0 w-[82%] max-w-xs bg-white p-5 pt-[calc(1.25rem+env(safe-area-inset-top,0px))] pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] flex flex-col gap-1 overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between mb-4 gap-3">
               <Link href="/" onClick={() => setDrawerOpen(false)} className="flex items-center gap-2.5 min-w-0">
                 <Logo className="h-11 w-auto shrink-0" />

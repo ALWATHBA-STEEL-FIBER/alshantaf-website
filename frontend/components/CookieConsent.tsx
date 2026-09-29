@@ -33,7 +33,7 @@ export function CookieConsent() {
   if (!visible) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 p-4">
+    <div className="fixed inset-x-0 bottom-0 z-50 p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
       <div className="mx-auto max-w-2xl bg-green text-white rounded-2xl shadow-[0_20px_50px_-20px_rgba(0,0,0,0.5)] p-4 sm:p-5 flex flex-col gap-3">
         <p className="text-sm leading-relaxed">
           {t.cookieConsent.text}{" "}

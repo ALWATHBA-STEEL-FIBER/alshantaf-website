@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { StandaloneExternalLinks } from "@/components/StandaloneExternalLinks";
 
 const CookieConsent = dynamic(() => import("@/components/CookieConsent").then((m) => m.CookieConsent), {
   ssr: false,
@@ -24,6 +25,7 @@ export function DeferredSiteChrome() {
       <PresenceHeartbeat />
       <CookieConsent />
       <AiAssistant />
+      <StandaloneExternalLinks />
     </>
   );
 }

@@ -106,7 +106,7 @@ export function AiAssistant() {
   if (!enabled) return null;
 
   return (
-    <div className="pointer-events-none fixed bottom-4 end-4 z-40 flex flex-col items-end gap-3 sm:bottom-6 sm:end-6">
+    <div className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom,0px))] end-4 z-40 flex flex-col items-end gap-3 sm:bottom-[max(1.5rem,env(safe-area-inset-bottom,0px))] sm:end-6">
       {open && (
         <section
           className="pointer-events-auto flex h-[min(70vh,560px)] w-[min(100vw-2rem,380px)] flex-col overflow-hidden rounded-3xl border border-line bg-[#f7f5f0] shadow-[0_28px_60px_-28px_rgba(15,52,47,0.55)]"
