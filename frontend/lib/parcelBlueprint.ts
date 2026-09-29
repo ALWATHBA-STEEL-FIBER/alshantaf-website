@@ -1049,40 +1049,37 @@ async function composeBlueprintA4Jpeg(opts: {
   }
 
   y += topoH + 12;
-  ctx.strokeStyle = GREEN;
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(padX, y);
-  ctx.lineTo(W - padX, y);
-  ctx.stroke();
-  y += 12;
 
-  // Footer — site left, both engineer contacts side-by-side on the right
+  // Footer bar — green background, white text
+  const footTop = y;
+  const footH = H - edge - footTop - 4;
   ctx.fillStyle = GREEN;
+  ctx.fillRect(edge, footTop, W - edge * 2, footH);
+
+  const footPadX = padX;
+  const footY = footTop + 14;
+  ctx.fillStyle = "#ffffff";
   ctx.font = '800 22px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  ctx.fillText(BLUEPRINT_SITE_URL, padX, y);
-  ctx.fillStyle = "#333333";
+  ctx.fillText(BLUEPRINT_SITE_URL, footPadX, footY);
   ctx.font = '600 16px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText(stabilizeRtlAsciiPunct(opts.location), padX, y + 26, W * 0.42);
-  ctx.fillStyle = "#666666";
+  ctx.fillText(stabilizeRtlAsciiPunct(opts.location), footPadX, footY + 26, W * 0.42);
   ctx.font = '500 13px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
   const footNote = wrapCanvasText(ctx, stabilizeRtlAsciiPunct(opts.footerNote), W * 0.42);
   footNote.slice(0, 2).forEach((line, i) => {
-    ctx.fillText(line, padX, y + 48 + i * 15, W * 0.42);
+    ctx.fillText(line, footPadX, footY + 48 + i * 15, W * 0.42);
   });
 
   const contactColW = 230;
   BLUEPRINT_CONTACTS.forEach((c, i) => {
     const cx = W - padX - (BLUEPRINT_CONTACTS.length - 1 - i) * (contactColW + 16);
-    ctx.fillStyle = "#111111";
+    ctx.fillStyle = "#ffffff";
     ctx.font = '700 16px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
     ctx.textAlign = "right";
-    ctx.fillText(c.name, cx, y);
-    ctx.fillStyle = GREEN;
+    ctx.fillText(c.name, cx, footY);
     ctx.font = '800 20px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
-    ctx.fillText(c.phone, cx, y + 24);
+    ctx.fillText(c.phone, cx, footY + 24);
   });
 
   return canvas.toDataURL("image/jpeg", 0.92);
@@ -1607,13 +1604,17 @@ export async function printParcelBlueprint(opts: {
     display: grid;
     grid-template-columns: 1fr 1.15fr;
     gap: 3mm;
-    align-items: end;
+    align-items: center;
     height: 16mm;
     max-height: 16mm;
     min-height: 0;
-    padding-top: 1.5mm;
-    border-top: 0.45mm solid var(--green);
+    margin: 0 -7mm -5mm;
+    padding: 2.5mm 7mm 3mm;
+    background: var(--green);
+    color: #ffffff;
     overflow: hidden;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .footer-left {
     text-align: left;
@@ -1622,7 +1623,7 @@ export async function printParcelBlueprint(opts: {
   .footer-url {
     font-size: 7.5pt;
     font-weight: 800;
-    color: var(--green);
+    color: #ffffff;
     direction: ltr;
     unicode-bidi: isolate;
   }
@@ -1630,7 +1631,7 @@ export async function printParcelBlueprint(opts: {
     margin-top: 0.4mm;
     font-size: 6pt;
     font-weight: 600;
-    color: #333333;
+    color: #ffffff;
     line-height: 1.2;
     max-width: 88mm;
     unicode-bidi: plaintext;
@@ -1638,7 +1639,7 @@ export async function printParcelBlueprint(opts: {
   .footer-note {
     margin-top: 0.5mm;
     font-size: 4.5pt;
-    color: #666666;
+    color: rgba(255,255,255,0.85);
     line-height: 1.2;
     max-width: 95mm;
     unicode-bidi: plaintext;
@@ -1662,14 +1663,14 @@ export async function printParcelBlueprint(opts: {
   .contact-name {
     font-size: 6pt;
     font-weight: 700;
-    color: #111111;
+    color: #ffffff;
     line-height: 1.15;
     white-space: nowrap;
   }
   .contact-phone {
     font-size: 7.5pt;
     font-weight: 800;
-    color: var(--green);
+    color: #ffffff;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
     line-height: 1.15;
