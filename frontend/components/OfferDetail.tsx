@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { useSettings } from "@/lib/SettingsProvider";
 import { offerWhatsappLink } from "@/lib/whatsapp";
@@ -8,7 +9,13 @@ import { api } from "@/lib/api";
 import { buildSrcSet } from "@/lib/imageSrcSet";
 import { coordsToString, parseCoords } from "@/lib/mapCoords";
 import { codesForSelection, loadDlsLocations } from "@/lib/dlsLocations";
-import { parseAreaSqm } from "@/lib/adminPricing";
+import {
+  adminMedianEstimate,
+  formatAreaSqm,
+  formatMoney,
+  parseAreaSqm,
+  parsePricePerSqm,
+} from "@/lib/adminPricing";
 import {
   localizeListingTitle,
   localizePlaceName,
@@ -29,6 +36,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   const [perimeterM, setPerimeterM] = useState<number | null>(null);
   const [areaSqm, setAreaSqm] = useState<number | null>(() => parseAreaSqm(listing.size));
   const [activePhoto, setActivePhoto] = useState(0);
+  const [photoFsOpen, setPhotoFsOpen] = useState(false);
   const thumbRailRef = useRef<HTMLDivElement>(null);
   const stageRailRef = useRef<HTMLDivElement>(null);
 
@@ -78,6 +86,23 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     listing.parcel,
   ]);
 
+  useEffect(() => {
+    if (!photoFsOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPhotoFsOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [photoFsOpen]);
+
   const images = listing.images.length
     ? listing.images
     : [listing.mainImage].filter((x): x is string => Boolean(x));
@@ -98,9 +123,16 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           .join(" — ")
       : "";
   const whatsappHref = offerWhatsappLink(listing.phone, listing.listingNo, title, settings.whatsappNumber);
-  const showEstimated = listing.showEstimatedValue !== false;
+  const showOfficialEst = listing.showEstimatedValue !== false;
   const hasFiles = Boolean(listing.video || listing.document);
   const hasParcelOutline = Boolean(parcelPolygon?.[0]?.length);
+  const pricePerSqm = parsePricePerSqm(listing.price);
+  const effectiveArea = areaSqm && areaSqm > 0 ? areaSqm : parseAreaSqm(listing.size);
+  const requestedTotal =
+    !showOfficialEst && pricePerSqm != null && effectiveArea != null
+      ? adminMedianEstimate(pricePerSqm, effectiveArea)
+      : null;
+  const currency = t.owners.dlsHintCurrency;
 
   const locationShared = {
     value: mapCoords ? coordsToString(mapCoords) : "",
@@ -125,8 +157,9 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     },
   };
 
-  function selectPhoto(index: number) {
+  function selectPhoto(index: number, opts?: { openFullscreen?: boolean }) {
     setActivePhoto(index);
+    if (opts?.openFullscreen) setPhotoFsOpen(true);
     const stage = stageRailRef.current;
     if (stage) {
       const slide = stage.children[index] as HTMLElement | undefined;
@@ -154,9 +187,64 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     setActivePhoto(best);
   }
 
+  const pricingBlock =
+    showOfficialEst && listing.administrativeValue !== null ? (
+      <DlsPricingHint
+        ratePerSqm={listing.administrativeValue}
+        sizeLabel={listing.size}
+        areaSqm={areaSqm}
+        source={listing.administrativeValueSource}
+        retrievedAt={listing.administrativeValueAt}
+        showMedian
+        className="mt-3 rounded-2xl border border-gold/40 bg-gold/10 p-3.5 text-[11px] text-ink-soft leading-relaxed"
+      />
+    ) : requestedTotal != null && pricePerSqm != null && effectiveArea != null ? (
+      <div className="mt-3 rounded-2xl border border-green/25 bg-green/5 p-3.5 text-[11px] text-ink-soft leading-relaxed">
+        <p className="font-bold text-green">
+          {t.offers.requestedTotalLabel}:{" "}
+          <span className="tabular-nums" dir="ltr">
+            {formatMoney(requestedTotal, lang)} {currency}
+          </span>
+          <span className="font-normal text-ink-soft">
+            {" "}
+            ({formatAreaSqm(effectiveArea, lang)} × {formatMoney(pricePerSqm, lang)})
+          </span>
+        </p>
+        <p className="mt-1.5">{t.offers.requestedTotalNote}</p>
+      </div>
+    ) : null;
+
+  const photoLightbox =
+    photoFsOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div className="offer-photo-fs" role="dialog" aria-modal="true" aria-label={t.offers.openFullscreenPhoto}>
+            <div className="offer-photo-fs-toolbar">
+              <button
+                type="button"
+                onClick={() => setPhotoFsOpen(false)}
+                className="h-9 px-4 rounded-full border border-gold bg-gold text-[#0a1f1c] text-[11px] font-bold"
+              >
+                {t.offers.closeFullscreen}
+              </button>
+            </div>
+            <div className="offer-photo-fs-stage" onClick={() => setPhotoFsOpen(false)}>
+              <img
+                src={gallery[activePhoto]}
+                srcSet={buildSrcSet(gallery[activePhoto])}
+                sizes="100vw"
+                alt={title}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
     <div className="mx-auto max-w-[1100px] px-4 py-12 md:py-16">
-      {/* Photo + file rails — full width above the two columns */}
+      {photoLightbox}
+
       <section className="mb-8 min-w-0">
         <div className="flex items-baseline justify-between gap-3 mb-3">
           <h2 className="text-[11px] font-bold text-gold tracking-wide">{t.offers.galleryLabel}</h2>
@@ -173,9 +261,9 @@ export function OfferDetail({ listing }: { listing: Listing }) {
             <button
               key={src + i}
               type="button"
-              onClick={() => selectPhoto(i)}
+              onClick={() => selectPhoto(i, { openFullscreen: true })}
               className="relative aspect-[4/3] sm:aspect-[16/10] w-[min(88vw,720px)] overflow-hidden rounded-[1.1rem] focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold"
-              aria-label={`${i + 1} / ${gallery.length}`}
+              aria-label={t.offers.openFullscreenPhoto}
             >
               <img
                 src={src}
@@ -250,7 +338,6 @@ export function OfferDetail({ listing }: { listing: Listing }) {
       </section>
 
       <div className="grid lg:grid-cols-[1.4fr_0.8fr] gap-8 items-start">
-        {/* Left: listing dossier + 2D map */}
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             {areaLabel && <span className="text-gold text-xs font-bold tracking-wide">{areaLabel}</span>}
@@ -277,17 +364,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
             <Fact k={t.offers.statusLabel} v={t.offers.status[listing.status]} />
           </div>
 
-          {listing.administrativeValue !== null && (
-            <DlsPricingHint
-              ratePerSqm={listing.administrativeValue}
-              sizeLabel={listing.size}
-              areaSqm={areaSqm}
-              source={listing.administrativeValueSource}
-              retrievedAt={listing.administrativeValueAt}
-              showMedian={showEstimated}
-              className="mt-3 rounded-2xl border border-gold/40 bg-gold/10 p-3.5 text-[11px] text-ink-soft leading-relaxed"
-            />
-          )}
+          {pricingBlock}
 
           {presenter && (
             <div className="mt-5 rounded-2xl border border-line bg-surface-2/80 p-4 text-sm text-green">
@@ -301,7 +378,6 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           </div>
         </div>
 
-        {/* Right: contact + regulation + 3D */}
         <aside className="min-w-0 flex flex-col gap-5 lg:sticky lg:top-[calc(var(--header-h)+1rem)]">
           <div className="rounded-3xl border border-line bg-white p-6 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]">
             <p className="text-xs font-bold text-ink-soft">{t.offers.price}</p>
@@ -311,6 +387,14 @@ export function OfferDetail({ listing }: { listing: Listing }) {
             {sizeLabel && (
               <p className="text-sm text-ink-soft mt-2 [overflow-wrap:anywhere]">
                 {t.offers.size}: <span className="font-bold text-ink">{sizeLabel}</span>
+              </p>
+            )}
+            {requestedTotal != null && (
+              <p className="text-sm text-ink-soft mt-2 [overflow-wrap:anywhere]">
+                {t.offers.requestedTotalLabel}:{" "}
+                <span className="font-bold text-ink tabular-nums" dir="ltr">
+                  {formatMoney(requestedTotal, lang)} {currency}
+                </span>
               </p>
             )}
             <a

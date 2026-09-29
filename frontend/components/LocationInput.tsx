@@ -730,7 +730,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       {showMap && (
       <section
-        className="location-map-section w-full rounded-2xl border border-line bg-white p-3 sm:p-4 shadow-sm"
+        className="location-map-section w-full rounded-2xl border-2 border-green bg-white p-3 sm:p-4 shadow-sm"
         aria-label={lp.mapSectionTitle}
       >
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -879,7 +879,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       {showTopo && Boolean(polygon?.[0]?.length) && !loading && (
         <section
-          className="location-topo-section w-full rounded-2xl border border-gold/40 bg-gradient-to-br from-[#0a1f1c] via-[#0f342f] to-[#0a1f1c] p-3 sm:p-4 shadow-sm"
+          className="location-topo-section w-full rounded-2xl border-2 border-white bg-gradient-to-br from-[#0a1f1c] via-[#0f342f] to-[#0a1f1c] p-3 sm:p-4 shadow-sm ring-1 ring-black/10"
           aria-label={lp.topoSectionTitle}
         >
           <h3 className="text-sm font-bold text-gold tracking-wide mb-1 px-1">{lp.topoSectionTitle}</h3>
