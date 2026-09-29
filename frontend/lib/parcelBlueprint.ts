@@ -875,7 +875,7 @@ async function composeBlueprintA4Jpeg(opts: {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
 
-  // Green page edge that merges into the top-center icon badge
+  // Green page edge
   const edge = 18;
   ctx.strokeStyle = GREEN;
   ctx.lineWidth = edge;
@@ -885,29 +885,13 @@ async function composeBlueprintA4Jpeg(opts: {
   const padTop = 36;
   let y = padTop;
 
-  // Header: motto | logo | title (symmetric columns; logo sits in green badge)
-  const logoSize = 118;
-  const headerH = 128;
-  const colW = (W - padX * 2 - logoSize - 48) / 2;
-  const logoX = (W - logoSize) / 2;
-  const logoY = y + (headerH - logoSize) / 2 - 4;
-
-  // Green badge behind logo, merging with top edge
-  ctx.fillStyle = GREEN;
-  const badgePad = 10;
-  const badgeR = logoSize / 2 + badgePad;
-  ctx.beginPath();
-  ctx.arc(W / 2, edge / 2, badgeR + 8, Math.PI, 0, true);
-  ctx.lineTo(W / 2 + badgeR + 8, logoY + logoSize + badgePad);
-  ctx.arc(W / 2, logoY + logoSize / 2, badgeR + 8, 0, Math.PI, false);
-  ctx.closePath();
-  ctx.fill();
-
-  // Soft white inset so the favicon reads cleanly
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-  ctx.arc(W / 2, logoY + logoSize / 2, logoSize / 2 + 4, 0, Math.PI * 2);
-  ctx.fill();
+  // Header: motto | logo (plain ellipse) | title
+  const logoW = 132;
+  const logoH = 96;
+  const headerH = 118;
+  const colW = (W - padX * 2 - logoW - 48) / 2;
+  const logoX = (W - logoW) / 2;
+  const logoY = y + (headerH - logoH) / 2;
 
   ctx.fillStyle = "#222222";
   ctx.font = '600 20px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
@@ -925,9 +909,9 @@ async function composeBlueprintA4Jpeg(opts: {
       const logo = await loadImage(opts.logoDataUrl);
       ctx.save();
       ctx.beginPath();
-      ctx.arc(W / 2, logoY + logoSize / 2, logoSize / 2, 0, Math.PI * 2);
+      ctx.ellipse(W / 2, logoY + logoH / 2, logoW / 2, logoH / 2, 0, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(logo, logoX, logoY, logoSize, logoSize);
+      ctx.drawImage(logo, logoX, logoY, logoW, logoH);
       ctx.restore();
     } catch {
       /* skip logo */
@@ -950,7 +934,7 @@ async function composeBlueprintA4Jpeg(opts: {
   ctx.beginPath();
   ctx.moveTo(padX, y);
   ctx.lineTo(logoX - 12, y);
-  ctx.moveTo(logoX + logoSize + 12, y);
+  ctx.moveTo(logoX + logoW + 12, y);
   ctx.lineTo(W - padX, y);
   ctx.stroke();
   y += 16;
@@ -1490,22 +1474,16 @@ export async function printParcelBlueprint(opts: {
     align-items: center;
     justify-content: center;
     justify-self: center;
-    width: 26mm;
-    height: 26mm;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 0 2.2mm var(--green);
+    width: 30mm;
+    height: 22mm;
     overflow: hidden;
-    position: relative;
-    z-index: 2;
-    margin-top: -3mm;
+    clip-path: ellipse(50% 50% at 50% 50%);
   }
   .header .logo-wrap img {
-    width: 24mm;
-    height: 24mm;
+    width: 30mm;
+    height: 22mm;
     object-fit: cover;
     display: block;
-    border-radius: 50%;
   }
   .header .title-block {
     text-align: right;
