@@ -177,6 +177,18 @@ export function OfferDetail({ listing }: { listing: Listing }) {
         ? t.offers.mapLoading
         : t.offers.topoLoading;
 
+  useEffect(() => {
+    if (!spatialLoading) return;
+    const prevOverflow = document.body.style.overflow;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+    };
+  }, [spatialLoading]);
+
   const locationShared = {
     value: mapCoords ? coordsToString(mapCoords) : "",
     onChange: () => undefined,
@@ -257,6 +269,28 @@ export function OfferDetail({ listing }: { listing: Listing }) {
       </div>
     ) : null;
 
+  const pageLoader =
+    spatialLoading && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            className="fixed inset-0 z-[9000] flex flex-col items-center justify-center gap-4 bg-[#f3efe6]/96 backdrop-blur-[2px] px-6"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <span
+              className="inline-block h-10 w-10 rounded-full border-[3px] border-green/20 border-t-green animate-spin"
+              aria-hidden
+            />
+            <p className="text-sm md:text-base font-bold text-green text-center max-w-sm">
+              {t.offers.pageLoading}
+            </p>
+            <p className="text-xs text-ink-soft text-center max-w-sm">{spatialLoadingLabel}</p>
+          </div>,
+          document.body
+        )
+      : null;
+
   const photoLightbox =
     photoFsOpen && typeof document !== "undefined"
       ? createPortal(
@@ -286,64 +320,86 @@ export function OfferDetail({ listing }: { listing: Listing }) {
 
   return (
     <div className="mx-auto max-w-[1100px] px-4 py-12 md:py-16">
+      {pageLoader}
       {photoLightbox}
 
       <section className="mb-8 min-w-0">
         <div className="flex items-baseline justify-between gap-3 mb-3">
           <h2 className="text-[11px] font-bold text-gold tracking-wide">{t.offers.galleryLabel}</h2>
-          <span className="text-[11px] tabular-nums text-ink-soft" dir="ltr">
-            {activePhoto + 1} {t.offers.photoOf} {gallery.length}
-          </span>
+          {gallery.length > 1 && (
+            <span className="text-[11px] tabular-nums text-ink-soft" dir="ltr">
+              {activePhoto + 1} {t.offers.photoOf} {gallery.length}
+            </span>
+          )}
         </div>
-        <div
-          ref={stageRailRef}
-          onScroll={onStageScroll}
-          className="offer-media-rail rounded-[1.25rem] border border-line bg-white/50"
-        >
-          {gallery.map((src, i) => (
-            <button
-              key={src + i}
-              type="button"
-              onClick={() => selectPhoto(i, { openFullscreen: true })}
-              className="relative aspect-[4/3] sm:aspect-[16/10] w-[min(88vw,720px)] overflow-hidden rounded-[1.1rem] focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold"
-              aria-label={t.offers.openFullscreenPhoto}
+        {gallery.length === 1 ? (
+          <button
+            type="button"
+            onClick={() => selectPhoto(0, { openFullscreen: true })}
+            className="relative aspect-[4/3] sm:aspect-[16/10] w-full overflow-hidden rounded-[1.25rem] border border-line focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold"
+            aria-label={t.offers.openFullscreenPhoto}
+          >
+            <img
+              src={gallery[0]}
+              srcSet={buildSrcSet(gallery[0])}
+              sizes="(min-width: 1100px) 1100px, 100vw"
+              alt={title}
+              loading="eager"
+              decoding="async"
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          </button>
+        ) : (
+          <>
+            <div
+              ref={stageRailRef}
+              onScroll={onStageScroll}
+              className="offer-media-rail rounded-[1.25rem] border border-line bg-white/50"
             >
-              <img
-                src={src}
-                srcSet={buildSrcSet(src)}
-                sizes="(min-width: 1100px) 720px, 88vw"
-                alt={title}
-                loading={i === 0 ? "eager" : "lazy"}
-                decoding="async"
-                className="absolute inset-0 w-full h-full object-cover"
-              />
-            </button>
-          ))}
-        </div>
-        {gallery.length > 1 && (
-          <div ref={thumbRailRef} className="offer-media-rail mt-3">
-            {gallery.map((src, i) => (
-              <button
-                key={`thumb-${src}-${i}`}
-                type="button"
-                onClick={() => selectPhoto(i)}
-                aria-current={i === activePhoto}
-                className={`relative h-14 w-20 sm:h-16 sm:w-24 overflow-hidden rounded-xl border-2 transition-colors ${
-                  i === activePhoto ? "border-gold" : "border-transparent opacity-70 hover:opacity-100"
-                }`}
-              >
-                <img
-                  src={src}
-                  srcSet={buildSrcSet(src)}
-                  sizes="96px"
-                  alt=""
-                  loading="lazy"
-                  decoding="async"
-                  className="absolute inset-0 w-full h-full object-cover"
-                />
-              </button>
-            ))}
-          </div>
+              {gallery.map((src, i) => (
+                <button
+                  key={src + i}
+                  type="button"
+                  onClick={() => selectPhoto(i, { openFullscreen: true })}
+                  className="relative aspect-[4/3] sm:aspect-[16/10] w-[min(88vw,720px)] overflow-hidden rounded-[1.1rem] focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold"
+                  aria-label={t.offers.openFullscreenPhoto}
+                >
+                  <img
+                    src={src}
+                    srcSet={buildSrcSet(src)}
+                    sizes="(min-width: 1100px) 720px, 88vw"
+                    alt={title}
+                    loading={i === 0 ? "eager" : "lazy"}
+                    decoding="async"
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+            <div ref={thumbRailRef} className="offer-media-rail mt-3">
+              {gallery.map((src, i) => (
+                <button
+                  key={`thumb-${src}-${i}`}
+                  type="button"
+                  onClick={() => selectPhoto(i)}
+                  aria-current={i === activePhoto}
+                  className={`relative h-14 w-20 sm:h-16 sm:w-24 overflow-hidden rounded-xl border-2 transition-colors ${
+                    i === activePhoto ? "border-gold" : "border-transparent opacity-70 hover:opacity-100"
+                  }`}
+                >
+                  <img
+                    src={src}
+                    srcSet={buildSrcSet(src)}
+                    sizes="96px"
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </>
         )}
         {hasFiles && (
           <div className="mt-4">
@@ -417,19 +473,6 @@ export function OfferDetail({ listing }: { listing: Listing }) {
 
           <div className="mt-6">
             <h2 className="text-[11px] font-bold text-gold tracking-wide mb-3">{t.offers.mapTitle}</h2>
-            {spatialLoading && (
-              <div
-                className="mb-3 flex items-center gap-2.5 rounded-2xl border border-green/20 bg-green/5 px-3.5 py-3 text-sm font-bold text-green"
-                role="status"
-                aria-live="polite"
-              >
-                <span
-                  className="inline-block h-4 w-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
-                  aria-hidden
-                />
-                {spatialLoadingLabel}
-              </div>
-            )}
             {expectsMap ? (
               <LocationInput
                 {...locationShared}

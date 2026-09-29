@@ -1,0 +1,25 @@
+---
+description: Auto-commit and push to production after successful edits
+alwaysApply: true
+---
+
+# Auto-deploy to production
+
+After completing a successful set of code edits for a user request, **commit and push to `origin` (production VPS) without waiting for the user to say "push to prod"**.
+
+## When to deploy
+- Edits for the current request are done and working as intended
+- Do **not** ask "want me to push?" — just ship
+
+## How
+1. `git status` / `git diff` / `git log` for commit message style
+2. Stage relevant files only (never secrets)
+3. Commit with the deploy identity env vars used in this repo (`Al Shantaf Deploy` / `deploy@alshantaf.com`) when local git user is unset — do **not** run `git config`
+4. `git push origin HEAD` (triggers VPS deploy hook)
+5. Confirm briefly that deploy finished (or report failure)
+
+## Exceptions — do NOT auto-push when
+- The user only asked a question / review with no code changes
+- Changes are incomplete, broken, or still exploratory
+- The user explicitly said not to deploy / wait / keep local-only
+- Only docs or unrelated files changed and the feature isn't ready
