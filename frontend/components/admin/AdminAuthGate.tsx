@@ -22,8 +22,8 @@ export function AdminAuthGate({ children }: { children: React.ReactNode }) {
       .catch(async () => {
         await api.logout().catch(() => undefined);
         if (!ignore) {
-          // Bare /admin/login is a 404 without ?unlock= — send expired sessions home.
-          router.replace("/");
+          // Trusted devices can open /admin/login without ?unlock=; others get 404 from the proxy.
+          router.replace("/admin/login");
           router.refresh();
         }
       });

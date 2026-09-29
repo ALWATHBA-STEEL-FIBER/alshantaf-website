@@ -105,6 +105,10 @@ export function AdminLoginForm() {
         <button type="submit" disabled={loading} className="h-11 rounded-full bg-green text-white font-bold disabled:opacity-60 hover:bg-green-2 transition-colors">
           {loading ? t.admin.loading : t.admin.login}
         </button>
+        <div className="rounded-2xl border border-line bg-surface-2/80 px-3.5 py-3">
+          <p className="text-[11px] font-bold text-green">{t.admin.installAdminApp}</p>
+          <p className="text-[11px] text-ink-soft mt-1.5 leading-relaxed">{t.admin.installAdminAppHint}</p>
+        </div>
       </form>
     </div>
   );

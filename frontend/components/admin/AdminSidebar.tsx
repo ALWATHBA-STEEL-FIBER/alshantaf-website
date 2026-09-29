@@ -40,7 +40,8 @@ export function AdminSidebar() {
 
   async function handleLogout() {
     await api.logout().catch(() => undefined);
-    router.push("/");
+    // Stay on trusted-device login (no unlock key needed) instead of the public site.
+    router.push("/admin/login");
     router.refresh();
   }
 

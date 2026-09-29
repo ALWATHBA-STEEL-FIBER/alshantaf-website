@@ -4,6 +4,12 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { signSession } from "../lib/jwt";
+import {
+  ADMIN_DEVICE_COOKIE,
+  ADMIN_SESSION_MAX_AGE_MS,
+  adminDeviceCookieOptions,
+  signAdminDeviceToken,
+} from "../lib/adminDevice";
 import { requireAdmin } from "../middleware/auth";
 import { audit } from "../lib/audit";
 import { asyncHandler } from "../lib/asyncHandler";
@@ -23,6 +29,14 @@ const loginLimiter = rateLimit({
   message: { error: "Too many login attempts. Please try again later." },
 });
 
+function requestIsSecure(req: { get: (n: string) => string | undefined; secure?: boolean }) {
+  const forwardedProto = String(req.get("x-forwarded-proto") || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  return forwardedProto === "https" || (!forwardedProto && Boolean(req.secure));
+}
+
 authRouter.post(
   "/login",
   loginLimiter,
@@ -35,26 +49,24 @@ authRouter.post(
       return;
     }
     const token = signSession({ userId: user.id, email: user.email });
-    // Prefer the actual request scheme (nginx sets X-Forwarded-Proto) so local
-    // HTTP docker stacks still receive a usable session cookie.
-    const forwardedProto = String(req.get("x-forwarded-proto") || "")
-      .split(",")[0]
-      .trim()
-      .toLowerCase();
-    const secure = forwardedProto === "https" || (!forwardedProto && Boolean(req.secure));
+    const secure = requestIsSecure(req);
     res.cookie("session", token, {
       httpOnly: true,
       secure,
       sameSite: "lax",
-      maxAge: 12 * 60 * 60 * 1000,
+      maxAge: ADMIN_SESSION_MAX_AGE_MS,
       path: "/",
     });
+    // Trust this browser after a successful unlock+login so future visits
+    // can open /admin/login without the unlock query param.
+    res.cookie(ADMIN_DEVICE_COOKIE, signAdminDeviceToken(), adminDeviceCookieOptions(secure));
     await audit({ actorEmail: user.email, action: "auth.login", ip: req.ip });
     res.json({ id: user.id, email: user.email, name: user.name });
   })
 );
 
 authRouter.post("/logout", (_req, res) => {
+  // Keep admin_device so this trusted device can reach login again without unlock.
   res.clearCookie("session", { path: "/" });
   res.status(204).end();
 });

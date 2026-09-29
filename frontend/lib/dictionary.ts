@@ -1085,7 +1085,10 @@ export const dictionary = {
     },
     admin: {
       loginTitle: "دخول لوحة الإدارة",
-      loginSubtitle: "بيانات دخول داخلية لفريق الشنتف فقط.",
+      loginSubtitle: "بيانات دخول داخلية لفريق الشنتف فقط. بعد أول دخول يُوثَّق هذا الجهاز ويمكنك تثبيت التطبيق للوصول المباشر.",
+      installAdminApp: "ثبّت تطبيق الإدارة على الشاشة الرئيسية",
+      installAdminAppHint:
+        "من متصفح Safari أو Chrome: مشاركة ← إضافة إلى الشاشة الرئيسية. بعد ذلك يفتح اللوحة مباشرة على هذا الجهاز الموثوق.",
       email: "البريد الإلكتروني",
       password: "كلمة المرور",
       login: "دخول",
@@ -2505,7 +2508,10 @@ export const dictionary = {
     },
     admin: {
       loginTitle: "Admin sign in",
-      loginSubtitle: "Internal access for the Alshantaf team only.",
+      loginSubtitle: "Internal access for the Alshantaf team only. After the first sign-in this device is trusted — install the app for direct access.",
+      installAdminApp: "Install the admin app on your home screen",
+      installAdminAppHint:
+        "In Safari or Chrome: Share → Add to Home Screen. The panel then opens directly on this trusted device.",
       email: "Email",
       password: "Password",
       login: "Sign in",
