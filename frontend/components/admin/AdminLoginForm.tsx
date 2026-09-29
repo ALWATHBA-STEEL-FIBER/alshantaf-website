@@ -60,7 +60,7 @@ export function AdminLoginForm() {
   }
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-green px-4">
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-green px-4 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
       <div className="absolute inset-0 pointer-events-none" aria-hidden>
         <div className="absolute -top-24 -end-20 w-80 h-80 rounded-full bg-gold/20 blur-3xl" />
         <div className="absolute bottom-0 start-0 w-[28rem] h-64 bg-[radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.12),transparent_60%)]" />

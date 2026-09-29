@@ -71,7 +71,7 @@ export function AdminSidebar() {
 
   return (
     <>
-      <header className="lg:hidden sticky top-0 z-30 bg-green text-white h-14 flex items-center justify-between px-4">
+      <header className="lg:hidden sticky top-0 z-30 bg-green text-white flex items-center justify-between px-4 h-[calc(3.5rem+env(safe-area-inset-top,0px))] pt-[env(safe-area-inset-top,0px)]">
         <button type="button" onClick={() => setDrawerOpen(true)} aria-label="menu">
           <MenuIcon />
         </button>
@@ -84,7 +84,7 @@ export function AdminSidebar() {
       {drawerOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} aria-label="close" />
-          <div className="absolute inset-y-0 start-0 w-72 max-w-[80%] bg-white p-4 flex flex-col gap-4 shadow-xl">
+          <div className="absolute inset-y-0 start-0 w-72 max-w-[80%] bg-white p-4 pt-[calc(1rem+env(safe-area-inset-top,0px))] flex flex-col gap-4 shadow-xl">
             <div className="flex items-center justify-between">
               <span className="font-bold text-green">ALSHANTAF</span>
               <button onClick={() => setDrawerOpen(false)} type="button" aria-label="close">
@@ -92,7 +92,7 @@ export function AdminSidebar() {
               </button>
             </div>
             {navList}
-            <div className="mt-auto flex flex-col gap-2">
+            <div className="mt-auto flex flex-col gap-2 pb-[env(safe-area-inset-bottom,0px)]">
               <LiveVisitors />
               <Link href="/" className="h-10 px-3 rounded-xl text-sm font-bold text-ink-soft flex items-center gap-2">
                 ← {t.admin.sidebar.backToSite}
