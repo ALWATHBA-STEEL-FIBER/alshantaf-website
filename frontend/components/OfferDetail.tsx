@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { useSettings } from "@/lib/SettingsProvider";
 import { offerWhatsappLink } from "@/lib/whatsapp";
@@ -25,17 +25,18 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   const { t, lang } = useLanguage();
   const settings = useSettings();
   const analyticsAllowed = useAnalyticsAllowed();
-  const lp = t.locationPicker;
   const [parcelPolygon, setParcelPolygon] = useState<[number, number][][] | null>(null);
   const [perimeterM, setPerimeterM] = useState<number | null>(null);
   const [areaSqm, setAreaSqm] = useState<number | null>(() => parseAreaSqm(listing.size));
+  const [activePhoto, setActivePhoto] = useState(0);
+  const thumbRailRef = useRef<HTMLDivElement>(null);
+  const stageRailRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!analyticsAllowed) return;
     api.recordView(listing.id);
   }, [listing.id, analyticsAllowed]);
 
-  // Load DLS parcel outline so map + 3D match land-check when identity is public.
   useEffect(() => {
     let cancelled = false;
     const { governorate, directorate, village, basin, neighborhood, parcel } = listing;
@@ -77,8 +78,10 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     listing.parcel,
   ]);
 
-  const images = listing.images.length ? listing.images : [listing.mainImage].filter((x): x is string => Boolean(x));
-  const gallery = (images.length ? images : ["/industrial-clean-wide.webp"]).slice(0, 4);
+  const images = listing.images.length
+    ? listing.images
+    : [listing.mainImage].filter((x): x is string => Boolean(x));
+  const gallery = images.length ? images : ["/industrial-clean-wide.webp"];
   const mapCoords =
     listing.latitude !== null && listing.longitude !== null
       ? { lat: listing.latitude, lng: listing.longitude }
@@ -96,72 +99,159 @@ export function OfferDetail({ listing }: { listing: Listing }) {
       : "";
   const whatsappHref = offerWhatsappLink(listing.phone, listing.listingNo, title, settings.whatsappNumber);
   const showEstimated = listing.showEstimatedValue !== false;
+  const hasFiles = Boolean(listing.video || listing.document);
+  const hasParcelOutline = Boolean(parcelPolygon?.[0]?.length);
+
+  const locationShared = {
+    value: mapCoords ? coordsToString(mapCoords) : "",
+    onChange: () => undefined,
+    address: listing.address ?? "",
+    readOnly: true as const,
+    polygon: parcelPolygon,
+    lockEditing: hasParcelOutline,
+    perimeterM,
+    areaSqm,
+    areaLabel: sizeLabel || listing.size,
+    showDimensions: true,
+    blueprint: {
+      governorate: listing.governorate ?? undefined,
+      directorate: listing.directorate ?? undefined,
+      village: listing.village ?? undefined,
+      basin: listing.basin ?? undefined,
+      neighborhood: listing.neighborhood ?? undefined,
+      parcel: listing.parcel ?? undefined,
+      industryLabel: t.offers.industryLabel,
+      industryValue: t.offers.industry[listing.industryType],
+    },
+  };
+
+  function selectPhoto(index: number) {
+    setActivePhoto(index);
+    const stage = stageRailRef.current;
+    if (stage) {
+      const slide = stage.children[index] as HTMLElement | undefined;
+      slide?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+    const thumb = thumbRailRef.current?.children[index] as HTMLElement | undefined;
+    thumb?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }
+
+  function onStageScroll() {
+    const stage = stageRailRef.current;
+    if (!stage || stage.children.length === 0) return;
+    const mid = stage.scrollLeft + stage.clientWidth / 2;
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < stage.children.length; i++) {
+      const el = stage.children[i] as HTMLElement;
+      const center = el.offsetLeft + el.offsetWidth / 2;
+      const dist = Math.abs(center - mid);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    setActivePhoto(best);
+  }
 
   return (
     <div className="mx-auto max-w-[1100px] px-4 py-12 md:py-16">
-      <div className="sm:hidden grid gap-2 rounded-[1.75rem] overflow-hidden mb-8">
-        {gallery.map((src, i) => (
-          <div key={src + i} className="relative aspect-[4/3] overflow-hidden">
-            <img
-              src={src}
-              srcSet={buildSrcSet(src)}
-              sizes="100vw"
-              alt={title}
-              loading={i === 0 ? "eager" : "lazy"}
-              decoding="async"
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-          </div>
-        ))}
-      </div>
-
-      <div className="hidden sm:block rounded-[1.75rem] overflow-hidden mb-8">
-        {gallery.length === 1 ? (
-          <div className="relative h-[420px] lg:h-[500px]">
-            <img
-              src={gallery[0]}
-              srcSet={buildSrcSet(gallery[0])}
-              sizes="100vw"
-              alt={title}
-              loading="eager"
-              decoding="async"
-              className="absolute inset-0 w-full h-full object-cover"
-            />
-          </div>
-        ) : (
-          <div className="grid grid-cols-[1.6fr_1fr] gap-2 h-[420px] lg:h-[500px]">
-            <div className="relative overflow-hidden">
+      {/* Photo + file rails — full width above the two columns */}
+      <section className="mb-8 min-w-0">
+        <div className="flex items-baseline justify-between gap-3 mb-3">
+          <h2 className="text-[11px] font-bold text-gold tracking-wide">{t.offers.galleryLabel}</h2>
+          <span className="text-[11px] tabular-nums text-ink-soft" dir="ltr">
+            {activePhoto + 1} {t.offers.photoOf} {gallery.length}
+          </span>
+        </div>
+        <div
+          ref={stageRailRef}
+          onScroll={onStageScroll}
+          className="offer-media-rail rounded-[1.25rem] border border-line bg-white/50"
+        >
+          {gallery.map((src, i) => (
+            <button
+              key={src + i}
+              type="button"
+              onClick={() => selectPhoto(i)}
+              className="relative aspect-[4/3] sm:aspect-[16/10] w-[min(88vw,720px)] overflow-hidden rounded-[1.1rem] focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold"
+              aria-label={`${i + 1} / ${gallery.length}`}
+            >
               <img
-                src={gallery[0]}
-                srcSet={buildSrcSet(gallery[0])}
-                sizes="60vw"
+                src={src}
+                srcSet={buildSrcSet(src)}
+                sizes="(min-width: 1100px) 720px, 88vw"
                 alt={title}
-                loading="eager"
+                loading={i === 0 ? "eager" : "lazy"}
                 decoding="async"
-                className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 hover:scale-105"
+                className="absolute inset-0 w-full h-full object-cover"
               />
-            </div>
-            <div className="flex flex-col gap-2">
-              {gallery.slice(1).map((src, i) => (
-                <div key={src + i} className="relative flex-1 overflow-hidden">
-                  <img
-                    src={src}
-                    srcSet={buildSrcSet(src)}
-                    sizes="33vw"
-                    alt={title}
-                    loading="lazy"
-                    decoding="async"
-                    className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 hover:scale-105"
-                  />
+            </button>
+          ))}
+        </div>
+        {gallery.length > 1 && (
+          <div ref={thumbRailRef} className="offer-media-rail mt-3">
+            {gallery.map((src, i) => (
+              <button
+                key={`thumb-${src}-${i}`}
+                type="button"
+                onClick={() => selectPhoto(i)}
+                aria-current={i === activePhoto}
+                className={`relative h-14 w-20 sm:h-16 sm:w-24 overflow-hidden rounded-xl border-2 transition-colors ${
+                  i === activePhoto ? "border-gold" : "border-transparent opacity-70 hover:opacity-100"
+                }`}
+              >
+                <img
+                  src={src}
+                  srcSet={buildSrcSet(src)}
+                  sizes="96px"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              </button>
+            ))}
+          </div>
+        )}
+        {hasFiles && (
+          <div className="mt-4">
+            <h2 className="text-[11px] font-bold text-gold tracking-wide mb-3">{t.offers.filesLabel}</h2>
+            <div className="offer-media-rail">
+              {listing.video && (
+                <div className="w-[min(88vw,420px)] rounded-2xl border border-line bg-white overflow-hidden">
+                  <div className="px-3 py-2 border-b border-line text-[11px] font-bold text-green">
+                    {t.offers.videoLabel}
+                  </div>
+                  <video controls className="w-full aspect-video bg-black" preload="metadata">
+                    <source src={listing.video} />
+                  </video>
                 </div>
-              ))}
+              )}
+              {listing.document && (
+                <a
+                  href={listing.document}
+                  target="_blank"
+                  rel="noopener"
+                  className="w-[min(70vw,260px)] rounded-2xl border border-line bg-white p-4 flex flex-col justify-between gap-5 hover:border-gold/50 transition-colors"
+                >
+                  <div>
+                    <p className="text-[11px] font-bold text-gold tracking-wide">{t.offers.documentLabel}</p>
+                    <p className="mt-2 text-sm font-bold text-green leading-snug">{t.offers.viewDocument}</p>
+                  </div>
+                  <span className="inline-flex h-9 items-center justify-center rounded-full bg-green text-white text-xs font-bold px-4">
+                    {t.offers.openFile}
+                  </span>
+                </a>
+              )}
             </div>
           </div>
         )}
-      </div>
+      </section>
 
       <div className="grid lg:grid-cols-[1.4fr_0.8fr] gap-8 items-start">
-        <div>
+        {/* Left: listing dossier + 2D map */}
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             {areaLabel && <span className="text-gold text-xs font-bold tracking-wide">{areaLabel}</span>}
             <span dir="ltr" className="text-xs font-mono text-green bg-surface-2 px-2.5 py-1 rounded-full">
@@ -199,73 +289,51 @@ export function OfferDetail({ listing }: { listing: Listing }) {
             />
           )}
 
-          <RegulationGuide value={listing.industryType} readOnly className="mt-3 rounded-2xl border border-line bg-white/90 p-4" />
-
           {presenter && (
-            <div className="mt-5 rounded-2xl border border-line bg-surface-2/80 p-4 text-sm text-green">{presenter}</div>
+            <div className="mt-5 rounded-2xl border border-line bg-surface-2/80 p-4 text-sm text-green">
+              {presenter}
+            </div>
           )}
 
           <div className="mt-6">
-            <LocationInput
-              value={mapCoords ? coordsToString(mapCoords) : ""}
-              onChange={() => undefined}
-              address={listing.address ?? ""}
-              readOnly
-              polygon={parcelPolygon}
-              lockEditing={Boolean(parcelPolygon)}
-              perimeterM={perimeterM}
-              areaSqm={areaSqm}
-              areaLabel={sizeLabel || listing.size}
-              showDimensions
-              blueprint={{
-                governorate: listing.governorate ?? undefined,
-                directorate: listing.directorate ?? undefined,
-                village: listing.village ?? undefined,
-                basin: listing.basin ?? undefined,
-                neighborhood: listing.neighborhood ?? undefined,
-                parcel: listing.parcel ?? undefined,
-                industryLabel: t.offers.industryLabel,
-                industryValue: t.offers.industry[listing.industryType],
-              }}
-            />
+            <h2 className="text-[11px] font-bold text-gold tracking-wide mb-3">{t.offers.mapTitle}</h2>
+            <LocationInput {...locationShared} showMap showTopo={false} />
           </div>
-
-          {listing.video && (
-            <video controls className="w-full rounded-2xl mt-6 border border-line">
-              <source src={listing.video} />
-            </video>
-          )}
-
-          {listing.document && (
-            <a
-              href={listing.document}
-              target="_blank"
-              rel="noopener"
-              className="inline-flex mt-4 text-sm font-bold text-green underline underline-offset-4 hover:text-gold transition-colors"
-            >
-              {t.offers.viewDocument}
-            </a>
-          )}
         </div>
 
-        <aside className="lg:sticky lg:top-[calc(var(--header-h)+1rem)] rounded-3xl border border-line bg-white p-6 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)] min-w-0">
-          <p className="text-xs font-bold text-ink-soft">{t.offers.price}</p>
-          <p className="text-2xl font-bold text-green mt-1 [overflow-wrap:anywhere]">
-            {listing.price || t.offers.onRequest}
-          </p>
-          {sizeLabel && (
-            <p className="text-sm text-ink-soft mt-2 [overflow-wrap:anywhere]">
-              {t.offers.size}: <span className="font-bold text-ink">{sizeLabel}</span>
+        {/* Right: contact + regulation + 3D */}
+        <aside className="min-w-0 flex flex-col gap-5 lg:sticky lg:top-[calc(var(--header-h)+1rem)]">
+          <div className="rounded-3xl border border-line bg-white p-6 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]">
+            <p className="text-xs font-bold text-ink-soft">{t.offers.price}</p>
+            <p className="text-2xl font-bold text-green mt-1 [overflow-wrap:anywhere]">
+              {listing.price || t.offers.onRequest}
             </p>
+            {sizeLabel && (
+              <p className="text-sm text-ink-soft mt-2 [overflow-wrap:anywhere]">
+                {t.offers.size}: <span className="font-bold text-ink">{sizeLabel}</span>
+              </p>
+            )}
+            <a
+              href={whatsappHref}
+              target="_blank"
+              rel="noopener"
+              className="mt-6 flex h-12 rounded-full bg-green text-white font-bold items-center justify-center hover:bg-green-2 transition-colors shadow-[0_14px_28px_-16px_rgba(15,52,47,0.7)]"
+            >
+              {t.offers.whatsapp}
+            </a>
+          </div>
+
+          <RegulationGuide
+            value={listing.industryType}
+            readOnly
+            className="rounded-2xl border border-line bg-white/90 p-4"
+          />
+
+          {hasParcelOutline && (
+            <div>
+              <LocationInput {...locationShared} showMap={false} showTopo />
+            </div>
           )}
-          <a
-            href={whatsappHref}
-            target="_blank"
-            rel="noopener"
-            className="mt-6 flex h-12 rounded-full bg-green text-white font-bold items-center justify-center hover:bg-green-2 transition-colors shadow-[0_14px_28px_-16px_rgba(15,52,47,0.7)]"
-          >
-            {t.offers.whatsapp}
-          </a>
         </aside>
       </div>
     </div>

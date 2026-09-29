@@ -63,6 +63,10 @@ interface Props {
     industryUserChoseNote?: string;
   } | null;
   onBlueprintReadyChange?: (ready: boolean) => void;
+  /** When false, omit the 2D map block (offer page can place map/topo in separate columns). */
+  showMap?: boolean;
+  /** When false, omit the 3D topography block. */
+  showTopo?: boolean;
 }
 
 function Spinner({ className = "w-5 h-5" }: { className?: string }) {
@@ -95,6 +99,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   showDimensions = true,
   blueprint = null,
   onBlueprintReadyChange,
+  showMap = true,
+  showTopo = true,
 }: Props,
   ref
 ) {
@@ -651,6 +657,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
   return (
     <div className="space-y-4" dir={lang === "ar" ? "rtl" : "ltr"}>
+      {(showMap || !locked) && (
       <section
         className="rounded-2xl border border-line bg-surface-2/55 p-3 sm:p-4"
         aria-label={locked ? lp.viewLabel : lp.pickingLabel}
@@ -719,7 +726,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         <p className="text-[11px] text-ink-soft leading-snug flex-1 min-w-[12rem]">{hint}</p>
       </div>
       </section>
+      )}
 
+      {showMap && (
       <section
         className="location-map-section w-full rounded-2xl border border-line bg-white p-3 sm:p-4 shadow-sm"
         aria-label={lp.mapSectionTitle}
@@ -866,8 +875,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         {basemap === "map" ? "© OpenStreetMap" : "© Esri"} · {lp.osmNote}
       </p>
       </section>
+      )}
 
-      {Boolean(polygon?.[0]?.length) && !loading && (
+      {showTopo && Boolean(polygon?.[0]?.length) && !loading && (
         <section
           className="location-topo-section w-full rounded-2xl border border-gold/40 bg-gradient-to-br from-[#0a1f1c] via-[#0f342f] to-[#0a1f1c] p-3 sm:p-4 shadow-sm"
           aria-label={lp.topoSectionTitle}
@@ -939,7 +949,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           {message}
         </p>
       )}
-      {(selected || polygon) && !loading && (
+      {(selected || polygon) && !loading && showMap && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-line bg-white px-3 py-2 text-xs">
           {!locked && <b className="text-green">✓ {lp.confirm}</b>}
           {selected && (

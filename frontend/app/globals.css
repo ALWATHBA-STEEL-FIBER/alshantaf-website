@@ -135,6 +135,46 @@ body {
   touch-action: none;
 }
 
+/* Offer detail — horizontal media / file rails */
+.offer-media-rail {
+  display: flex;
+  gap: 0.65rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 0.25rem;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.35rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 154, 88, 0.65) transparent;
+}
+.offer-media-rail::-webkit-scrollbar {
+  height: 5px;
+}
+.offer-media-rail::-webkit-scrollbar-thumb {
+  background: rgba(200, 154, 88, 0.65);
+  border-radius: 999px;
+}
+.offer-media-rail > * {
+  scroll-snap-align: start;
+  flex: 0 0 auto;
+}
+.offer-dossier {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 245, 239, 0.88));
+  border: 1px solid var(--color-line);
+  box-shadow: 0 28px 60px -40px rgba(15, 52, 47, 0.35);
+}
+.offer-dossier-spine {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(200, 154, 88, 0.45) 12%,
+    rgba(200, 154, 88, 0.45) 88%,
+    transparent
+  );
+}
+
 body {
   background:
     radial-gradient(1200px 500px at 10% -10%, rgba(200, 154, 88, 0.12), transparent 55%),
