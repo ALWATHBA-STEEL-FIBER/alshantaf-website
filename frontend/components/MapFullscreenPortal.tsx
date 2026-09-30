@@ -39,6 +39,7 @@ type Labels = {
   measureFinish: string;
   measureUndo: string;
   measureSnapOn: string;
+  measureEdgeSnap: string;
   measureHintDistance: string;
   measureHintArea: string;
 };
@@ -53,6 +54,8 @@ type Props = {
   showDimensions: boolean;
   measureMode: MeasureMode;
   onMeasureModeChange: (m: MeasureMode) => void;
+  edgeSnap: boolean;
+  onEdgeSnapChange: (v: boolean) => void;
   polygon: ParcelRing[] | null | undefined;
   selected: Coords | null;
   perimeterM: number | null;
@@ -66,6 +69,8 @@ type Props = {
 };
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
+const MAP_MAX_ZOOM = 19;
+const MEASURE_MAX_ZOOM = 22;
 
 /**
  * Independent fullscreen map: mounts a brand-new Leaflet instance in a body portal.
@@ -81,6 +86,8 @@ export function MapFullscreenPortal({
   showDimensions,
   measureMode,
   onMeasureModeChange,
+  edgeSnap,
+  onEdgeSnapChange,
   polygon,
   selected,
   perimeterM,
@@ -172,16 +179,23 @@ export function MapFullscreenPortal({
         scrollWheelZoom: true,
         doubleClickZoom: false,
         boxZoom: false,
+        maxZoom: measureModeRef.current !== "off" ? MEASURE_MAX_ZOOM : MAP_MAX_ZOOM,
       }).setView(start, selected ? 16 : 8);
 
       const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "© OpenStreetMap",
-        maxZoom: 19,
+        maxNativeZoom: MAP_MAX_ZOOM,
+        maxZoom: MEASURE_MAX_ZOOM,
         crossOrigin: true,
       });
       const sat = L.tileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        { attribution: "© Esri", maxZoom: 19, crossOrigin: true }
+        {
+          attribution: "© Esri",
+          maxNativeZoom: MAP_MAX_ZOOM,
+          maxZoom: MEASURE_MAX_ZOOM,
+          crossOrigin: true,
+        }
       );
       osmRef.current = osm;
       satRef.current = sat;
@@ -227,6 +241,7 @@ export function MapFullscreenPortal({
       measureToolRef.current.setSnapTargets(
         parcelSnapTargets(polygon as [number, number][][] | null | undefined)
       );
+      measureToolRef.current.setEdgeSnap(edgeSnap);
       if (measureModeRef.current !== "off") {
         measureToolRef.current.setMode(measureModeRef.current);
       }
@@ -273,12 +288,25 @@ export function MapFullscreenPortal({
     if (!open) return;
     measureToolRef.current?.setMode(measureMode);
     if (measureMode === "off") setMeasureSnap(null);
+    const map = mapRef.current;
+    if (map) {
+      const nextMax = measureMode !== "off" ? MEASURE_MAX_ZOOM : MAP_MAX_ZOOM;
+      map.setMaxZoom(nextMax);
+      if (measureMode === "off" && map.getZoom() > MAP_MAX_ZOOM) {
+        map.setZoom(MAP_MAX_ZOOM, { animate: false });
+      }
+    }
   }, [open, measureMode]);
 
   useEffect(() => {
     if (!open) return;
     measureToolRef.current?.setSnapTargets(snapTargets);
   }, [open, snapTargets]);
+
+  useEffect(() => {
+    if (!open) return;
+    measureToolRef.current?.setEdgeSnap(edgeSnap);
+  }, [open, edgeSnap]);
 
   useEffect(() => {
     if (!open) return;
@@ -312,6 +340,7 @@ export function MapFullscreenPortal({
     measureFinish: lp.measureFinish,
     measureUndo: lp.measureUndo,
     measureSnapOn: lp.measureSnapOn,
+    measureEdgeSnap: lp.measureEdgeSnap,
     measureHintDistance: lp.measureHintDistance,
     measureHintArea: lp.measureHintArea,
     dimensionsArea: lp.dimensionsArea,
@@ -369,6 +398,8 @@ export function MapFullscreenPortal({
             mode={measureMode}
             snap={measureSnap}
             hasParcelSnap={snapTargets.length > 0}
+            edgeSnap={edgeSnap}
+            onEdgeSnapChange={onEdgeSnapChange}
             lang={lang}
             variant="dark"
             labels={measureLabels}
@@ -398,6 +429,8 @@ export function MapFullscreenPortal({
             mode={measureMode}
             snap={measureSnap}
             hasParcelSnap={snapTargets.length > 0}
+            edgeSnap={edgeSnap}
+            onEdgeSnapChange={onEdgeSnapChange}
             lang={lang}
             variant="dark"
             labels={measureLabels}

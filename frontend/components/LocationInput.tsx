@@ -27,6 +27,10 @@ import { MeasureToolbar } from "@/components/MeasureToolbar";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
+/** Normal browsing zoom ceiling (native tiles). */
+const MAP_MAX_ZOOM = 19;
+/** Extra overzoom while measuring for precise taps (tiles scale past native). */
+const MEASURE_MAX_ZOOM = 22;
 type SearchResult = { latitude: number; longitude: number; address: string };
 /** Leaflet-ready ring: [lat, lng][]. */
 export type ParcelRing = [number, number][];
@@ -294,6 +298,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [mapFullscreen, setMapFullscreen] = useState(false);
   const [measureMode, setMeasureMode] = useState<MeasureMode>("off");
   const [measureSnap, setMeasureSnap] = useState<MeasureSnapshot | null>(null);
+  const [edgeSnap, setEdgeSnap] = useState(true);
   const measureToolRef = useRef<MeasureTool | null>(null);
   const measureModeRef = useRef<MeasureMode>("off");
   measureModeRef.current = measureMode;
@@ -360,18 +365,21 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         scrollWheelZoom: true,
         doubleClickZoom: !locked,
         boxZoom: !locked,
+        maxZoom: MAP_MAX_ZOOM,
       }).setView(start, selected ? 16 : 8);
 
       const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "© OpenStreetMap",
-        maxZoom: 19,
+        maxNativeZoom: MAP_MAX_ZOOM,
+        maxZoom: MEASURE_MAX_ZOOM,
         crossOrigin: true,
       });
       const sat = L.tileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         {
           attribution: "© Esri",
-          maxZoom: 19,
+          maxNativeZoom: MAP_MAX_ZOOM,
+          maxZoom: MEASURE_MAX_ZOOM,
           crossOrigin: true,
         }
       );
@@ -442,6 +450,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         onChange: setMeasureSnap,
       });
       measureToolRef.current.setSnapTargets(snapTargets);
+      measureToolRef.current.setEdgeSnap(edgeSnap);
       if (measureModeRef.current !== "off") {
         measureToolRef.current.setMode(measureModeRef.current);
       }
@@ -460,6 +469,21 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   useEffect(() => {
     measureToolRef.current?.setSnapTargets(snapTargets);
   }, [snapTargets]);
+
+  useEffect(() => {
+    measureToolRef.current?.setEdgeSnap(edgeSnap);
+  }, [edgeSnap]);
+
+  // Allow deeper overzoom only while architecture-measuring.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const nextMax = measuring ? MEASURE_MAX_ZOOM : MAP_MAX_ZOOM;
+    map.setMaxZoom(nextMax);
+    if (!measuring && map.getZoom() > MAP_MAX_ZOOM) {
+      map.setZoom(MAP_MAX_ZOOM, { animate: false });
+    }
+  }, [measuring, mapReady]);
 
   // Keep interaction mode in sync without remounting (remounts caused intermittent blank maps).
   useEffect(() => {
@@ -855,6 +879,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               mode={measureMode}
               snap={measureSnap}
               hasParcelSnap={snapTargets.length > 0}
+              edgeSnap={edgeSnap}
+              onEdgeSnapChange={setEdgeSnap}
               lang={lang}
               variant="light"
               labels={{
@@ -868,6 +894,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
                 measureFinish: lp.measureFinish,
                 measureUndo: lp.measureUndo,
                 measureSnapOn: lp.measureSnapOn,
+                measureEdgeSnap: lp.measureEdgeSnap,
                 measureHintDistance: lp.measureHintDistance,
                 measureHintArea: lp.measureHintArea,
                 dimensionsArea: lp.dimensionsArea,
@@ -898,6 +925,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             mode={measureMode}
             snap={measureSnap}
             hasParcelSnap={snapTargets.length > 0}
+            edgeSnap={edgeSnap}
+            onEdgeSnapChange={setEdgeSnap}
             lang={lang}
             variant="light"
             labels={{
@@ -911,6 +940,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               measureFinish: lp.measureFinish,
               measureUndo: lp.measureUndo,
               measureSnapOn: lp.measureSnapOn,
+              measureEdgeSnap: lp.measureEdgeSnap,
               measureHintDistance: lp.measureHintDistance,
               measureHintArea: lp.measureHintArea,
               dimensionsArea: lp.dimensionsArea,
@@ -985,6 +1015,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         showDimensions={showDimensions}
         measureMode={measureMode}
         onMeasureModeChange={setMeasureMode}
+        edgeSnap={edgeSnap}
+        onEdgeSnapChange={setEdgeSnap}
         polygon={polygon}
         selected={selected}
         perimeterM={perimeterM}
@@ -1014,6 +1046,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           measureFinish: lp.measureFinish,
           measureUndo: lp.measureUndo,
           measureSnapOn: lp.measureSnapOn,
+          measureEdgeSnap: lp.measureEdgeSnap,
           measureHintDistance: lp.measureHintDistance,
           measureHintArea: lp.measureHintArea,
         }}

@@ -92,14 +92,16 @@ export type SnapResult = {
 };
 
 /**
- * Snap to parcel vertices first, then edges. Radius is metres on the ground.
+ * Snap to parcel vertices first, then optionally edges. Radius is metres on the ground.
  */
 export function snapMeasureClick(
   click: Coords,
   targets: Coords[],
-  maxMeters: number
+  maxMeters: number,
+  opts?: { edgeSnap?: boolean }
 ): SnapResult {
   if (!targets.length || maxMeters <= 0) return { point: click, kind: "none" };
+  const edgeSnap = opts?.edgeSnap !== false;
 
   let bestV: Coords | null = null;
   let bestVd = maxMeters;
@@ -115,19 +117,22 @@ export function snapMeasureClick(
     return { point: { lat: bestV.lat, lng: bestV.lng }, kind: "vertex" };
   }
 
-  let bestE: Coords | null = null;
-  let bestEd = maxMeters;
-  for (const [a, b] of parcelEdges(targets)) {
-    const p = projectOnSegment(click, a, b);
-    const d = planarMeters(click, p);
-    if (d < bestEd) {
-      bestEd = d;
-      bestE = p;
+  if (edgeSnap) {
+    let bestE: Coords | null = null;
+    let bestEd = maxMeters;
+    for (const [a, b] of parcelEdges(targets)) {
+      const p = projectOnSegment(click, a, b);
+      const d = planarMeters(click, p);
+      if (d < bestEd) {
+        bestEd = d;
+        bestE = p;
+      }
+    }
+    if (bestE && bestEd <= maxMeters) {
+      return { point: bestE, kind: "edge" };
     }
   }
-  if (bestE && bestEd <= maxMeters) {
-    return { point: bestE, kind: "edge" };
-  }
+
   if (bestV && bestVd <= maxMeters) {
     return { point: { lat: bestV.lat, lng: bestV.lng }, kind: "vertex" };
   }
@@ -184,6 +189,7 @@ export function attachMeasureTool(
   let lastSnapped = false;
   let liveSegmentM: number | null = null;
   let snapTargets: Coords[] = [];
+  let edgeSnap = true;
   let clickHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let moveHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let dblHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
@@ -305,7 +311,7 @@ export function attachMeasureTool(
 
   function resolveClick(raw: Coords): SnapResult {
     const radius = snapRadiusMeters(L, map);
-    return snapMeasureClick(raw, snapTargets, radius);
+    return snapMeasureClick(raw, snapTargets, radius, { edgeSnap });
   }
 
   function placePoint(raw: Coords) {
@@ -449,6 +455,9 @@ export function attachMeasureTool(
     setSnapTargets(targets: Coords[]) {
       snapTargets = targets.map((t) => ({ lat: t.lat, lng: t.lng }));
       drawSnapTargets();
+    },
+    setEdgeSnap(enabled: boolean) {
+      edgeSnap = Boolean(enabled);
     },
     finish() {
       if (mode === "area" && points.length >= 3) {

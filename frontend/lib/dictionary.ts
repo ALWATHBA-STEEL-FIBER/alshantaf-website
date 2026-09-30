@@ -657,8 +657,9 @@ export const dictionary = {
       measureFinish: "إغلاق",
       measureUndo: "تراجع",
       measureSnapOn: "التقاط لرؤوس القطعة",
+      measureEdgeSnap: "التقاط للحواف",
       measureHintDistance:
-        "انقر نقاطًا لقياس المسافة. يلتقط تلقائيًا لرؤوس وحدود القطعة إن وُجدت. استخدم تراجع أو إنهاء القياس.",
+        "انقر نقاطًا لقياس المسافة. يلتقط تلقائيًا لرؤوس القطعة (ويمكن إيقاف التقاط الحواف). استخدم تراجع أو إنهاء القياس.",
       measureHintArea:
         "ارسم مضلعًا بالنقر. أغلق بالنقر قرب أول نقطة أو زر الإغلاق. الأبعاد الرسمية مخفية أثناء القياس.",
       mapSectionTitle: "خريطة القطعة",
@@ -2097,9 +2098,10 @@ export const dictionary = {
       measureClear: "Clear",
       measureFinish: "Close",
       measureUndo: "Undo",
-      measureSnapOn: "Snap to parcel",
+      measureSnapOn: "Snap to vertices",
+      measureEdgeSnap: "Edge snap",
       measureHintDistance:
-        "Tap points to measure distance. Auto-snaps to parcel vertices and edges when available. Use Undo or Exit measure.",
+        "Tap points to measure distance. Auto-snaps to parcel vertices (edge snap can be turned off). Use Undo or Exit measure.",
       measureHintArea:
         "Draw a polygon by tapping. Close by tapping near the first point or Close. Official dimensions stay hidden while measuring.",
       mapSectionTitle: "Parcel map",

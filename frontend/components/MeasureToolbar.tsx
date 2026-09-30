@@ -14,6 +14,7 @@ export type MeasureToolbarLabels = {
   measureFinish: string;
   measureUndo: string;
   measureSnapOn: string;
+  measureEdgeSnap: string;
   measureHintDistance: string;
   measureHintArea: string;
   dimensionsArea: string;
@@ -23,6 +24,8 @@ type Props = {
   mode: MeasureMode;
   snap: MeasureSnapshot | null;
   hasParcelSnap: boolean;
+  edgeSnap: boolean;
+  onEdgeSnapChange: (v: boolean) => void;
   lang: "ar" | "en";
   labels: MeasureToolbarLabels;
   /** Dark gold-on-green chrome (fullscreen) vs light (inline map). */
@@ -152,6 +155,8 @@ export function MeasureToolbar({
   mode,
   snap,
   hasParcelSnap,
+  edgeSnap,
+  onEdgeSnapChange,
   lang,
   labels: lp,
   variant = "light",
@@ -214,13 +219,26 @@ export function MeasureToolbar({
           {lp.measureLabel}
         </span>
         {hasParcelSnap && (
-          <span
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${btnAccent}`}
-            title={lp.measureSnapOn}
-          >
-            <IconMagnet />
-            {lp.measureSnapOn}
-          </span>
+          <>
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${btnAccent}`}
+              title={lp.measureSnapOn}
+            >
+              <IconMagnet />
+              {lp.measureSnapOn}
+            </span>
+            <button
+              type="button"
+              onClick={() => onEdgeSnapChange(!edgeSnap)}
+              className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-colors ${
+                edgeSnap ? btnAccent : btnIdle
+              }`}
+              aria-pressed={edgeSnap}
+              title={lp.measureEdgeSnap}
+            >
+              {lp.measureEdgeSnap}
+            </button>
+          </>
         )}
         {snap?.lastSnapped && (
           <span className={`text-[10px] font-bold ${title}`}>●</span>
