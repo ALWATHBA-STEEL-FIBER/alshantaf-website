@@ -42,6 +42,9 @@ services:
       GROQ_GUARD_MODEL: ${GROQ_GUARD_MODEL:-meta-llama/llama-prompt-guard-2-86m}
       GROQ_GUARD_THRESHOLD: ${GROQ_GUARD_THRESHOLD:-0.85}
       GROQ_GUARD_ENABLED: ${GROQ_GUARD_ENABLED:-1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-luna}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-none}
     volumes:
       - ./backend/uploads:/app/uploads
 

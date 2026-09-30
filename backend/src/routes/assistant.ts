@@ -18,14 +18,15 @@ import {
   selectFewShotMessages,
 } from "../lib/assistantKnowledge";
 import {
-  DEFAULT_GROQ_GUARD_MODEL,
-  DEFAULT_GROQ_MODEL,
-  GroqRequestError,
-  groqChatJson,
+  activeChatModel,
+  chatJson,
   guardThreshold,
+  llmConfigured,
+  llmStatus,
+  LlmRequestError,
   scorePromptRisk,
-  type GroqMessage,
-} from "../lib/groq";
+  type LlmMessage,
+} from "../lib/llm";
 
 export const assistantRouter = Router();
 
@@ -153,9 +154,8 @@ assistantRouter.get(
   asyncHandler(async (_req, res) => {
     res.json({
       enabled: true,
-      model: process.env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL,
-      guardModel: process.env.GROQ_GUARD_MODEL?.trim() || DEFAULT_GROQ_GUARD_MODEL,
-      aiEnabled: Boolean(process.env.GROQ_API_KEY?.trim()),
+      ...llmStatus(),
+      aiEnabled: llmConfigured(),
       knowledge: knowledgePackStatus(),
     });
   })
@@ -172,7 +172,7 @@ assistantRouter.post(
       return;
     }
 
-    // 1) Prompt Guard (14.4K RPD) — block obvious jailbreaks; fail-open on guard errors.
+    // 1) Prompt Guard via Groq classifier when available — fail-open on errors.
     if (process.env.GROQ_API_KEY?.trim()) {
       const { score, skipped } = await scorePromptRisk(last.content);
       if (!skipped && score >= guardThreshold()) {
@@ -182,19 +182,19 @@ assistantRouter.post(
       }
     }
 
-    // 2) No API key → deterministic helper still works (offers/services from DB).
-    if (!process.env.GROQ_API_KEY?.trim()) {
+    // 2) No LLM key → deterministic helper still works (offers/services from DB).
+    if (!llmConfigured()) {
       const fallback = await buildFallbackReply(last.content, body.lang);
       res.json(fallback);
       return;
     }
 
-    // 3) AI chat — on rate limit / any failure, never surface an error to the user.
+    // 3) AI chat — OpenAI gpt-6-luna preferred; Groq fallback. Never surface raw errors.
     try {
       const digest = await listingDigestForPrompt(body.lang);
       const knowledgeContext = retrieveKnowledgeContext(last.content);
       const fewShots = selectFewShotMessages(last.content, 4);
-      const history: GroqMessage[] = [
+      const history: LlmMessage[] = [
         {
           role: "system",
           content: buildSystemPrompt(body.lang, digest, {
@@ -206,7 +206,7 @@ assistantRouter.post(
         ...body.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
       ];
 
-      const raw = await groqChatJson({ messages: history });
+      const raw = await chatJson({ messages: history });
       const plan = extractJsonObject(raw);
 
       if (!plan) {
@@ -216,13 +216,13 @@ assistantRouter.post(
       }
 
       const { reply, cards } = await cardsFromPlan(plan, body.lang);
-      res.json({ reply, cards });
+      res.json({ reply, cards, model: activeChatModel() });
     } catch (err) {
       const fallback = await buildFallbackReply(last.content, body.lang);
       res.json({
         ...fallback,
         degraded: true,
-        reason: err instanceof GroqRequestError && err.rateLimited ? "rate_limit" : "ai_unavailable",
+        reason: err instanceof LlmRequestError && err.rateLimited ? "rate_limit" : "ai_unavailable",
       });
     }
   })
