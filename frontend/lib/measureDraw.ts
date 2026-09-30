@@ -211,6 +211,8 @@ export function attachMeasureTool(
   let snapTargets: Coords[] = [];
   let edgeSnap = true;
   let lineColor: string = DEFAULT_MEASURE_LINE_COLOR;
+  let pendingClickTimer: number | null = null;
+  let pendingClickCoords: Coords | null = null;
   let clickHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let moveHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let dblHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
@@ -359,6 +361,11 @@ export function attachMeasureTool(
   }
 
   function unbindMap() {
+    if (pendingClickTimer != null) {
+      window.clearTimeout(pendingClickTimer);
+      pendingClickTimer = null;
+      pendingClickCoords = null;
+    }
     if (clickHandler) map.off("click", clickHandler);
     if (moveHandler) map.off("mousemove", moveHandler);
     if (dblHandler) map.off("dblclick", dblHandler);
@@ -368,12 +375,40 @@ export function attachMeasureTool(
     cursorGroup.clearLayers();
   }
 
+  function finishLine() {
+    if (mode === "off" || closed) return;
+    if (mode === "distance" && points.length >= 2) {
+      closed = true;
+      liveSegmentM = null;
+      cursorGroup.clearLayers();
+      redrawMeasure();
+      emit();
+      return;
+    }
+    if (mode === "area" && points.length >= 3) {
+      closed = true;
+      liveSegmentM = null;
+      cursorGroup.clearLayers();
+      redrawMeasure();
+      emit();
+    }
+  }
+
   function bindMap() {
     unbindMap();
     clickHandler = (e) => {
       if (mode === "off" || closed) return;
       L.DomEvent.stopPropagation(e.originalEvent);
-      placePoint({ lat: e.latlng.lat, lng: e.latlng.lng });
+      const coords = { lat: e.latlng.lat, lng: e.latlng.lng };
+      // Delay placement so a double-click can cancel the second tap and finish the line.
+      if (pendingClickTimer != null) window.clearTimeout(pendingClickTimer);
+      pendingClickCoords = coords;
+      pendingClickTimer = window.setTimeout(() => {
+        pendingClickTimer = null;
+        const next = pendingClickCoords;
+        pendingClickCoords = null;
+        if (next) placePoint(next);
+      }, 280);
     };
     moveHandler = (e) => {
       if (mode === "off" || closed) {
@@ -435,15 +470,12 @@ export function attachMeasureTool(
       if (mode === "off") return;
       L.DomEvent.preventDefault(e.originalEvent);
       L.DomEvent.stopPropagation(e.originalEvent);
-      if (mode === "distance" && points.length >= 2) {
-        emit();
-      } else if (mode === "area" && points.length >= 3) {
-        closed = true;
-        liveSegmentM = null;
-        cursorGroup.clearLayers();
-        redrawMeasure();
-        emit();
+      if (pendingClickTimer != null) {
+        window.clearTimeout(pendingClickTimer);
+        pendingClickTimer = null;
+        pendingClickCoords = null;
       }
+      finishLine();
     };
     map.on("click", clickHandler);
     map.on("mousemove", moveHandler);
@@ -487,15 +519,7 @@ export function attachMeasureTool(
       redrawMeasure();
     },
     finish() {
-      if (mode === "area" && points.length >= 3) {
-        closed = true;
-        liveSegmentM = null;
-        cursorGroup.clearLayers();
-        redrawMeasure();
-        emit();
-      } else {
-        emit();
-      }
+      finishLine();
     },
     undo() {
       if (closed) {

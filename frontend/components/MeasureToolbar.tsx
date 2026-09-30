@@ -180,12 +180,17 @@ export function MeasureToolbar({
     ? "rounded-xl border border-gold/40 bg-[#0f342f] text-gold"
     : "rounded-xl border border-line bg-surface-2/95 text-ink shadow-sm";
   const btnIdle = dark
-    ? "border-gold/35 bg-[#0a1f1c] text-gold/85 hover:text-gold"
+    ? "border-gold/35 bg-[#0a1f1c] text-gold/70 hover:text-gold"
     : "border-line bg-white text-ink-soft hover:text-ink";
-  const btnActive = "bg-green text-white border-green";
+  const btnActive = dark
+    ? "bg-gold text-[#0a1f1c] border-gold ring-2 ring-white/90 ring-offset-2 ring-offset-[#0f342f] shadow-md scale-[1.03]"
+    : "bg-green text-white border-green ring-2 ring-green/40 ring-offset-2 ring-offset-white shadow-md scale-[1.03]";
   const btnAccent = dark
     ? "border-gold bg-gold/15 text-gold"
     : "border-green bg-green/10 text-green";
+  const btnSelectedToggle = dark
+    ? "bg-gold text-[#0a1f1c] border-gold ring-2 ring-white/80 ring-offset-1 ring-offset-[#0f342f]"
+    : "bg-green text-white border-green ring-2 ring-green/35 ring-offset-1 ring-offset-white";
   const btnExit = dark
     ? "border-gold bg-gold text-[#0a1f1c]"
     : "border-green bg-green text-white";
@@ -210,7 +215,11 @@ export function MeasureToolbar({
     );
   }
 
-  const canFinish = mode === "area" && snap && snap.points.length >= 3 && !snap.closed;
+  const canFinish =
+    Boolean(snap) &&
+    !snap!.closed &&
+    ((mode === "area" && snap!.points.length >= 3) ||
+      (mode === "distance" && snap!.points.length >= 2));
   const canUndo = Boolean(snap && (snap.points.length > 0 || snap.closed));
   const totalLive =
     snap && snap.points.length > 0
@@ -236,8 +245,8 @@ export function MeasureToolbar({
             <button
               type="button"
               onClick={() => onEdgeSnapChange(!edgeSnap)}
-              className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-colors ${
-                edgeSnap ? btnAccent : btnIdle
+              className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-all ${
+                edgeSnap ? btnSelectedToggle : btnIdle
               }`}
               aria-pressed={edgeSnap}
               title={lp.measureEdgeSnap}
@@ -266,24 +275,26 @@ export function MeasureToolbar({
         <button
           type="button"
           onClick={() => onModeChange("distance")}
-          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[4.5rem] px-2.5 rounded-xl border text-[11px] font-bold transition-colors ${
+          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[4.5rem] px-2.5 rounded-xl border text-[11px] font-bold transition-all ${
             mode === "distance" ? btnActive : btnIdle
           }`}
           aria-pressed={mode === "distance"}
         >
           <IconRuler className="w-[18px] h-[18px]" />
           {lp.measureDistance}
+          {mode === "distance" && <span className="text-[9px] font-extrabold tracking-wide opacity-90">●</span>}
         </button>
         <button
           type="button"
           onClick={() => onModeChange("area")}
-          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[4.5rem] px-2.5 rounded-xl border text-[11px] font-bold transition-colors ${
+          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[4.5rem] px-2.5 rounded-xl border text-[11px] font-bold transition-all ${
             mode === "area" ? btnActive : btnIdle
           }`}
           aria-pressed={mode === "area"}
         >
           <IconPolygon className="w-[18px] h-[18px]" />
           {lp.measureArea}
+          {mode === "area" && <span className="text-[9px] font-extrabold tracking-wide opacity-90">●</span>}
         </button>
         <button
           type="button"
@@ -334,7 +345,9 @@ export function MeasureToolbar({
                 type="button"
                 onClick={() => onLineColorChange(c.hex)}
                 className={`relative h-9 w-9 rounded-full border-2 transition-transform ${
-                  selected ? "scale-110 border-white shadow-[0_0_0_2px_rgba(15,52,47,.85)]" : "border-black/20 opacity-90 hover:opacity-100"
+                  selected
+                    ? "scale-110 border-white shadow-[0_0_0_3px_rgba(15,52,47,.9)]"
+                    : "border-black/20 opacity-75 hover:opacity-100"
                 }`}
                 style={{ backgroundColor: c.hex }}
                 aria-label={name}
