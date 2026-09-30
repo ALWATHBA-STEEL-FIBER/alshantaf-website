@@ -7,11 +7,13 @@ import { createParcelCanvasLayer, type ParcelCanvasOpts } from "@/lib/parcelCanv
 import {
   attachMeasureTool,
   parcelSnapTargets,
+  type FixedSnapMeters,
   type MeasureMode,
   type MeasureSnapshot,
   type MeasureTool,
 } from "@/lib/measureDraw";
 import { MeasureToolbar } from "@/components/MeasureToolbar";
+import { MeasureThreadsOverlay } from "@/components/MeasureThreadsOverlay";
 import type { ParcelRing } from "@/components/LocationInput";
 import "leaflet/dist/leaflet.css";
 
@@ -42,6 +44,9 @@ type Labels = {
   measureThreads: string;
   measureSnapOn: string;
   measureEdgeSnap: string;
+  measureLineSnap: string;
+  measureFixed1m: string;
+  measureFixed5m: string;
   measureLineColor: string;
   measureHintDistance: string;
   measureHintArea: string;
@@ -59,6 +64,10 @@ type Props = {
   onMeasureModeChange: (m: MeasureMode) => void;
   edgeSnap: boolean;
   onEdgeSnapChange: (v: boolean) => void;
+  lineSnap: boolean;
+  onLineSnapChange: (v: boolean) => void;
+  fixedSnapM: FixedSnapMeters;
+  onFixedSnapMChange: (v: FixedSnapMeters) => void;
   lineColor: string;
   onLineColorChange: (hex: string) => void;
   polygon: ParcelRing[] | null | undefined;
@@ -93,6 +102,10 @@ export function MapFullscreenPortal({
   onMeasureModeChange,
   edgeSnap,
   onEdgeSnapChange,
+  lineSnap,
+  onLineSnapChange,
+  fixedSnapM,
+  onFixedSnapMChange,
   lineColor,
   onLineColorChange,
   polygon,
@@ -148,7 +161,7 @@ export function MapFullscreenPortal({
     };
     const onTouchMove = (e: TouchEvent) => {
       const target = e.target as Element | null;
-      if (target?.closest?.(".map-fs-portal-pane, .map-fs-portal-toolbar")) return;
+      if (target?.closest?.(".map-fs-portal-pane, .map-fs-portal-toolbar, .map-measure-overlay")) return;
       e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
@@ -249,6 +262,8 @@ export function MapFullscreenPortal({
         parcelSnapTargets(polygon as [number, number][][] | null | undefined)
       );
       measureToolRef.current.setEdgeSnap(edgeSnap);
+      measureToolRef.current.setLineSnap(lineSnap);
+      measureToolRef.current.setFixedSnapM(fixedSnapM);
       measureToolRef.current.setLineColor(lineColor);
       if (measureModeRef.current !== "off") {
         measureToolRef.current.setMode(measureModeRef.current);
@@ -318,6 +333,16 @@ export function MapFullscreenPortal({
 
   useEffect(() => {
     if (!open) return;
+    measureToolRef.current?.setLineSnap(lineSnap);
+  }, [open, lineSnap]);
+
+  useEffect(() => {
+    if (!open) return;
+    measureToolRef.current?.setFixedSnapM(fixedSnapM);
+  }, [open, fixedSnapM]);
+
+  useEffect(() => {
+    if (!open) return;
     measureToolRef.current?.setLineColor(lineColor);
   }, [open, lineColor]);
 
@@ -367,6 +392,9 @@ export function MapFullscreenPortal({
     measureThreads: lp.measureThreads,
     measureSnapOn: lp.measureSnapOn,
     measureEdgeSnap: lp.measureEdgeSnap,
+    measureLineSnap: lp.measureLineSnap,
+    measureFixed1m: lp.measureFixed1m,
+    measureFixed5m: lp.measureFixed5m,
     measureLineColor: lp.measureLineColor,
     measureHintDistance: lp.measureHintDistance,
     measureHintArea: lp.measureHintArea,
@@ -427,6 +455,10 @@ export function MapFullscreenPortal({
             hasParcelSnap={snapTargets.length > 0}
             edgeSnap={edgeSnap}
             onEdgeSnapChange={onEdgeSnapChange}
+            lineSnap={lineSnap}
+            onLineSnapChange={onLineSnapChange}
+            fixedSnapM={fixedSnapM}
+            onFixedSnapMChange={onFixedSnapMChange}
             lineColor={lineColor}
             onLineColorChange={onLineColorChange}
             lang={lang}
@@ -442,7 +474,6 @@ export function MapFullscreenPortal({
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
             onNewLine={() => measureToolRef.current?.newThread()}
-            onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
           />
         )}
         <button
@@ -462,6 +493,10 @@ export function MapFullscreenPortal({
             hasParcelSnap={snapTargets.length > 0}
             edgeSnap={edgeSnap}
             onEdgeSnapChange={onEdgeSnapChange}
+            lineSnap={lineSnap}
+            onLineSnapChange={onLineSnapChange}
+            fixedSnapM={fixedSnapM}
+            onFixedSnapMChange={onFixedSnapMChange}
             lineColor={lineColor}
             onLineColorChange={onLineColorChange}
             lang={lang}
@@ -477,15 +512,32 @@ export function MapFullscreenPortal({
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
             onNewLine={() => measureToolRef.current?.newThread()}
-            onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
           />
         </div>
       )}
 
-      <div
-        ref={paneRef}
-        className="map-fs-portal-pane relative min-h-0 flex-1 w-full overflow-hidden rounded-xl border border-line bg-surface-2 touch-none"
-      />
+      <div className="relative min-h-0 flex-1 w-full overflow-hidden rounded-xl border border-line bg-surface-2">
+        <div
+          ref={paneRef}
+          className="map-fs-portal-pane absolute inset-0 touch-none"
+        />
+        {measuring && (
+          <MeasureThreadsOverlay
+            snap={measureSnap}
+            lang={lang}
+            variant="dark"
+            labels={{
+              measureThreads: lp.measureThreads,
+              measureDistance: lp.measureDistance,
+              measureArea: lp.measureArea,
+              measureTotal: lp.measureTotal,
+              measureClear: lp.measureClear,
+              dimensionsArea: lp.dimensionsArea,
+            }}
+            onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
+          />
+        )}
+      </div>
 
       {hasInfo && !measuring && (
         <div className="shrink-0 rounded-xl border border-gold/35 bg-[#0f342f] px-3 py-2 text-gold-2">

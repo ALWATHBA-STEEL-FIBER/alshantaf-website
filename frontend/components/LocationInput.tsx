@@ -20,11 +20,13 @@ import {
   attachMeasureTool,
   DEFAULT_MEASURE_LINE_COLOR,
   parcelSnapTargets,
+  type FixedSnapMeters,
   type MeasureMode,
   type MeasureSnapshot,
   type MeasureTool,
 } from "@/lib/measureDraw";
 import { MeasureToolbar } from "@/components/MeasureToolbar";
+import { MeasureThreadsOverlay } from "@/components/MeasureThreadsOverlay";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
@@ -300,6 +302,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [measureMode, setMeasureMode] = useState<MeasureMode>("off");
   const [measureSnap, setMeasureSnap] = useState<MeasureSnapshot | null>(null);
   const [edgeSnap, setEdgeSnap] = useState(true);
+  const [lineSnap, setLineSnap] = useState(true);
+  const [fixedSnapM, setFixedSnapM] = useState<FixedSnapMeters>(0);
   const [lineColor, setLineColor] = useState(DEFAULT_MEASURE_LINE_COLOR);
   const measureToolRef = useRef<MeasureTool | null>(null);
   const measureModeRef = useRef<MeasureMode>("off");
@@ -454,6 +458,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     measureThreads: lp.measureThreads,
     measureSnapOn: lp.measureSnapOn,
     measureEdgeSnap: lp.measureEdgeSnap,
+    measureLineSnap: lp.measureLineSnap,
+    measureFixed1m: lp.measureFixed1m,
+    measureFixed5m: lp.measureFixed5m,
     measureLineColor: lp.measureLineColor,
     measureHintDistance: lp.measureHintDistance,
     measureHintArea: lp.measureHintArea,
@@ -472,6 +479,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       });
       measureToolRef.current.setSnapTargets(snapTargets);
       measureToolRef.current.setEdgeSnap(edgeSnap);
+      measureToolRef.current.setLineSnap(lineSnap);
+      measureToolRef.current.setFixedSnapM(fixedSnapM);
       measureToolRef.current.setLineColor(lineColor);
       if (measureModeRef.current !== "off") {
         measureToolRef.current.setMode(measureModeRef.current);
@@ -495,6 +504,14 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   useEffect(() => {
     measureToolRef.current?.setEdgeSnap(edgeSnap);
   }, [edgeSnap]);
+
+  useEffect(() => {
+    measureToolRef.current?.setLineSnap(lineSnap);
+  }, [lineSnap]);
+
+  useEffect(() => {
+    measureToolRef.current?.setFixedSnapM(fixedSnapM);
+  }, [fixedSnapM]);
 
   useEffect(() => {
     measureToolRef.current?.setLineColor(lineColor);
@@ -919,6 +936,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               hasParcelSnap={snapTargets.length > 0}
               edgeSnap={edgeSnap}
               onEdgeSnapChange={setEdgeSnap}
+              lineSnap={lineSnap}
+              onLineSnapChange={setLineSnap}
+              fixedSnapM={fixedSnapM}
+              onFixedSnapMChange={setFixedSnapM}
               lineColor={lineColor}
               onLineColorChange={setLineColor}
               lang={lang}
@@ -934,7 +955,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               onClear={() => measureToolRef.current?.clear()}
               onFinish={() => measureToolRef.current?.finish()}
               onNewLine={() => measureToolRef.current?.newThread()}
-              onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
             />
           )}
           <button
@@ -954,6 +974,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             hasParcelSnap={snapTargets.length > 0}
             edgeSnap={edgeSnap}
             onEdgeSnapChange={setEdgeSnap}
+            lineSnap={lineSnap}
+            onLineSnapChange={setLineSnap}
+            fixedSnapM={fixedSnapM}
+            onFixedSnapMChange={setFixedSnapM}
             lineColor={lineColor}
             onLineColorChange={setLineColor}
             lang={lang}
@@ -969,7 +993,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
             onNewLine={() => measureToolRef.current?.newThread()}
-            onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
           />
         )}
 
@@ -978,6 +1001,22 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             ref={mapDivRef}
             className="location-map-pane relative z-0 w-full h-72 sm:h-[28rem] overflow-hidden rounded-xl border border-line bg-[#e8eef0]"
           />
+          {measuring && (
+            <MeasureThreadsOverlay
+              snap={measureSnap}
+              lang={lang}
+              variant="light"
+              labels={{
+                measureThreads: lp.measureThreads,
+                measureDistance: lp.measureDistance,
+                measureArea: lp.measureArea,
+                measureTotal: lp.measureTotal,
+                measureClear: lp.measureClear,
+                dimensionsArea: lp.dimensionsArea,
+              }}
+              onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
+            />
+          )}
           {loading && (
             <div className="absolute inset-0 z-30 rounded-xl bg-white/75 flex flex-col items-center justify-center gap-3 px-4 text-center">
               <Spinner className="w-7 h-7" />
@@ -1033,6 +1072,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         onMeasureModeChange={setMeasureMode}
         edgeSnap={edgeSnap}
         onEdgeSnapChange={setEdgeSnap}
+        lineSnap={lineSnap}
+        onLineSnapChange={setLineSnap}
+        fixedSnapM={fixedSnapM}
+        onFixedSnapMChange={setFixedSnapM}
         lineColor={lineColor}
         onLineColorChange={setLineColor}
         polygon={polygon}
@@ -1067,6 +1110,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           measureThreads: lp.measureThreads,
           measureSnapOn: lp.measureSnapOn,
           measureEdgeSnap: lp.measureEdgeSnap,
+          measureLineSnap: lp.measureLineSnap,
+          measureFixed1m: lp.measureFixed1m,
+          measureFixed5m: lp.measureFixed5m,
           measureLineColor: lp.measureLineColor,
           measureHintDistance: lp.measureHintDistance,
           measureHintArea: lp.measureHintArea,

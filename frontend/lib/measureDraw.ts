@@ -128,51 +128,141 @@ function projectOnSegment(click: Coords, a: Coords, b: Coords): Coords {
 
 export type SnapResult = {
   point: Coords;
-  kind: "vertex" | "edge" | "none";
+  kind: "vertex" | "edge" | "line" | "fixed" | "none";
 };
 
+export type FixedSnapMeters = 0 | 1 | 5;
+
+/** Place a point at `meters` from `from` toward `toward` (local ENU). */
+export function pointAtDistance(from: Coords, toward: Coords, meters: number): Coords {
+  const origin = from;
+  const a = toLocalEnu(from.lat, from.lng, origin.lat, origin.lng);
+  const b = toLocalEnu(toward.lat, toward.lng, origin.lat, origin.lng);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) {
+    // No direction — nudge north.
+    return fromLocalEnu(0, meters, origin.lat, origin.lng);
+  }
+  const s = meters / len;
+  return fromLocalEnu(a.x + dx * s, a.y + dy * s, origin.lat, origin.lng);
+}
+
+/** Open polyline edges (no auto-close). Area rings close last→first when needed. */
+function measureLineEdges(vertices: Coords[], closed: boolean): [Coords, Coords][] {
+  if (vertices.length < 2) return [];
+  const edges: [Coords, Coords][] = [];
+  const n = vertices.length;
+  const last = n - 1;
+  for (let i = 0; i < last; i++) {
+    const a = vertices[i]!;
+    const b = vertices[i + 1]!;
+    if (planarMeters(a, b) < 0.02) continue;
+    edges.push([a, b]);
+  }
+  if (closed && n >= 3) {
+    const a = vertices[last]!;
+    const b = vertices[0]!;
+    if (planarMeters(a, b) >= 0.05) edges.push([a, b]);
+  }
+  return edges;
+}
+
+/**
+ * Snap to vertices first, then edges. `edgeSnap` enables edge projection on parcel `targets`.
+ * Finished / draft measure polylines snap when `linePolylines` is provided.
+ */
 export function snapMeasureClick(
   click: Coords,
   targets: Coords[],
   maxMeters: number,
-  opts?: { edgeSnap?: boolean }
+  opts?: {
+    edgeSnap?: boolean;
+    linePolylines?: { points: Coords[]; closed?: boolean }[];
+    lineEdgeSnap?: boolean;
+  }
 ): SnapResult {
-  if (!targets.length || maxMeters <= 0) return { point: click, kind: "none" };
   const edgeSnap = opts?.edgeSnap !== false;
+  const linePolylines = opts?.linePolylines ?? [];
+  const lineEdgeSnap = opts?.lineEdgeSnap !== false;
 
   let bestV: Coords | null = null;
   let bestVd = maxMeters;
+  let bestKind: "vertex" | "line" = "vertex";
+
   for (const v of targets) {
     const d = planarMeters(click, v);
     if (d <= bestVd) {
       bestVd = d;
       bestV = v;
+      bestKind = "vertex";
     }
   }
-  if (bestV && bestVd <= maxMeters * 0.85) {
-    return { point: { lat: bestV.lat, lng: bestV.lng }, kind: "vertex" };
+  for (const poly of linePolylines) {
+    for (const v of poly.points) {
+      const d = planarMeters(click, v);
+      if (d <= bestVd) {
+        bestVd = d;
+        bestV = v;
+        bestKind = "line";
+      }
+    }
   }
 
-  if (edgeSnap) {
-    let bestE: Coords | null = null;
-    let bestEd = maxMeters;
+  if (bestV && bestVd <= maxMeters * 0.85) {
+    return { point: { lat: bestV.lat, lng: bestV.lng }, kind: bestKind };
+  }
+
+  let bestE: Coords | null = null;
+  let bestEd = maxMeters;
+  let bestEKind: "edge" | "line" = "edge";
+
+  if (edgeSnap && targets.length >= 2) {
     for (const [a, b] of parcelEdges(targets)) {
       const p = projectOnSegment(click, a, b);
       const d = planarMeters(click, p);
       if (d < bestEd) {
         bestEd = d;
         bestE = p;
+        bestEKind = "edge";
       }
     }
-    if (bestE && bestEd <= maxMeters) {
-      return { point: bestE, kind: "edge" };
+  }
+  if (lineEdgeSnap) {
+    for (const poly of linePolylines) {
+      for (const [a, b] of measureLineEdges(poly.points, Boolean(poly.closed))) {
+        const p = projectOnSegment(click, a, b);
+        const d = planarMeters(click, p);
+        if (d < bestEd) {
+          bestEd = d;
+          bestE = p;
+          bestEKind = "line";
+        }
+      }
     }
+  }
+  if (bestE && bestEd <= maxMeters) {
+    return { point: bestE, kind: bestEKind };
   }
 
   if (bestV && bestVd <= maxMeters) {
-    return { point: { lat: bestV.lat, lng: bestV.lng }, kind: "vertex" };
+    return { point: { lat: bestV.lat, lng: bestV.lng }, kind: bestKind };
   }
   return { point: click, kind: "none" };
+}
+
+/** Snap distance from `from` toward `click` to the nearest multiple of `stepM` (min 1 step). */
+export function applyFixedLengthSnap(
+  from: Coords,
+  click: Coords,
+  stepM: number
+): SnapResult {
+  if (stepM <= 0) return { point: click, kind: "none" };
+  const dist = planarMeters(from, click);
+  const steps = Math.max(1, Math.round(dist / stepM));
+  const target = pointAtDistance(from, click, steps * stepM);
+  return { point: target, kind: "fixed" };
 }
 
 function pathLengthShared(pts: Coords[]): number {
@@ -311,6 +401,8 @@ export function attachMeasureTool(
   let liveSegmentM: number | null = null;
   let snapTargets: Coords[] = [];
   let edgeSnap = true;
+  let lineSnap = true;
+  let fixedSnapM: FixedSnapMeters = 0;
   let lineColor: string = DEFAULT_MEASURE_LINE_COLOR;
   let pendingClickTimer: number | null = null;
   let pendingClickCoords: Coords | null = null;
@@ -340,8 +432,17 @@ export function attachMeasureTool(
 
   function drawSnapTargets() {
     snapGroup.clearLayers();
-    if (mode === "off" || snapTargets.length === 0) return;
-    for (const p of snapTargets) {
+    if (mode === "off") return;
+    const pts: Coords[] = [];
+    if (edgeSnap) pts.push(...snapTargets);
+    if (lineSnap) {
+      for (const t of threads) pts.push(...t.points);
+    }
+    const seen = new Set<string>();
+    for (const p of pts) {
+      const key = `${p.lat.toFixed(7)},${p.lng.toFixed(7)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       L.marker([p.lat, p.lng], {
         interactive: false,
         keyboard: false,
@@ -366,7 +467,30 @@ export function attachMeasureTool(
   }
 
   function resolveClick(raw: Coords): SnapResult {
-    return snapMeasureClick(raw, snapTargets, snapRadiusMeters(L, map), { edgeSnap });
+    const radius = snapRadiusMeters(L, map);
+    const linePolylines = lineSnap
+      ? [
+          ...threads.map((t) => ({
+            points: t.points,
+            closed: t.kind === "area",
+          })),
+          ...(points.length >= 2 ? [{ points, closed: mode === "area" && closed }] : []),
+        ]
+      : [];
+    // Parcel targets only when edge snap is on (vertices + edges of the land).
+    const parcelTargets = edgeSnap ? snapTargets : [];
+    let snapped = snapMeasureClick(raw, parcelTargets, radius, {
+      edgeSnap,
+      linePolylines,
+      lineEdgeSnap: lineSnap,
+    });
+
+    // Fixed length from the previous draft vertex (1 m / 5 m steps).
+    if (fixedSnapM > 0 && points.length >= 1 && !closed) {
+      const fixed = applyFixedLengthSnap(points[points.length - 1]!, snapped.point, fixedSnapM);
+      snapped = { point: fixed.point, kind: snapped.kind === "none" ? "fixed" : snapped.kind };
+    }
+    return snapped;
   }
 
   function commitDraftToThread(): boolean {
@@ -441,6 +565,7 @@ export function attachMeasureTool(
     const advanceColor = optsFinish?.autoNew !== false;
     resetDraft(true);
     if (advanceColor) lineColor = nextColorAfter(lineColor);
+    drawSnapTargets();
     redrawAll();
     emit();
   }
@@ -581,6 +706,14 @@ export function attachMeasureTool(
     },
     setEdgeSnap(enabled: boolean) {
       edgeSnap = Boolean(enabled);
+      drawSnapTargets();
+    },
+    setLineSnap(enabled: boolean) {
+      lineSnap = Boolean(enabled);
+      drawSnapTargets();
+    },
+    setFixedSnapM(meters: FixedSnapMeters) {
+      fixedSnapM = meters === 1 || meters === 5 ? meters : 0;
     },
     setLineColor(hex: string) {
       const next = String(hex || "").trim();

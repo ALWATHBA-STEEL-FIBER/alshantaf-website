@@ -1,8 +1,7 @@
 "use client";
 
-import type { MeasureMode, MeasureSnapshot } from "@/lib/measureDraw";
-import { MEASURE_LINE_COLORS, formatThreadSummary } from "@/lib/measureDraw";
-import { formatDlsArea, formatMeters } from "@/lib/mapCoords";
+import type { FixedSnapMeters, MeasureMode, MeasureSnapshot } from "@/lib/measureDraw";
+import { MEASURE_LINE_COLORS } from "@/lib/measureDraw";
 
 export type MeasureToolbarLabels = {
   measureEnter: string;
@@ -18,6 +17,9 @@ export type MeasureToolbarLabels = {
   measureThreads: string;
   measureSnapOn: string;
   measureEdgeSnap: string;
+  measureLineSnap: string;
+  measureFixed1m: string;
+  measureFixed5m: string;
   measureLineColor: string;
   measureHintDistance: string;
   measureHintArea: string;
@@ -30,6 +32,10 @@ type Props = {
   hasParcelSnap: boolean;
   edgeSnap: boolean;
   onEdgeSnapChange: (v: boolean) => void;
+  lineSnap: boolean;
+  onLineSnapChange: (v: boolean) => void;
+  fixedSnapM: FixedSnapMeters;
+  onFixedSnapMChange: (v: FixedSnapMeters) => void;
   lineColor: string;
   onLineColorChange: (hex: string) => void;
   lang: "ar" | "en";
@@ -42,7 +48,6 @@ type Props = {
   onClear: () => void;
   onFinish: () => void;
   onNewLine: () => void;
-  onRemoveThread?: (id: string) => void;
 };
 
 function IconRuler({ className = "w-4 h-4" }: { className?: string }) {
@@ -148,20 +153,6 @@ function IconPlus({ className = "w-4 h-4" }: { className?: string }) {
   );
 }
 
-function IconMagnet({ className = "w-3.5 h-3.5" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M7 3v8a5 5 0 0 0 10 0V3"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-      />
-      <path d="M7 3h3v5H7V3Zm7 0h3v5h-3V3Z" fill="currentColor" />
-    </svg>
-  );
-}
-
 /**
  * Architecture measure chrome — multi-thread distance/area with per-line colors.
  */
@@ -171,6 +162,10 @@ export function MeasureToolbar({
   hasParcelSnap,
   edgeSnap,
   onEdgeSnapChange,
+  lineSnap,
+  onLineSnapChange,
+  fixedSnapM,
+  onFixedSnapMChange,
   lineColor,
   onLineColorChange,
   lang,
@@ -183,7 +178,6 @@ export function MeasureToolbar({
   onClear,
   onFinish,
   onNewLine,
-  onRemoveThread,
 }: Props) {
   const dark = variant === "dark";
   const measuring = mode !== "off";
@@ -207,9 +201,6 @@ export function MeasureToolbar({
     ? "border-gold bg-gold text-[#0a1f1c]"
     : "border-green bg-green text-white";
   const hintCls = dark ? "text-gold/80" : "text-ink-soft";
-  const panelCls = dark
-    ? "rounded-xl border border-gold/35 bg-[#0f342f] text-gold-2"
-    : "rounded-xl border border-line bg-surface-2/80 text-ink";
   const muted = dark ? "text-gold/70" : "text-ink-soft";
   const title = dark ? "text-gold" : "text-green";
 
@@ -227,7 +218,6 @@ export function MeasureToolbar({
     );
   }
 
-  const threads = snap?.threads ?? [];
   const canFinish =
     Boolean(snap) &&
     !snap!.closed &&
@@ -237,10 +227,6 @@ export function MeasureToolbar({
     snap && (snap.points.length > 0 || snap.closed || snap.threads.length > 0)
   );
   const canClear = canUndo;
-  const totalLive =
-    snap && snap.points.length > 0
-      ? snap.lengthM + (snap.closed || snap.liveSegmentM == null ? 0 : snap.liveSegmentM)
-      : snap?.liveSegmentM ?? null;
 
   return (
     <div className={`w-full space-y-2 ${shell} p-2`} role="toolbar" aria-label={lp.measureLabel}>
@@ -249,15 +235,8 @@ export function MeasureToolbar({
           <IconRuler className="w-4 h-4" />
           {lp.measureLabel}
         </span>
-        {hasParcelSnap && (
-          <>
-            <span
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold ${btnAccent}`}
-              title={lp.measureSnapOn}
-            >
-              <IconMagnet />
-              {lp.measureSnapOn}
-            </span>
+        <div className="flex flex-wrap items-center gap-1.5 w-full">
+          {hasParcelSnap && (
             <button
               type="button"
               onClick={() => onEdgeSnapChange(!edgeSnap)}
@@ -269,9 +248,42 @@ export function MeasureToolbar({
             >
               {lp.measureEdgeSnap}
             </button>
-          </>
-        )}
-        {snap?.lastSnapped && <span className={`text-[10px] font-bold ${title}`}>●</span>}
+          )}
+          <button
+            type="button"
+            onClick={() => onLineSnapChange(!lineSnap)}
+            className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-all ${
+              lineSnap ? btnSelectedToggle : btnIdle
+            }`}
+            aria-pressed={lineSnap}
+            title={lp.measureLineSnap}
+          >
+            {lp.measureLineSnap}
+          </button>
+          <button
+            type="button"
+            onClick={() => onFixedSnapMChange(fixedSnapM === 1 ? 0 : 1)}
+            className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-all ${
+              fixedSnapM === 1 ? btnSelectedToggle : btnIdle
+            }`}
+            aria-pressed={fixedSnapM === 1}
+            title={lp.measureFixed1m}
+          >
+            {lp.measureFixed1m}
+          </button>
+          <button
+            type="button"
+            onClick={() => onFixedSnapMChange(fixedSnapM === 5 ? 0 : 5)}
+            className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-all ${
+              fixedSnapM === 5 ? btnSelectedToggle : btnIdle
+            }`}
+            aria-pressed={fixedSnapM === 5}
+            title={lp.measureFixed5m}
+          >
+            {lp.measureFixed5m}
+          </button>
+          {snap?.lastSnapped && <span className={`text-[10px] font-bold ${title}`}>●</span>}
+        </div>
         <div className="ms-auto flex flex-wrap items-center gap-1.5">
           <button
             type="button"
@@ -390,61 +402,6 @@ export function MeasureToolbar({
       <p className={`text-[11px] leading-snug px-0.5 ${hintCls}`}>
         {mode === "distance" ? lp.measureHintDistance : lp.measureHintArea}
       </p>
-
-      {threads.length > 0 && (
-        <div className={`${panelCls} px-3 py-2`}>
-          <p className={`text-[10px] font-bold tracking-wide mb-1.5 ${title}`}>
-            {lp.measureThreads} ({threads.length})
-          </p>
-          <ul className="space-y-1.5">
-            {threads.map((t, i) => (
-              <li key={t.id} className="flex items-center gap-2 text-[11px] leading-snug">
-                <span
-                  className="h-3 w-3 shrink-0 rounded-full border border-black/20"
-                  style={{ backgroundColor: t.color }}
-                  aria-hidden
-                />
-                <span className={muted}>
-                  {t.kind === "area" ? lp.measureArea : lp.measureDistance} {i + 1}:
-                </span>
-                <b className="min-w-0 truncate">{formatThreadSummary(t, lang)}</b>
-                {onRemoveThread && (
-                  <button
-                    type="button"
-                    onClick={() => onRemoveThread(t.id)}
-                    className={`ms-auto shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${btnIdle}`}
-                    aria-label={lp.measureClear}
-                  >
-                    ×
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {snap && (snap.points.length > 0 || (snap.liveSegmentM != null && snap.liveSegmentM > 0)) && (
-        <div className={`${panelCls} px-3 py-2`}>
-          <ul className="space-y-0.5 text-[11px] leading-snug">
-            {totalLive != null && totalLive > 0 && (
-              <li>
-                <span className={muted}>{lp.measureTotal}: </span>
-                <b>{formatMeters(totalLive, lang)}</b>
-                {snap.liveSegmentM != null && snap.liveSegmentM > 0 && !snap.closed && (
-                  <span className={muted}> (+{formatMeters(snap.liveSegmentM, lang)})</span>
-                )}
-              </li>
-            )}
-            {snap.areaSqm != null && snap.areaSqm > 0 && (
-              <li>
-                <span className={muted}>{lp.dimensionsArea}: </span>
-                <b>{formatDlsArea(snap.areaSqm, lang)}</b>
-              </li>
-            )}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

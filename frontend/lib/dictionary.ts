@@ -660,6 +660,9 @@ export const dictionary = {
       measureThreads: "القياسات",
       measureSnapOn: "التقاط لرؤوس القطعة",
       measureEdgeSnap: "التقاط للحواف",
+      measureLineSnap: "التقاط للخطوط",
+      measureFixed1m: "تثبيت 1 م",
+      measureFixed5m: "تثبيت 5 م",
       measureLineColor: "لون الخط",
       measureHintDistance:
         "ارسم خط مسافة. نقرة مزدوجة أو «إنهاء» يحفظه ويبدأ خطًا بلون جديد. المساحة والخطوط تبقى معًا على الخريطة.",
@@ -2105,6 +2108,9 @@ export const dictionary = {
       measureThreads: "Measurements",
       measureSnapOn: "Snap to vertices",
       measureEdgeSnap: "Edge snap",
+      measureLineSnap: "Line snap",
+      measureFixed1m: "1 m fixed",
+      measureFixed5m: "5 m fixed",
       measureLineColor: "Line color",
       measureHintDistance:
         "Draw a distance line. Double-click or Done saves it and starts another in a new color. Areas and lines stay on the map together.",
