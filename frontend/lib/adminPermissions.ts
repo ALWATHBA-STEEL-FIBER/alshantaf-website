@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo } from "react";
+import { createContext, createElement, useContext, useMemo, type ReactNode } from "react";
 
 export const ADMIN_FEATURES = [
   "dashboard",
@@ -36,7 +36,7 @@ export function AdminSessionProvider({
   children,
 }: {
   session: AdminSession;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const value = useMemo<Ctx>(() => {
     const perms = session.permissions?.length ? session.permissions : (["*"] as AdminPermission[]);
@@ -49,7 +49,7 @@ export function AdminSessionProvider({
     };
   }, [session]);
 
-  return <AdminSessionContext.Provider value={value}>{children}</AdminSessionContext.Provider>;
+  return createElement(AdminSessionContext.Provider, { value }, children);
 }
 
 export function useAdminSession() {
