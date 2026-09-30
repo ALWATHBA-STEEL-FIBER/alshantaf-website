@@ -313,10 +313,15 @@ function drawFeature(
   points: Coords[],
   color: string,
   closed: boolean,
-  lang: "ar" | "en"
+  lang: "ar" | "en",
+  opts?: {
+    editable?: boolean;
+    onVertexDragEnd?: (index: number, latlng: Coords) => void;
+  }
 ) {
   if (points.length === 0) return;
   const latlngs = points.map((p) => L.latLng(p.lat, p.lng));
+  const editable = Boolean(opts?.editable);
 
   if (kind === "area" && (closed || points.length >= 2)) {
     L.polygon(latlngs, {
@@ -364,18 +369,32 @@ function drawFeature(
     }).addTo(group);
   }
 
-  for (const p of points) {
-    L.marker([p.lat, p.lng], {
-      interactive: false,
+  points.forEach((p, index) => {
+    const marker = L.marker([p.lat, p.lng], {
+      interactive: editable,
+      draggable: editable,
       keyboard: false,
+      zIndexOffset: editable ? 600 : 0,
       icon: L.divIcon({
         className: "",
         html: vertexHtml(color),
-        iconSize: [12, 12],
-        iconAnchor: [6, 6],
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
       }),
     }).addTo(group);
-  }
+
+    if (editable && opts?.onVertexDragEnd) {
+      marker.on("click", (e) => L.DomEvent.stop(e));
+      marker.on("dblclick", (e) => {
+        L.DomEvent.stop(e);
+        L.DomEvent.preventDefault(e);
+      });
+      marker.on("dragend", (e) => {
+        const ll = (e.target as import("leaflet").Marker).getLatLng();
+        opts.onVertexDragEnd!(index, { lat: ll.lat, lng: ll.lng });
+      });
+    }
+  });
 }
 
 /**
@@ -406,6 +425,7 @@ export function attachMeasureTool(
   let lineColor: string = DEFAULT_MEASURE_LINE_COLOR;
   let pendingClickTimer: number | null = null;
   let pendingClickCoords: Coords | null = null;
+  let suppressMapClickUntil = 0;
   let clickHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let moveHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let dblHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
@@ -456,17 +476,7 @@ export function attachMeasureTool(
     }
   }
 
-  function redrawAll() {
-    group.clearLayers();
-    for (const t of threads) {
-      drawFeature(L, group, t.kind, t.points, t.color, true, opts.lang);
-    }
-    if (mode !== "off" && points.length > 0) {
-      drawFeature(L, group, mode, points, lineColor, closed, opts.lang);
-    }
-  }
-
-  function resolveClick(raw: Coords): SnapResult {
+  function resolveClick(raw: Coords, resolveOpts?: { skipFixed?: boolean }): SnapResult {
     const radius = snapRadiusMeters(L, map);
     const linePolylines = lineSnap
       ? [
@@ -486,11 +496,39 @@ export function attachMeasureTool(
     });
 
     // Fixed length from the previous draft vertex (1 m / 5 m steps).
-    if (fixedSnapM > 0 && points.length >= 1 && !closed) {
+    if (
+      !resolveOpts?.skipFixed &&
+      fixedSnapM > 0 &&
+      points.length >= 1 &&
+      !closed
+    ) {
       const fixed = applyFixedLengthSnap(points[points.length - 1]!, snapped.point, fixedSnapM);
       snapped = { point: fixed.point, kind: snapped.kind === "none" ? "fixed" : snapped.kind };
     }
     return snapped;
+  }
+
+  function moveDraftVertex(index: number, raw: Coords) {
+    if (index < 0 || index >= points.length) return;
+    const snapped = resolveClick(raw, { skipFixed: true });
+    points[index] = snapped.point;
+    lastSnapped = snapped.kind !== "none";
+    suppressMapClickUntil = Date.now() + 450;
+    redrawAll();
+    emit();
+  }
+
+  function redrawAll() {
+    group.clearLayers();
+    for (const t of threads) {
+      drawFeature(L, group, t.kind, t.points, t.color, true, opts.lang);
+    }
+    if (mode !== "off" && points.length > 0) {
+      drawFeature(L, group, mode, points, lineColor, closed, opts.lang, {
+        editable: true,
+        onVertexDragEnd: moveDraftVertex,
+      });
+    }
   }
 
   function commitDraftToThread(): boolean {
@@ -574,6 +612,7 @@ export function attachMeasureTool(
     unbindMap();
     clickHandler = (e) => {
       if (mode === "off" || closed) return;
+      if (Date.now() < suppressMapClickUntil) return;
       L.DomEvent.stopPropagation(e.originalEvent);
       const coords = { lat: e.latlng.lat, lng: e.latlng.lng };
       if (pendingClickTimer != null) window.clearTimeout(pendingClickTimer);

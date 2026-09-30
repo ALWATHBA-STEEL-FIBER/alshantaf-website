@@ -544,10 +544,15 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    if (locked || measuring) {
+    if (locked) {
       map.doubleClickZoom.disable();
       map.boxZoom.disable();
       if (markerRef.current?.dragging) markerRef.current.dragging.disable();
+    } else if (measuring) {
+      // Architecture mode: keep the location pin movable; disable map dbl-zoom (used to finish).
+      map.doubleClickZoom.disable();
+      map.boxZoom.disable();
+      if (markerRef.current?.dragging) markerRef.current.dragging.enable();
     } else {
       map.doubleClickZoom.enable();
       map.boxZoom.enable();

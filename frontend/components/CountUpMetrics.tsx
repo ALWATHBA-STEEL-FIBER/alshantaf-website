@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useLanguage } from "@/lib/LanguageProvider";
 
 type Metric = { value: string; label: string };
 
@@ -82,13 +83,16 @@ function CountUpValue({ value }: { value: string }) {
 }
 
 /** Landing metric strip — counts up once when first visible. */
-export function CountUpMetrics({ metrics }: { metrics: readonly Metric[] }) {
+export function CountUpMetrics({ metrics }: { metrics?: readonly Metric[] }) {
+  const { t } = useLanguage();
+  const items = metrics ?? t.hero.metrics;
+
   return (
     <section className="relative -mt-10 z-10">
       <div className="mx-auto max-w-[1240px] px-4">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-px overflow-hidden rounded-2xl border border-line bg-line shadow-[0_24px_60px_-28px_rgba(17,58,52,0.45)]">
-          {metrics.map((m) => (
-            <div key={m.label} className="bg-white px-4 py-5 md:px-6 md:py-6">
+          {items.map((m) => (
+            <div key={`${m.value}-${m.label}`} className="bg-white px-4 py-5 md:px-6 md:py-6">
               <CountUpValue value={m.value} />
               <span className="mt-1 block text-xs text-ink-soft leading-snug">{m.label}</span>
             </div>

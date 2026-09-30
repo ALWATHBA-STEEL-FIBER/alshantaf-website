@@ -6,7 +6,6 @@ import { FeaturedOffersSection } from "@/components/FeaturedOffersSection";
 import { WhyAlshantaf } from "@/components/journey/WhyAlshantaf";
 import { AdvisorCta } from "@/components/AdvisorCta";
 import { getPublicListingsServer } from "@/lib/api";
-import { getServerDict } from "@/lib/serverLang";
 
 const AreasGuide = dynamic(() => import("@/components/AreasGuide").then((m) => m.AreasGuide), {
   loading: () => <div className="py-16 md:py-20 bg-surface-2 min-h-[320px]" aria-hidden />,
@@ -17,7 +16,7 @@ const GovToolsHome = dynamic(() => import("@/components/journey/DecisionToolsHom
 });
 
 export default async function HomePage() {
-  const [{ t }, listings] = await Promise.all([getServerDict(), getPublicListingsServer()]);
+  const listings = await getPublicListingsServer();
 
   return (
     <>
@@ -54,7 +53,7 @@ export default async function HomePage() {
         fetchPriority="high"
       />
       <Hero />
-      <CountUpMetrics metrics={t.hero.metrics} />
+      <CountUpMetrics />
       <IntentGate />
       <FeaturedOffersSection listings={listings} />
       <AreasGuide />

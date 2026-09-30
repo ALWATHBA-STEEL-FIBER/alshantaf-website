@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { dictionary, type Lang } from "./dictionary";
 
 interface LanguageContextValue {
@@ -20,6 +21,7 @@ export function LanguageProvider({
   children: React.ReactNode;
 }) {
   const [lang, setLang] = useState<Lang>(initialLang);
+  const router = useRouter();
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -35,7 +37,9 @@ export function LanguageProvider({
     } catch {
       // ignore storage failures (private browsing, etc.)
     }
-  }, [lang]);
+    // Refresh RSC trees that still read the lang cookie on the server.
+    router.refresh();
+  }, [lang, router]);
 
   const value = useMemo<LanguageContextValue>(
     () => ({ lang, dir: dictionary[lang].dir, t: dictionary[lang], toggleLanguage }),
