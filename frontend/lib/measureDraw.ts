@@ -24,7 +24,7 @@ export const MEASURE_LINE_COLORS = [
 
 export type MeasureLineColorId = (typeof MEASURE_LINE_COLORS)[number]["id"];
 
-export const DEFAULT_MEASURE_LINE_COLOR = MEASURE_LINE_COLORS[0]!.hex;
+export const DEFAULT_MEASURE_LINE_COLOR: string = MEASURE_LINE_COLORS[0]!.hex;
 
 function vertexHtml(color: string) {
   return `<span style="display:block;width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #0f342f;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span>`;
@@ -210,7 +210,7 @@ export function attachMeasureTool(
   let liveSegmentM: number | null = null;
   let snapTargets: Coords[] = [];
   let edgeSnap = true;
-  let lineColor = DEFAULT_MEASURE_LINE_COLOR;
+  let lineColor: string = DEFAULT_MEASURE_LINE_COLOR;
   let clickHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let moveHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let dblHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
