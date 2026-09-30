@@ -465,16 +465,28 @@ export function MapFullscreenPortal({
             variant="dark"
             labels={measureLabels}
             onEnter={() => onMeasureModeChange("distance")}
-            onExit={() => {
-              measureToolRef.current?.clear();
-              onMeasureModeChange("off");
-            }}
             onModeChange={(m) => onMeasureModeChange(m)}
             onUndo={() => measureToolRef.current?.undo()}
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
             onNewLine={() => measureToolRef.current?.newThread()}
           />
+        )}
+        {measuring && (
+          <button
+            type="button"
+            onClick={() => {
+              measureToolRef.current?.clear();
+              onMeasureModeChange("off");
+            }}
+            className="inline-flex items-center gap-1.5 min-h-11 px-3 rounded-full border text-[12px] font-bold border-gold bg-gold text-[#0a1f1c]"
+            aria-label={lp.measureExit}
+          >
+            <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <span>{lp.measureExit}</span>
+          </button>
         )}
         <button
           type="button"
@@ -503,10 +515,6 @@ export function MapFullscreenPortal({
             variant="dark"
             labels={measureLabels}
             onEnter={() => onMeasureModeChange("distance")}
-            onExit={() => {
-              measureToolRef.current?.clear();
-              onMeasureModeChange("off");
-            }}
             onModeChange={(m) => onMeasureModeChange(m)}
             onUndo={() => measureToolRef.current?.undo()}
             onClear={() => measureToolRef.current?.clear()}

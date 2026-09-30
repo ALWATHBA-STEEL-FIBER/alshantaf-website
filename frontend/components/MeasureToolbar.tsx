@@ -42,7 +42,6 @@ type Props = {
   labels: MeasureToolbarLabels;
   variant?: "light" | "dark";
   onEnter: () => void;
-  onExit: () => void;
   onModeChange: (m: Exclude<MeasureMode, "off">) => void;
   onUndo: () => void;
   onClear: () => void;
@@ -137,14 +136,6 @@ function IconCheck({ className = "w-4 h-4" }: { className?: string }) {
   );
 }
 
-function IconClose({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function IconPlus({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -172,7 +163,6 @@ export function MeasureToolbar({
   labels: lp,
   variant = "light",
   onEnter,
-  onExit,
   onModeChange,
   onUndo,
   onClear,
@@ -197,9 +187,6 @@ export function MeasureToolbar({
   const btnSelectedToggle = dark
     ? "bg-gold text-[#0a1f1c] border-gold ring-2 ring-white/80 ring-offset-1 ring-offset-[#0f342f]"
     : "bg-green text-white border-green ring-2 ring-green/35 ring-offset-1 ring-offset-white";
-  const btnExit = dark
-    ? "border-gold bg-gold text-[#0a1f1c]"
-    : "border-green bg-green text-white";
   const hintCls = dark ? "text-gold/80" : "text-ink-soft";
   const muted = dark ? "text-gold/70" : "text-ink-soft";
   const title = dark ? "text-gold" : "text-green";
@@ -283,17 +270,6 @@ export function MeasureToolbar({
             {lp.measureFixed5m}
           </button>
           {snap?.lastSnapped && <span className={`text-[10px] font-bold ${title}`}>●</span>}
-        </div>
-        <div className="ms-auto flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={onExit}
-            className={`inline-flex items-center gap-1.5 min-h-11 px-3 rounded-full border text-[12px] font-bold ${btnExit}`}
-            aria-label={lp.measureExit}
-          >
-            <IconClose className="w-[18px] h-[18px]" />
-            <span>{lp.measureExit}</span>
-          </button>
         </div>
       </div>
 
