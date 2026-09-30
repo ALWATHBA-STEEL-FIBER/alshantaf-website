@@ -7,7 +7,8 @@ export function GET() {
     name: "ALSHANTAF Admin",
     short_name: "Admin",
     description: "Alshantaf Invest — admin control panel",
-    start_url: "/admin",
+    // Login URL so a signed-out trusted device never lands on a gated 404.
+    start_url: "/admin/login",
     scope: "/admin",
     display: "standalone",
     background_color: "#0f342f",

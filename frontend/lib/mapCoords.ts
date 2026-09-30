@@ -477,6 +477,21 @@ export function ringPerimeterMeters(ring: [number, number][]): number {
   return sum;
 }
 
+/** Planar shoelace area in m² for a lat/lng ring (client-side measure tool). */
+export function ringAreaSqm(ring: [number, number][]): number {
+  const pts = uniqueRing(ring);
+  if (pts.length < 3) return 0;
+  const origin = ringCentroid(pts);
+  const enu = pts.map(([lat, lng]) => toEnu(lat, lng, origin.lat, origin.lng));
+  let twice = 0;
+  for (let i = 0; i < enu.length; i++) {
+    const a = enu[i]!;
+    const b = enu[(i + 1) % enu.length]!;
+    twice += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(twice) / 2;
+}
+
 export function formatMeters(meters: number, lang: "ar" | "en"): string {
   let rounded: number;
   if (meters >= 100) rounded = Math.round(meters * 10) / 10;

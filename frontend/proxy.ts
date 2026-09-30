@@ -8,9 +8,9 @@ const DEVICE_MAX_AGE_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 /**
  * Hide /admin from directory scanners:
  * - First visit: /admin/login needs ?unlock=<ADMIN_GATE_SECRET>
- * - After login, a trusted-device cookie lets this browser reopen /admin
- *   (and login) without the unlock key
- * - Session cookie unlocks the rest of /admin/*
+ * - Unlock (or login) sets a long-lived trusted-device cookie so the
+ *   homescreen PWA can reopen /admin/login forever without the unlock key
+ * - Session cookie unlocks the signed-in panel
  * - Everyone else gets an indistinguishable 404
  */
 export async function proxy(request: NextRequest) {
@@ -21,24 +21,74 @@ export async function proxy(request: NextRequest) {
   const deviceToken = request.cookies.get(DEVICE_COOKIE)?.value;
   const deviceTrusted = secret ? await verifyAdminDeviceToken(deviceToken, secret) : false;
   const isLogin = pathname === "/admin/login" || pathname.startsWith("/admin/login/");
+  const unlockOk = Boolean(secret && unlock === secret);
+  const secure = request.nextUrl.protocol === "https:";
+
+  // One-time unlock: mint device trust and land on clean /admin/login (no secret in URL).
+  if (isLogin && unlockOk) {
+    const url = request.nextUrl.clone();
+    url.searchParams.delete("unlock");
+    const res = NextResponse.redirect(url);
+    await attachAdminDeviceCookie(res, secret, secure);
+    res.cookies.set(GATE_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
+    return res;
+  }
 
   if (isLogin) {
-    if ((secret && unlock === secret) || deviceTrusted || session) {
+    if (deviceTrusted || session) {
       const res = NextResponse.next();
+      if (secret) await attachAdminDeviceCookie(res, secret, secure);
       res.cookies.set(GATE_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
       return res;
     }
     return hideAsNotFound(request);
   }
 
+  // Homescreen start_url may be /admin — signed-out trusted devices go to login, not 404.
+  if (deviceTrusted && !session && (pathname === "/admin" || pathname === "/admin/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/admin/login";
+    url.search = "";
+    const res = NextResponse.redirect(url);
+    if (secret) await attachAdminDeviceCookie(res, secret, secure);
+    res.cookies.set(GATE_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
+    return res;
+  }
+
   // Signed-in admins, or trusted devices (AuthGate will send them to login).
   if (session || deviceTrusted) {
     const res = NextResponse.next();
+    if (secret) await attachAdminDeviceCookie(res, secret, secure);
     res.cookies.set(GATE_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 });
     return res;
   }
 
   return hideAsNotFound(request);
+}
+
+async function attachAdminDeviceCookie(res: NextResponse, secret: string, secure: boolean) {
+  const token = await signAdminDeviceToken(secret);
+  res.cookies.set(DEVICE_COOKIE, token, {
+    httpOnly: true,
+    secure,
+    sameSite: "lax",
+    path: "/",
+    maxAge: Math.floor(DEVICE_MAX_AGE_MS / 1000),
+  });
+}
+
+async function signAdminDeviceToken(secret: string): Promise<string> {
+  const iat = Date.now().toString(36);
+  const payload = `v1.${iat}`;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return `${payload}.${bufferToBase64Url(mac)}`;
 }
 
 function hideAsNotFound(request: NextRequest) {

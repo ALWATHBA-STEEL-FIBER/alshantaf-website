@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { formatMeters, type Coords } from "@/lib/mapCoords";
+import { formatDlsArea, formatMeters, type Coords } from "@/lib/mapCoords";
 import { createParcelCanvasLayer, type ParcelCanvasOpts } from "@/lib/parcelCanvasLayer";
+import {
+  attachMeasureTool,
+  type MeasureMode,
+  type MeasureSnapshot,
+  type MeasureTool,
+} from "@/lib/measureDraw";
 import type { ParcelRing } from "@/components/LocationInput";
 import "leaflet/dist/leaflet.css";
 
@@ -21,6 +27,14 @@ type Labels = {
   dimensionsPerimeter: string;
   dimensionsExtent: string;
   exitFullscreen: string;
+  measureLabel: string;
+  measureDistance: string;
+  measureArea: string;
+  measureTotal: string;
+  measureClear: string;
+  measureFinish: string;
+  measureHintDistance: string;
+  measureHintArea: string;
 };
 
 type Props = {
@@ -31,6 +45,8 @@ type Props = {
   drawDimensions: boolean;
   onDrawDimensionsChange: (v: boolean) => void;
   showDimensions: boolean;
+  measureMode: MeasureMode;
+  onMeasureModeChange: (m: MeasureMode) => void;
   polygon: ParcelRing[] | null | undefined;
   selected: Coords | null;
   perimeterM: number | null;
@@ -57,6 +73,8 @@ export function MapFullscreenPortal({
   drawDimensions,
   onDrawDimensionsChange,
   showDimensions,
+  measureMode,
+  onMeasureModeChange,
   polygon,
   selected,
   perimeterM,
@@ -75,8 +93,12 @@ export function MapFullscreenPortal({
   const polyRef = useRef<import("leaflet").Polygon | null>(null);
   const dimsRef = useRef<import("leaflet").LayerGroup | null>(null);
   const markerRef = useRef<import("leaflet").Marker | null>(null);
+  const measureToolRef = useRef<MeasureTool | null>(null);
+  const [measureSnap, setMeasureSnap] = useState<MeasureSnapshot | null>(null);
   const basemapRef = useRef(basemap);
   basemapRef.current = basemap;
+  const measureModeRef = useRef(measureMode);
+  measureModeRef.current = measureMode;
 
   // Body scroll lock + Escape; block iOS rubber-band scroll outside the map pane
   useEffect(() => {
@@ -177,6 +199,14 @@ export function MapFullscreenPortal({
         }).addTo(map);
       }
 
+      measureToolRef.current = attachMeasureTool(L, map, {
+        lang,
+        onChange: setMeasureSnap,
+      });
+      if (measureModeRef.current !== "off") {
+        measureToolRef.current.setMode(measureModeRef.current);
+      }
+
       // Size passes after first paint
       requestAnimationFrame(() => {
         map?.invalidateSize({ animate: false });
@@ -189,6 +219,8 @@ export function MapFullscreenPortal({
 
     return () => {
       cancelled = true;
+      measureToolRef.current?.destroy();
+      measureToolRef.current = null;
       map?.remove();
       mapRef.current = null;
       osmRef.current = null;
@@ -196,6 +228,7 @@ export function MapFullscreenPortal({
       polyRef.current = null;
       dimsRef.current = null;
       markerRef.current = null;
+      setMeasureSnap(null);
     };
     // Intentionally only when open flips — polygon/selected snapshotted at open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -213,6 +246,11 @@ export function MapFullscreenPortal({
     if (map.hasLayer(idle)) map.removeLayer(idle);
     if (!map.hasLayer(active)) active.addTo(map);
   }, [basemap, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    measureToolRef.current?.setMode(measureMode);
+  }, [open, measureMode]);
 
   // Keep canvas annotations (dims + parcel no) in sync with toggles
   useEffect(() => {
@@ -282,6 +320,52 @@ export function MapFullscreenPortal({
             {lp.dimensionsOnMap}
           </button>
         )}
+        <div
+          className="inline-flex rounded-full border border-gold/35 bg-[#0a1f1c] p-0.5"
+          role="group"
+          aria-label={lp.measureLabel}
+        >
+          <button
+            type="button"
+            onClick={() => onMeasureModeChange(measureMode === "distance" ? "off" : "distance")}
+            className={`h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
+              measureMode === "distance" ? "bg-green text-white" : "text-gold/80 hover:text-gold"
+            }`}
+            aria-pressed={measureMode === "distance"}
+          >
+            {lp.measureDistance}
+          </button>
+          <button
+            type="button"
+            onClick={() => onMeasureModeChange(measureMode === "area" ? "off" : "area")}
+            className={`h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
+              measureMode === "area" ? "bg-green text-white" : "text-gold/80 hover:text-gold"
+            }`}
+            aria-pressed={measureMode === "area"}
+          >
+            {lp.measureArea}
+          </button>
+        </div>
+        {measureMode !== "off" && (
+          <>
+            {measureMode === "area" && measureSnap && measureSnap.points.length >= 3 && !measureSnap.closed && (
+              <button
+                type="button"
+                onClick={() => measureToolRef.current?.finish()}
+                className="h-8 px-3 rounded-full border border-gold bg-gold/15 text-[11px] font-bold text-gold"
+              >
+                {lp.measureFinish}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => measureToolRef.current?.clear()}
+              className="h-8 px-3 rounded-full border border-gold/35 bg-[#0a1f1c] text-[11px] font-bold text-gold/80 hover:text-gold"
+            >
+              {lp.measureClear}
+            </button>
+          </>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -291,10 +375,34 @@ export function MapFullscreenPortal({
         </button>
       </div>
 
+      {measureMode !== "off" && (
+        <p className="text-[11px] text-gold/80 px-1">
+          {measureMode === "distance" ? lp.measureHintDistance : lp.measureHintArea}
+        </p>
+      )}
+
       <div
         ref={paneRef}
         className="map-fs-portal-pane relative min-h-0 flex-1 w-full overflow-hidden rounded-xl border border-line bg-surface-2"
       />
+
+      {measureSnap && measureMode !== "off" && measureSnap.points.length > 0 && (
+        <div className="shrink-0 rounded-xl border border-gold/35 bg-[#0f342f] px-3 py-2 text-gold-2">
+          <p className="text-[10px] font-bold tracking-wide mb-1 text-gold">{lp.measureLabel}</p>
+          <ul className="space-y-0.5 text-[11px] leading-snug">
+            <li>
+              <span className="text-gold/70">{lp.measureTotal}: </span>
+              <b>{formatMeters(measureSnap.lengthM, lang)}</b>
+            </li>
+            {measureSnap.areaSqm != null && measureSnap.areaSqm > 0 && (
+              <li>
+                <span className="text-gold/70">{lp.dimensionsArea}: </span>
+                <b>{formatDlsArea(measureSnap.areaSqm, lang)}</b>
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
 
       {hasInfo && (
         <div className="shrink-0 rounded-xl border border-gold/35 bg-[#0f342f] px-3 py-2 text-gold-2">
