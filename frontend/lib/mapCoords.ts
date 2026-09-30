@@ -494,11 +494,23 @@ export function ringAreaSqm(ring: [number, number][]): number {
 
 export function formatMeters(meters: number, lang: "ar" | "en"): string {
   let rounded: number;
-  if (meters >= 100) rounded = Math.round(meters * 10) / 10;
-  else if (meters >= 10) rounded = Math.round(meters * 10) / 10;
-  else rounded = Math.round(meters * 100) / 100;
+  let maxFrac: number;
+  if (meters >= 100) {
+    rounded = Math.round(meters * 10) / 10;
+    maxFrac = 1;
+  } else if (meters >= 10) {
+    rounded = Math.round(meters * 10) / 10;
+    maxFrac = 1;
+  } else if (meters >= 1) {
+    // Centimetre-level for short architecture segments.
+    rounded = Math.round(meters * 100) / 100;
+    maxFrac = 2;
+  } else {
+    rounded = Math.round(meters * 1000) / 1000;
+    maxFrac = 3;
+  }
   const n = rounded.toLocaleString("en-JO", {
-    maximumFractionDigits: meters >= 10 ? 1 : 2,
+    maximumFractionDigits: maxFrac,
     minimumFractionDigits: 0,
   });
   return lang === "ar" ? `${n} م` : `${n} m`;

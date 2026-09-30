@@ -4,7 +4,6 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { useLanguage } from "@/lib/LanguageProvider";
 import {
   coordsToString,
-  formatDlsArea,
   formatMeters,
   formatSideMeters,
   mapsLinkFromCoords,
@@ -19,10 +18,12 @@ import type { BlueprintMeta } from "@/lib/parcelBlueprint";
 import { createParcelCanvasLayer, type ParcelCanvasOpts } from "@/lib/parcelCanvasLayer";
 import {
   attachMeasureTool,
+  parcelSnapTargets,
   type MeasureMode,
   type MeasureSnapshot,
   type MeasureTool,
 } from "@/lib/measureDraw";
+import { MeasureToolbar } from "@/components/MeasureToolbar";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
@@ -423,6 +424,13 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const snapTargets = useMemo(
+    () => parcelSnapTargets(polygon as [number, number][][] | null | undefined),
+    [polygon]
+  );
+  const measuring = measureMode !== "off";
+  const dimsOnCanvas = Boolean(drawDimensions && showDimensions && !measuring);
+
   // Attach measure tool once the map is ready.
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
@@ -433,6 +441,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         lang,
         onChange: setMeasureSnap,
       });
+      measureToolRef.current.setSnapTargets(snapTargets);
       if (measureModeRef.current !== "off") {
         measureToolRef.current.setMode(measureModeRef.current);
       }
@@ -440,17 +449,23 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, lang]);
 
   useEffect(() => {
     measureToolRef.current?.setMode(measureMode);
+    if (measureMode === "off") setMeasureSnap(null);
   }, [measureMode]);
+
+  useEffect(() => {
+    measureToolRef.current?.setSnapTargets(snapTargets);
+  }, [snapTargets]);
 
   // Keep interaction mode in sync without remounting (remounts caused intermittent blank maps).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    if (locked) {
+    if (locked || measuring) {
       map.doubleClickZoom.disable();
       map.boxZoom.disable();
       if (markerRef.current?.dragging) markerRef.current.dragging.disable();
@@ -459,7 +474,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       map.boxZoom.enable();
       if (markerRef.current?.dragging) markerRef.current.dragging.enable();
     }
-  }, [locked, mapReady]);
+  }, [locked, mapReady, measuring]);
 
   useEffect(() => {
     // Force tile redraw after basemap switch / container reveal
@@ -534,7 +549,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       if (polygon && polygon.length > 0 && polygonKey) {
         const opts: ParcelCanvasOpts = {
           rings: polygon as [number, number][][],
-          showDimensions: Boolean(drawDimensions && showDimensions),
+          showDimensions: Boolean(
+            drawDimensions && showDimensions && measureModeRef.current === "off"
+          ),
           perimeterM,
           lang,
           parcelNumber: blueprint?.parcel?.trim() || null,
@@ -575,13 +592,13 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     if (!layer?.setParcelOptions || !polygon?.[0]?.length) return;
     layer.setParcelOptions({
       rings: polygon as [number, number][][],
-      showDimensions: Boolean(drawDimensions && showDimensions),
+      showDimensions: dimsOnCanvas,
       perimeterM,
       lang,
       parcelNumber: blueprint?.parcel?.trim() || null,
       parcelLabel: lp.blueprintParcel,
     });
-  }, [drawDimensions, showDimensions, perimeterM, lang, blueprint?.parcel, polygon, lp.blueprintParcel]);
+  }, [dimsOnCanvas, perimeterM, lang, blueprint?.parcel, polygon, lp.blueprintParcel]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -819,7 +836,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               {lp.basemapSatellite}
             </button>
           </div>
-          {Boolean(polygon?.[0]?.length) && showDimensions && (
+          {Boolean(polygon?.[0]?.length) && showDimensions && !measuring && (
             <button
               type="button"
               onClick={() => setDrawDimensions((v) => !v)}
@@ -833,83 +850,81 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               {lp.dimensionsOnMap}
             </button>
           )}
-          <div
-            className="inline-flex rounded-full border border-line bg-surface-2 p-0.5"
-            role="group"
-            aria-label={lp.measureLabel}
-          >
-            <button
-              type="button"
-              onClick={() => setMeasureMode((m) => (m === "distance" ? "off" : "distance"))}
-              className={`h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
-                measureMode === "distance" ? "bg-green text-white" : "text-ink-soft hover:text-ink"
-              }`}
-              aria-pressed={measureMode === "distance"}
-            >
-              {lp.measureDistance}
-            </button>
-            <button
-              type="button"
-              onClick={() => setMeasureMode((m) => (m === "area" ? "off" : "area"))}
-              className={`h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
-                measureMode === "area" ? "bg-green text-white" : "text-ink-soft hover:text-ink"
-              }`}
-              aria-pressed={measureMode === "area"}
-            >
-              {lp.measureArea}
-            </button>
-          </div>
-          {measureMode !== "off" && (
-            <>
-              {measureMode === "area" && measureSnap && measureSnap.points.length >= 3 && !measureSnap.closed && (
-                <button
-                  type="button"
-                  onClick={() => measureToolRef.current?.finish()}
-                  className="h-8 px-3 rounded-full border border-green bg-green/10 text-[11px] font-bold text-green"
-                >
-                  {lp.measureFinish}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => measureToolRef.current?.clear()}
-                className="h-8 px-3 rounded-full border border-line bg-surface-2 text-[11px] font-bold text-ink-soft hover:text-ink"
-              >
-                {lp.measureClear}
-              </button>
-            </>
+          {!measuring && (
+            <MeasureToolbar
+              mode={measureMode}
+              snap={measureSnap}
+              hasParcelSnap={snapTargets.length > 0}
+              lang={lang}
+              variant="light"
+              labels={{
+                measureEnter: lp.measureEnter,
+                measureExit: lp.measureExit,
+                measureLabel: lp.measureLabel,
+                measureDistance: lp.measureDistance,
+                measureArea: lp.measureArea,
+                measureTotal: lp.measureTotal,
+                measureClear: lp.measureClear,
+                measureFinish: lp.measureFinish,
+                measureUndo: lp.measureUndo,
+                measureSnapOn: lp.measureSnapOn,
+                measureHintDistance: lp.measureHintDistance,
+                measureHintArea: lp.measureHintArea,
+                dimensionsArea: lp.dimensionsArea,
+              }}
+              onEnter={() => setMeasureMode("distance")}
+              onExit={() => {
+                measureToolRef.current?.clear();
+                setMeasureMode("off");
+              }}
+              onModeChange={(m) => setMeasureMode(m)}
+              onUndo={() => measureToolRef.current?.undo()}
+              onClear={() => measureToolRef.current?.clear()}
+              onFinish={() => measureToolRef.current?.finish()}
+            />
           )}
           <button
             type="button"
             onClick={() => setMapFullscreen(true)}
-            className="h-8 px-3 rounded-full border border-line bg-surface-2 text-[11px] font-bold text-ink-soft hover:text-ink transition-colors"
+            className="min-h-11 h-8 px-3 rounded-full border border-line bg-surface-2 text-[11px] font-bold text-ink-soft hover:text-ink transition-colors"
             aria-pressed={mapFullscreen}
           >
             {lp.fullscreen}
           </button>
         </div>
 
-        {measureMode !== "off" && (
-          <p className="text-[11px] text-ink-soft px-1">
-            {measureMode === "distance" ? lp.measureHintDistance : lp.measureHintArea}
-          </p>
-        )}
-        {measureSnap && measureMode !== "off" && measureSnap.points.length > 0 && (
-          <div className="shrink-0 rounded-xl border border-line bg-surface-2/80 px-3 py-2">
-            <p className="text-[10px] font-bold tracking-wide mb-1 text-green">{lp.measureLabel}</p>
-            <ul className="space-y-0.5 text-[11px] leading-snug text-ink">
-              <li>
-                <span className="text-ink-soft">{lp.measureTotal}: </span>
-                <b>{formatMeters(measureSnap.lengthM, lang)}</b>
-              </li>
-              {measureSnap.areaSqm != null && measureSnap.areaSqm > 0 && (
-                <li>
-                  <span className="text-ink-soft">{lp.dimensionsArea}: </span>
-                  <b>{formatDlsArea(measureSnap.areaSqm, lang)}</b>
-                </li>
-              )}
-            </ul>
-          </div>
+        {measuring && (
+          <MeasureToolbar
+            mode={measureMode}
+            snap={measureSnap}
+            hasParcelSnap={snapTargets.length > 0}
+            lang={lang}
+            variant="light"
+            labels={{
+              measureEnter: lp.measureEnter,
+              measureExit: lp.measureExit,
+              measureLabel: lp.measureLabel,
+              measureDistance: lp.measureDistance,
+              measureArea: lp.measureArea,
+              measureTotal: lp.measureTotal,
+              measureClear: lp.measureClear,
+              measureFinish: lp.measureFinish,
+              measureUndo: lp.measureUndo,
+              measureSnapOn: lp.measureSnapOn,
+              measureHintDistance: lp.measureHintDistance,
+              measureHintArea: lp.measureHintArea,
+              dimensionsArea: lp.dimensionsArea,
+            }}
+            onEnter={() => setMeasureMode("distance")}
+            onExit={() => {
+              measureToolRef.current?.clear();
+              setMeasureMode("off");
+            }}
+            onModeChange={(m) => setMeasureMode(m)}
+            onUndo={() => measureToolRef.current?.undo()}
+            onClear={() => measureToolRef.current?.clear()}
+            onFinish={() => measureToolRef.current?.finish()}
+          />
         )}
 
         <div className="relative">
@@ -925,7 +940,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           )}
         </div>
 
-        {hasDimensions && !loading && (
+        {hasDimensions && !loading && !measuring && (
           <div className="shrink-0 rounded-xl border border-line bg-surface-2/80 px-3 py-2">
             <p className="text-[10px] font-bold tracking-wide mb-1 text-green">{lp.dimensionsTitle}</p>
             <ul className="space-y-0.5 text-[11px] leading-snug text-ink">
@@ -989,12 +1004,16 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           dimensionsPerimeter: lp.dimensionsPerimeter,
           dimensionsExtent: lp.dimensionsExtent,
           exitFullscreen: lp.exitFullscreen,
+          measureEnter: lp.measureEnter,
+          measureExit: lp.measureExit,
           measureLabel: lp.measureLabel,
           measureDistance: lp.measureDistance,
           measureArea: lp.measureArea,
           measureTotal: lp.measureTotal,
           measureClear: lp.measureClear,
           measureFinish: lp.measureFinish,
+          measureUndo: lp.measureUndo,
+          measureSnapOn: lp.measureSnapOn,
           measureHintDistance: lp.measureHintDistance,
           measureHintArea: lp.measureHintArea,
         }}
