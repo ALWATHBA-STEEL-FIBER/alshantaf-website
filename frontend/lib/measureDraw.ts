@@ -18,10 +18,6 @@ export const MEASURE_LINE_COLORS = [
   { id: "white", hex: "#f5f5f0", labelEn: "White", labelAr: "أبيض" },
   { id: "cyan", hex: "#2ec4b6", labelEn: "Cyan", labelAr: "سماوي" },
   { id: "orange", hex: "#f4a261", labelEn: "Orange", labelAr: "برتقالي" },
-  { id: "red", hex: "#e63946", labelEn: "Red", labelAr: "أحمر" },
-  { id: "lime", hex: "#a8e063", labelEn: "Lime", labelAr: "ليموني" },
-  { id: "blue", hex: "#4ea8de", labelEn: "Blue", labelAr: "أزرق" },
-  { id: "violet", hex: "#9b5de5", labelEn: "Violet", labelAr: "بنفسجي" },
 ] as const;
 
 export type MeasureLineColorId = (typeof MEASURE_LINE_COLORS)[number]["id"];
