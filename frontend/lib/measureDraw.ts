@@ -146,7 +146,7 @@ export function attachMeasureTool(
     unbindMap();
     clickHandler = (e) => {
       if (mode === "off" || closed) return;
-      L.DomEvent.stopPropagation(e);
+      L.DomEvent.stopPropagation(e.originalEvent);
       const next = { lat: e.latlng.lat, lng: e.latlng.lng };
       // Close area if clicking near the first vertex (~8 m).
       if (mode === "area" && points.length >= 3) {
@@ -164,8 +164,8 @@ export function attachMeasureTool(
     };
     dblHandler = (e) => {
       if (mode === "off") return;
-      L.DomEvent.preventDefault(e);
-      L.DomEvent.stopPropagation(e);
+      L.DomEvent.preventDefault(e.originalEvent);
+      L.DomEvent.stopPropagation(e.originalEvent);
       if (mode === "distance" && points.length >= 2) {
         // finish distance (keep open polyline)
         emit();
