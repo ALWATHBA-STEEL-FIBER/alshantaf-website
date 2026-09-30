@@ -1,0 +1,63 @@
+{
+  "package": "ALSHANTAF AI Knowledge",
+  "version": "2026-09-30",
+  "training_example_count": 44,
+  "evaluation_case_count": 18,
+  "files": [
+    {
+      "name": "00-START-HERE-AR.txt",
+      "bytes": 8051,
+      "sha256": "db23cc050b12509ffd7452a2a94680e1aa46745a3bff86cc503941f2d9f9bd22"
+    },
+    {
+      "name": "01-SYSTEM-PROMPT-AR.txt",
+      "bytes": 15549,
+      "sha256": "0f90824c79fcebb6f069efbcb816f0c92ddf9d91888b3c1957d8d1d2c7b82c96"
+    },
+    {
+      "name": "02-KNOWLEDGE-BASE-AR.md",
+      "bytes": 38763,
+      "sha256": "83df23e6a6733c90dca2a47141b02d92285c820e50608436663a72042f56ae30"
+    },
+    {
+      "name": "03-RESPONSE-EXAMPLES-AR.md",
+      "bytes": 22735,
+      "sha256": "55b7e28d381f6e1dd3a78f5a81ae72b1a4378e42b67618650d776dcaaafe8c30"
+    },
+    {
+      "name": "04-TRAINING-EXAMPLES.jsonl",
+      "bytes": 49555,
+      "sha256": "a7193f25d83153857bf809349cf585f2597fe88667bfd8c9e46cb9f8f52bcc5d"
+    },
+    {
+      "name": "05-EVALUATION-CASES.json",
+      "bytes": 6002,
+      "sha256": "0906692c1d256bbd2ac65b3de0367ca0b775298499c68b3fa9d45c8004def71c"
+    },
+    {
+      "name": "06-DATA-MODEL.json",
+      "bytes": 7205,
+      "sha256": "a11bb3ae27745064ddafbe4770e5d463f683f5330f60da602892ab8c35557a72"
+    },
+    {
+      "name": "07-SOURCES-AND-VERIFICATION.md",
+      "bytes": 11493,
+      "sha256": "794f8b96574f150f2d8755c78b6e9dee45a88b25efbe80a14aa106da28244f5d"
+    },
+    {
+      "name": "08-ADMIN-REVIEW-NOTES.md",
+      "bytes": 5913,
+      "sha256": "a69acac7234f15fbdd7cca5a6ec8a0ce4627dab9a792bc7e2ef343cfd426ae36"
+    },
+    {
+      "name": "09-PACKAGE-VALIDATION.txt",
+      "bytes": 278,
+      "sha256": "c2dce76d87d11cca9ff32081cba0a16e3a6a09de336f0d47e9f68b0ec4fe69ae"
+    },
+    {
+      "name": "ALSHANTAF-AI-ALL-IN-ONE-AR.txt",
+      "bytes": 88880,
+      "sha256": "b824c238280f7aaf6cbe29f28140f53d43ada3d31251acac4b435ee933e9f007"
+    }
+  ]
+}

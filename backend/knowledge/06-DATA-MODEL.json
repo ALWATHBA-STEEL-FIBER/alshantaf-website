@@ -1,0 +1,290 @@
+{
+  "version": "2026-09-30",
+  "type": "مواصفة وبيانات مرجعية مقترحة، ليست قاعدة عروض حية ولا JSON Schema للتحقق الآلي",
+  "capabilities_default": {
+    "live_inventory": false,
+    "government_lookup": false,
+    "file_ocr_or_vision": false,
+    "create_lead": false,
+    "publish_listing": false,
+    "send_whatsapp": false,
+    "persistent_memory": false
+  },
+  "contacts": {
+    "ahmad": {
+      "display": "م. أحمد الشنتف",
+      "phone_local": "0799996668",
+      "phone_e164": "+962799996668",
+      "whatsapp_url": "https://wa.me/962799996668"
+    },
+    "mohammad": {
+      "display": "م. محمد الشنتف",
+      "phone_local": "0799996660",
+      "phone_e164": "+962799996660",
+      "whatsapp_url": "https://wa.me/962799996660"
+    },
+    "email": "info@alshantaf.com"
+  },
+  "area_directory": {
+    "source_type": "company_conversation",
+    "official_cadastral_verification": false,
+    "items": [
+      {
+        "id": "qastal_mushta",
+        "label_ar": "القسطل والمشتى"
+      },
+      {
+        "id": "sahab",
+        "label_ar": "سحاب"
+      },
+      {
+        "id": "muwaqqar",
+        "label_ar": "الموقر"
+      },
+      {
+        "id": "bayader",
+        "label_ar": "البيادر"
+      },
+      {
+        "id": "rajm_shami",
+        "label_ar": "رجم الشامي"
+      },
+      {
+        "id": "jiza",
+        "label_ar": "الجيزة"
+      },
+      {
+        "id": "qunaytira",
+        "label_ar": "القنيطرة"
+      },
+      {
+        "id": "dhahabiya",
+        "label_ar": "الذهبية"
+      }
+    ],
+    "spelling_note": "الذهبية/الذهيبة تحتاج تثبيت اسم القرية الرسمي؛ لا تدمج هويات قطع بناء على تصحيح لغوي."
+  },
+  "villages": {
+    "source_type": "user_provided_dropdown_not_official_exhaustive_register",
+    "القسطل": [
+      {
+        "basin_number": 1,
+        "basin_name": "شرقي الخط"
+      },
+      {
+        "basin_number": 2,
+        "basin_name": "الماكنة"
+      },
+      {
+        "basin_number": 3,
+        "basin_name": "حنو صفوق"
+      }
+    ],
+    "المشتى": [
+      {
+        "basin_number": 1,
+        "basin_name": "الفج"
+      },
+      {
+        "basin_number": 2,
+        "basin_name": "القصر"
+      },
+      {
+        "basin_number": 4,
+        "basin_name": "الظهرة"
+      },
+      {
+        "basin_number": 5,
+        "basin_name": "المنشية"
+      }
+    ]
+  },
+  "enums": {
+    "ui_industry": [
+      "light",
+      "medium",
+      "technical"
+    ],
+    "property_type": [
+      "land",
+      "hangar",
+      "warehouse",
+      "factory",
+      "other"
+    ],
+    "transaction": [
+      "sale",
+      "rent",
+      "partnership"
+    ],
+    "request_type": [
+      "buy",
+      "rent",
+      "build",
+      "invest",
+      "assess",
+      "submit_listing"
+    ],
+    "publication": [
+      "draft",
+      "pending_review",
+      "published",
+      "archived"
+    ],
+    "availability": [
+      "available",
+      "reserved",
+      "sold",
+      "leased",
+      "unknown"
+    ],
+    "presenter_role": [
+      "owner",
+      "legal_representative",
+      "broker",
+      "company",
+      "other",
+      "unspecified"
+    ],
+    "finding": [
+      "documented_within_scope",
+      "preliminary",
+      "unknown",
+      "potential_conflict",
+      "prohibited_by_document"
+    ]
+  },
+  "property_template": {
+    "listing_id": null,
+    "property_id": null,
+    "title": null,
+    "area_id": null,
+    "country": "JO",
+    "governorate": null,
+    "municipality_or_authority": null,
+    "inside_zoning": null,
+    "cadastral": {
+      "directorate": null,
+      "village_id": null,
+      "village_name_official": null,
+      "basin_number": null,
+      "basin_name_official": null,
+      "neighborhood_number": null,
+      "parcel_number": null,
+      "subdivision_history": []
+    },
+    "geo": {
+      "latitude": null,
+      "longitude": null,
+      "public_precision": null
+    },
+    "areas": {
+      "land_m2": null,
+      "gross_building_m2": null,
+      "net_operating_m2": null,
+      "clear_height_m": null
+    },
+    "zoning": {
+      "official_text": null,
+      "ui_industry": null,
+      "special_provisions": null,
+      "conversion_from_agriculture_status": null,
+      "decision_id": null,
+      "decision_date": null,
+      "effective_date": null,
+      "regulation_title": null,
+      "regulation_version": null,
+      "setbacks_m": {
+        "front": null,
+        "rear": null,
+        "side_a": null,
+        "side_b": null
+      },
+      "coverage_percent": null,
+      "floor_area_ratio": null,
+      "height_max_m": null,
+      "floors_max": null,
+      "evidence_id": null
+    },
+    "activity": {
+      "description": null,
+      "process": null,
+      "raw_materials": [],
+      "production_capacity": null,
+      "env_category_official": null,
+      "official_activity_code": null
+    },
+    "utilities": {
+      "power": {
+        "status": "unknown",
+        "capacity_kva": null,
+        "provider_evidence_id": null
+      },
+      "gas": {
+        "status": "unknown",
+        "flow_or_capacity": null,
+        "pressure": null,
+        "provider_evidence_id": null
+      },
+      "water_status": "unknown",
+      "wastewater_status": "unknown",
+      "truck_access_status": "unknown"
+    },
+    "permits": [],
+    "constraints": [],
+    "publication": "draft",
+    "availability": "unknown",
+    "price": {
+      "amount": null,
+      "currency": "JOD",
+      "basis": null,
+      "tax_inclusion": null,
+      "as_of": null
+    },
+    "presenter": {
+      "id": null,
+      "name": null,
+      "role": "unspecified",
+      "role_verified": false,
+      "show_name_publicly": false
+    },
+    "media": [],
+    "internal_notes": [],
+    "marketing": {
+      "price_agreed": false,
+      "commission_agreed": false,
+      "approved_at": null,
+      "expires_at": null,
+      "renewal_status": null
+    },
+    "last_verified_at": null,
+    "evidence": []
+  },
+  "evidence_template": {
+    "id": null,
+    "issuer": null,
+    "title": null,
+    "document_date": null,
+    "effective_date": null,
+    "retrieved_at": null,
+    "valid_until": null,
+    "country": null,
+    "authority": null,
+    "parcel_scope": [],
+    "activity_scope": null,
+    "source_url_or_private_ref": null,
+    "status": "unverified",
+    "verified_by": null,
+    "visibility": "internal",
+    "note": "verified status يصدر من مسار مراجعة محمي، لا من حقل يدخله الزائر"
+  },
+  "rule_guard": {
+    "numeric_defaults": null,
+    "unknown_not_zero": true,
+    "no_automatic_environmental_approval": true,
+    "no_country_fallback": true,
+    "no_percent_regulatory_match": true
+  },
+  "duplicate_key": "country + cadastral directorate/village identifier + basin + applicable neighborhood + parcel; review subdivisions before final merge",
+  "privacy": "لا ترسل internal_notes أو مستندات الملكية أو presenter.private بيانات للواجهة العامة أو نموذج غير مخول؛ الترشيح في الخادم قبل الاسترجاع."
+}

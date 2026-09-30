@@ -10,6 +10,7 @@ RUN npx prisma generate
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY knowledge ./knowledge
 RUN npm run build
 
 RUN mkdir -p uploads

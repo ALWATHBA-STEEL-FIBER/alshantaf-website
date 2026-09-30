@@ -12,6 +12,12 @@ import {
 } from "../lib/assistantCatalog";
 import { blockedPromptReply, buildFallbackReply } from "../lib/assistantFallback";
 import {
+  getPackSystemPrompt,
+  knowledgePackStatus,
+  retrieveKnowledgeContext,
+  selectFewShotMessages,
+} from "../lib/assistantKnowledge";
+import {
   DEFAULT_GROQ_GUARD_MODEL,
   DEFAULT_GROQ_MODEL,
   GroqRequestError,
@@ -150,6 +156,7 @@ assistantRouter.get(
       model: process.env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL,
       guardModel: process.env.GROQ_GUARD_MODEL?.trim() || DEFAULT_GROQ_GUARD_MODEL,
       aiEnabled: Boolean(process.env.GROQ_API_KEY?.trim()),
+      knowledge: knowledgePackStatus(),
     });
   })
 );
@@ -185,8 +192,17 @@ assistantRouter.post(
     // 3) AI chat — on rate limit / any failure, never surface an error to the user.
     try {
       const digest = await listingDigestForPrompt(body.lang);
+      const knowledgeContext = retrieveKnowledgeContext(last.content);
+      const fewShots = selectFewShotMessages(last.content, 4);
       const history: GroqMessage[] = [
-        { role: "system", content: buildSystemPrompt(body.lang, digest) },
+        {
+          role: "system",
+          content: buildSystemPrompt(body.lang, digest, {
+            packSystemPrompt: getPackSystemPrompt(),
+            knowledgeContext,
+          }),
+        },
+        ...fewShots,
         ...body.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
       ];
 

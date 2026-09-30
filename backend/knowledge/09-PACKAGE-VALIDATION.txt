@@ -1,0 +1,9 @@
+PASS JSON syntax: 05-EVALUATION-CASES.json
+PASS JSON syntax: 06-DATA-MODEL.json
+PASS JSONL records: 44
+PASS required files
+PASS no font files
+NOT RUN: website integration
+NOT RUN: LLM evaluation
+NOT RUN: government parcel checks
+NOT DONE: model fine-tuning or public deployment
