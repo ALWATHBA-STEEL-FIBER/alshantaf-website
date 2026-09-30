@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { audit } from "../lib/audit";
 import { asyncHandler } from "../lib/asyncHandler";
 
 export const adminStandbyRouter = Router();
 adminStandbyRouter.use(requireAdmin);
+adminStandbyRouter.use(requirePermission("media"));
 
 adminStandbyRouter.get(
   "/",

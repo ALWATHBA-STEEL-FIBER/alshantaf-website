@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 
 export const adminAuditRouter = Router();
 adminAuditRouter.use(requireAdmin);
+adminAuditRouter.use(requirePermission("security"));
 
 const querySchema = z.object({
   action: z.string().optional(),

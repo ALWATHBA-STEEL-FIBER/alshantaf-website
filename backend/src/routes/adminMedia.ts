@@ -2,13 +2,14 @@ import { Router } from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "../prisma";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { audit } from "../lib/audit";
 import { asyncHandler } from "../lib/asyncHandler";
 import { deleteUploadedFiles } from "../lib/uploadSecurity";
 
 export const adminMediaRouter = Router();
 adminMediaRouter.use(requireAdmin);
+adminMediaRouter.use(requirePermission("media"));
 
 const UPLOAD_DIR = path.resolve(__dirname, "../../uploads");
 

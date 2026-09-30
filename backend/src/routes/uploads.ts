@@ -1,12 +1,13 @@
 import { Router } from "express";
 import multer from "multer";
 import path from "node:path";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { validateAndStore, LIMITS, UploadValidationError, type UploadKind } from "../lib/uploadSecurity";
 import { asyncHandler } from "../lib/asyncHandler";
 
 export const uploadsRouter = Router();
 uploadsRouter.use(requireAdmin);
+uploadsRouter.use(requirePermission("listings", "submissions", "media"));
 
 const UPLOAD_DIR = path.resolve(__dirname, "../../uploads");
 

@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 import { audit } from "../lib/audit";
 
 export const adminContactRequestsRouter = Router();
 adminContactRequestsRouter.use(requireAdmin);
+adminContactRequestsRouter.use(requirePermission("contact"));
 
 const listSchema = z.object({
   status: z.enum(["new", "contacted", "closed"]).optional(),

@@ -191,6 +191,7 @@ export interface AdminUser {
   name: string;
   phone: string | null;
   whatsapp: string | null;
+  permissions: string[];
   createdAt: string;
 }
 

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import rateLimit from "express-rate-limit";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 import { lookupDlsAdministrativeValue, DlsLookupError } from "../lib/dlsAdministrativeValue";
 import { lookupDlsParcelLocation, DlsParcelLocationError } from "../lib/dlsParcelLocation";
@@ -9,6 +9,7 @@ import { westernDigitsString } from "../lib/arabicDigits";
 
 export const adminDlsRouter = Router();
 adminDlsRouter.use(requireAdmin);
+adminDlsRouter.use(requirePermission("listings", "submissions", "landChecks"));
 
 // Each lookup drives a real headless-browser session against the DLS site —
 // keep this modest regardless of who's calling, so we're never mistaken for

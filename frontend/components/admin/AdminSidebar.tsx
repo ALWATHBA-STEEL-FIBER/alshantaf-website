@@ -19,37 +19,39 @@ import {
   UsersIcon,
 } from "@/components/icons";
 import { LiveVisitors } from "@/components/admin/LiveVisitors";
+import { useAdminSession, type AdminFeature } from "@/lib/adminPermissions";
 
 const NAV = [
-  { href: "/admin", key: "dashboard" as const, icon: HomeIcon },
-  { href: "/admin/listings", key: "listings" as const, icon: ListingsIcon },
-  { href: "/admin/submissions", key: "submissions" as const, icon: InboxIcon },
-  { href: "/admin/contact", key: "contact" as const, icon: MessageIcon },
-  { href: "/admin/land-checks", key: "landChecks" as const, icon: MapCheckIcon },
-  { href: "/admin/media", key: "media" as const, icon: FolderIcon },
-  { href: "/admin/security", key: "security" as const, icon: ShieldIcon },
-  { href: "/admin/users", key: "admins" as const, icon: UsersIcon },
-  { href: "/admin/settings", key: "settings" as const, icon: SettingsIcon },
+  { href: "/admin", key: "dashboard" as const, icon: HomeIcon, feature: "dashboard" as AdminFeature },
+  { href: "/admin/listings", key: "listings" as const, icon: ListingsIcon, feature: "listings" as AdminFeature },
+  { href: "/admin/submissions", key: "submissions" as const, icon: InboxIcon, feature: "submissions" as AdminFeature },
+  { href: "/admin/contact", key: "contact" as const, icon: MessageIcon, feature: "contact" as AdminFeature },
+  { href: "/admin/land-checks", key: "landChecks" as const, icon: MapCheckIcon, feature: "landChecks" as AdminFeature },
+  { href: "/admin/media", key: "media" as const, icon: FolderIcon, feature: "media" as AdminFeature },
+  { href: "/admin/security", key: "security" as const, icon: ShieldIcon, feature: "security" as AdminFeature },
+  { href: "/admin/users", key: "admins" as const, icon: UsersIcon, feature: "users" as AdminFeature },
+  { href: "/admin/settings", key: "settings" as const, icon: SettingsIcon, feature: "settings" as AdminFeature },
 ];
 
 export function AdminSidebar() {
   const { t, toggleLanguage } = useLanguage();
   const router = useRouter();
   const pathname = usePathname();
+  const { has } = useAdminSession();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   async function handleLogout() {
     await api.logout().catch(() => undefined);
-    // Stay on trusted-device login (no unlock key needed) instead of the public site.
     router.push("/admin/login");
     router.refresh();
   }
 
   const isActive = (href: string) => (href === "/admin" ? pathname === "/admin" : pathname.startsWith(href));
+  const visibleNav = NAV.filter((item) => has(item.feature));
 
   const navList = (
     <nav className="flex flex-col gap-1">
-      {NAV.map((item) => {
+      {visibleNav.map((item) => {
         const Icon = item.icon;
         const active = isActive(item.href);
         return (

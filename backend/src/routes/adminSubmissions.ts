@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { nextListingNo } from "../lib/listingNo";
 import { nextOwnerAccessCode } from "../lib/ownerAccess";
 import { notifyListingOwner, smsPublished } from "../lib/listingNotify";
@@ -12,6 +12,7 @@ import { westernDigitsString } from "../lib/arabicDigits";
 
 export const adminSubmissionsRouter = Router();
 adminSubmissionsRouter.use(requireAdmin);
+adminSubmissionsRouter.use(requirePermission("submissions"));
 
 const listSchema = z.object({
   status: z.string().optional(),

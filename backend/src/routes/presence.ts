@@ -32,6 +32,8 @@ presenceRouter.post(
 
 export const adminPresenceRouter = Router();
 adminPresenceRouter.use(requireAdmin);
+// Live visitors widget — any signed-in admin may see it.
+
 
 adminPresenceRouter.get(
   "/",

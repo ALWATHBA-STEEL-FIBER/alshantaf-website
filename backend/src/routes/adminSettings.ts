@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { getSettings, setSettings } from "../lib/settings";
 import { audit } from "../lib/audit";
 import { asyncHandler } from "../lib/asyncHandler";
@@ -8,6 +8,7 @@ import { westernDigitsString } from "../lib/arabicDigits";
 
 export const adminSettingsRouter = Router();
 adminSettingsRouter.use(requireAdmin);
+adminSettingsRouter.use(requirePermission("settings"));
 
 adminSettingsRouter.get(
   "/",

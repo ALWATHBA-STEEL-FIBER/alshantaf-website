@@ -92,7 +92,8 @@ export const api = {
   login: (email: string, password: string) =>
     clientFetch<{ email: string }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   logout: () => clientFetch<void>("/auth/logout", { method: "POST" }),
-  me: () => clientFetch<{ email: string }>("/auth/me"),
+  me: () =>
+    clientFetch<{ id: string; email: string; name: string; permissions: string[] }>("/auth/me"),
 
   searchLocations: (query: string) => clientFetch<{ provider: string; results: Array<{ latitude: number; longitude: number; address: string }> }>(`/location/search?q=${encodeURIComponent(query)}`),
 
@@ -301,10 +302,18 @@ export const api = {
   deleteStandbyImage: (id: string) => clientFetch<void>(`/admin/standby/${id}`, { method: "DELETE" }),
 
   adminUsers: () => clientFetch<AdminUser[]>("/admin/users"),
-  createAdminUser: (data: { email: string; password: string; name: string; phone?: string; whatsapp?: string }) =>
-    clientFetch<AdminUser>("/admin/users", { method: "POST", body: JSON.stringify(data) }),
-  updateAdminUser: (id: string, data: { name?: string; phone?: string; whatsapp?: string }) =>
-    clientFetch<AdminUser>(`/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  createAdminUser: (data: {
+    email: string;
+    password: string;
+    name: string;
+    phone?: string;
+    whatsapp?: string;
+    permissions?: string[];
+  }) => clientFetch<AdminUser>("/admin/users", { method: "POST", body: JSON.stringify(data) }),
+  updateAdminUser: (
+    id: string,
+    data: { name?: string; phone?: string; whatsapp?: string; permissions?: string[] }
+  ) => clientFetch<AdminUser>(`/admin/users/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteAdminUser: (id: string) => clientFetch<void>(`/admin/users/${id}`, { method: "DELETE" }),
 
   recordView: (listingId: string) =>

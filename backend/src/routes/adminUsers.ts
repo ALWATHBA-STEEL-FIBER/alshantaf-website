@@ -2,15 +2,31 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "../prisma";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { audit } from "../lib/audit";
 import { asyncHandler } from "../lib/asyncHandler";
-import { westernDigitsString } from "../lib/arabicDigits";
+import {
+  ADMIN_FEATURES,
+  adminPhoneSchema,
+  hasPermission,
+  normalizePermissions,
+  permissionsSchema,
+  type AdminFeature,
+} from "../lib/adminPermissions";
 
 export const adminUsersRouter = Router();
 adminUsersRouter.use(requireAdmin);
+adminUsersRouter.use(requirePermission("users"));
 
-const userSelect = { id: true, email: true, name: true, phone: true, whatsapp: true, createdAt: true } as const;
+const userSelect = {
+  id: true,
+  email: true,
+  name: true,
+  phone: true,
+  whatsapp: true,
+  permissions: true,
+  createdAt: true,
+} as const;
 
 adminUsersRouter.get(
   "/",
@@ -23,22 +39,20 @@ adminUsersRouter.get(
   })
 );
 
-const phoneField = westernDigitsString(
-  z
-    .string()
-    .trim()
-    .regex(/^[0-9+\s()-]+$/, "Digits only")
-    .optional()
-    .or(z.literal(""))
-);
-
 const createSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   name: z.string().min(1),
-  phone: phoneField,
-  whatsapp: phoneField,
+  phone: adminPhoneSchema,
+  whatsapp: adminPhoneSchema,
+  permissions: permissionsSchema.optional(),
 });
+
+function canGrant(actorPerms: readonly string[], requested: string[]): boolean {
+  if (actorPerms.includes("*")) return true;
+  if (requested.includes("*")) return false;
+  return requested.every((p) => actorPerms.includes(p));
+}
 
 adminUsersRouter.post(
   "/",
@@ -49,14 +63,25 @@ adminUsersRouter.post(
       res.status(409).json({ error: "An admin with this email already exists" });
       return;
     }
+
+    const permissions = normalizePermissions(input.permissions ?? ["*"]);
+    const actorPerms = req.session!.permissions;
+    if (!canGrant(actorPerms, permissions)) {
+      res.status(403).json({ error: "You can only grant privileges you already have" });
+      return;
+    }
+
+    const phone = input.phone || null;
+    const whatsapp = input.whatsapp || phone;
     const passwordHash = await bcrypt.hash(input.password, 12);
     const user = await prisma.user.create({
       data: {
         email: input.email,
         name: input.name,
         passwordHash,
-        phone: input.phone || null,
-        whatsapp: input.whatsapp || input.phone || null,
+        phone,
+        whatsapp,
+        permissions,
       },
       select: userSelect,
     });
@@ -65,7 +90,7 @@ adminUsersRouter.post(
       action: "admin_user.create",
       targetType: "user",
       targetId: user.id,
-      metadata: { email: user.email },
+      metadata: { email: user.email, permissions },
       ip: req.ip,
     });
     res.status(201).json(user);
@@ -74,8 +99,9 @@ adminUsersRouter.post(
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
-  phone: phoneField,
-  whatsapp: phoneField,
+  phone: adminPhoneSchema,
+  whatsapp: adminPhoneSchema,
+  permissions: permissionsSchema.optional(),
 });
 
 adminUsersRouter.patch(
@@ -87,14 +113,33 @@ adminUsersRouter.patch(
       res.status(404).json({ error: "Admin not found" });
       return;
     }
-    const nextPhone = input.phone !== undefined ? input.phone || null : target.phone;
-    const nextWhatsapp = input.whatsapp !== undefined ? input.whatsapp || nextPhone : target.whatsapp;
+
+    let nextPermissions = target.permissions?.length ? target.permissions : ["*"];
+    if (input.permissions) {
+      nextPermissions = normalizePermissions(input.permissions);
+      if (!canGrant(req.session!.permissions, nextPermissions)) {
+        res.status(403).json({ error: "You can only grant privileges you already have" });
+        return;
+      }
+      // Never lock yourself out of user management.
+      if (target.id === req.session!.userId && !hasPermission(nextPermissions, "users")) {
+        res.status(400).json({ error: "You cannot remove your own user-management privilege" });
+        return;
+      }
+    }
+
+    const nextPhone =
+      input.phone !== undefined ? input.phone || null : target.phone;
+    const nextWhatsapp =
+      input.whatsapp !== undefined ? input.whatsapp || nextPhone : target.whatsapp;
+
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.phone !== undefined ? { phone: nextPhone } : {}),
         whatsapp: nextWhatsapp,
+        permissions: nextPermissions,
       },
       select: userSelect,
     });
@@ -103,7 +148,7 @@ adminUsersRouter.patch(
       action: "admin_user.update",
       targetType: "user",
       targetId: user.id,
-      metadata: { email: user.email },
+      metadata: { email: user.email, permissions: nextPermissions },
       ip: req.ip,
     });
     res.json(user);
@@ -139,3 +184,6 @@ adminUsersRouter.delete(
     res.status(204).end();
   })
 );
+
+export { ADMIN_FEATURES };
+export type { AdminFeature };

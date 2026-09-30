@@ -2,7 +2,7 @@ import { Router } from "express";
 import path from "node:path";
 import { z } from "zod";
 import { prisma } from "../prisma";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { serializeListing } from "../lib/serialize";
 import { nextListingNo } from "../lib/listingNo";
 import { nextOwnerAccessCode } from "../lib/ownerAccess";
@@ -16,6 +16,7 @@ import { toWesternDigits, westernDigitsString } from "../lib/arabicDigits";
 
 export const adminListingsRouter = Router();
 adminListingsRouter.use(requireAdmin);
+adminListingsRouter.use(requirePermission("listings"));
 
 const UPLOAD_DIR = path.resolve(__dirname, "../../uploads");
 

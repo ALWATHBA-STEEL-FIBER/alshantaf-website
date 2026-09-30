@@ -2,11 +2,12 @@ import { Router } from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "../prisma";
-import { requireAdmin } from "../middleware/auth";
+import { requireAdmin, requirePermission } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 
 export const adminDashboardRouter = Router();
 adminDashboardRouter.use(requireAdmin);
+adminDashboardRouter.use(requirePermission("dashboard"));
 
 const UPLOAD_DIR = path.resolve(__dirname, "../../uploads");
 

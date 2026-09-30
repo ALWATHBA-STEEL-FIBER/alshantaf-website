@@ -72,5 +72,10 @@ authRouter.post("/logout", (_req, res) => {
 });
 
 authRouter.get("/me", requireAdmin, (req, res) => {
-  res.json({ email: req.session!.email });
+  res.json({
+    id: req.session!.userId,
+    email: req.session!.email,
+    name: req.session!.name,
+    permissions: req.session!.permissions,
+  });
 });
