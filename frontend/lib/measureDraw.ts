@@ -384,10 +384,13 @@ function drawFeature(
     }).addTo(group);
 
     if (editable && opts?.onVertexDragEnd) {
-      marker.on("click", (e) => L.DomEvent.stop(e));
+      marker.on("click", (e) => {
+        L.DomEvent.stop(e.originalEvent);
+        L.DomEvent.preventDefault(e.originalEvent);
+      });
       marker.on("dblclick", (e) => {
-        L.DomEvent.stop(e);
-        L.DomEvent.preventDefault(e);
+        L.DomEvent.stop(e.originalEvent);
+        L.DomEvent.preventDefault(e.originalEvent);
       });
       marker.on("dragend", (e) => {
         const ll = (e.target as import("leaflet").Marker).getLatLng();
