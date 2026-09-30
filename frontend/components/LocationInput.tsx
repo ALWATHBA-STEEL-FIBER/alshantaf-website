@@ -18,6 +18,7 @@ import type { BlueprintMeta } from "@/lib/parcelBlueprint";
 import { createParcelCanvasLayer, type ParcelCanvasOpts } from "@/lib/parcelCanvasLayer";
 import {
   attachMeasureTool,
+  DEFAULT_MEASURE_LINE_COLOR,
   parcelSnapTargets,
   type MeasureMode,
   type MeasureSnapshot,
@@ -299,6 +300,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [measureMode, setMeasureMode] = useState<MeasureMode>("off");
   const [measureSnap, setMeasureSnap] = useState<MeasureSnapshot | null>(null);
   const [edgeSnap, setEdgeSnap] = useState(true);
+  const [lineColor, setLineColor] = useState(DEFAULT_MEASURE_LINE_COLOR);
   const measureToolRef = useRef<MeasureTool | null>(null);
   const measureModeRef = useRef<MeasureMode>("off");
   measureModeRef.current = measureMode;
@@ -451,6 +453,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       });
       measureToolRef.current.setSnapTargets(snapTargets);
       measureToolRef.current.setEdgeSnap(edgeSnap);
+      measureToolRef.current.setLineColor(lineColor);
       if (measureModeRef.current !== "off") {
         measureToolRef.current.setMode(measureModeRef.current);
       }
@@ -473,6 +476,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   useEffect(() => {
     measureToolRef.current?.setEdgeSnap(edgeSnap);
   }, [edgeSnap]);
+
+  useEffect(() => {
+    measureToolRef.current?.setLineColor(lineColor);
+  }, [lineColor]);
 
   // Allow deeper overzoom only while architecture-measuring.
   useEffect(() => {
@@ -881,6 +888,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               hasParcelSnap={snapTargets.length > 0}
               edgeSnap={edgeSnap}
               onEdgeSnapChange={setEdgeSnap}
+              lineColor={lineColor}
+              onLineColorChange={setLineColor}
               lang={lang}
               variant="light"
               labels={{
@@ -895,6 +904,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
                 measureUndo: lp.measureUndo,
                 measureSnapOn: lp.measureSnapOn,
                 measureEdgeSnap: lp.measureEdgeSnap,
+                measureLineColor: lp.measureLineColor,
                 measureHintDistance: lp.measureHintDistance,
                 measureHintArea: lp.measureHintArea,
                 dimensionsArea: lp.dimensionsArea,
@@ -927,6 +937,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             hasParcelSnap={snapTargets.length > 0}
             edgeSnap={edgeSnap}
             onEdgeSnapChange={setEdgeSnap}
+            lineColor={lineColor}
+            onLineColorChange={setLineColor}
             lang={lang}
             variant="light"
             labels={{
@@ -941,6 +953,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               measureUndo: lp.measureUndo,
               measureSnapOn: lp.measureSnapOn,
               measureEdgeSnap: lp.measureEdgeSnap,
+              measureLineColor: lp.measureLineColor,
               measureHintDistance: lp.measureHintDistance,
               measureHintArea: lp.measureHintArea,
               dimensionsArea: lp.dimensionsArea,
@@ -1017,6 +1030,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         onMeasureModeChange={setMeasureMode}
         edgeSnap={edgeSnap}
         onEdgeSnapChange={setEdgeSnap}
+        lineColor={lineColor}
+        onLineColorChange={setLineColor}
         polygon={polygon}
         selected={selected}
         perimeterM={perimeterM}
@@ -1047,6 +1062,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           measureUndo: lp.measureUndo,
           measureSnapOn: lp.measureSnapOn,
           measureEdgeSnap: lp.measureEdgeSnap,
+          measureLineColor: lp.measureLineColor,
           measureHintDistance: lp.measureHintDistance,
           measureHintArea: lp.measureHintArea,
         }}

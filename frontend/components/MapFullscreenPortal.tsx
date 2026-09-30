@@ -40,6 +40,7 @@ type Labels = {
   measureUndo: string;
   measureSnapOn: string;
   measureEdgeSnap: string;
+  measureLineColor: string;
   measureHintDistance: string;
   measureHintArea: string;
 };
@@ -56,6 +57,8 @@ type Props = {
   onMeasureModeChange: (m: MeasureMode) => void;
   edgeSnap: boolean;
   onEdgeSnapChange: (v: boolean) => void;
+  lineColor: string;
+  onLineColorChange: (hex: string) => void;
   polygon: ParcelRing[] | null | undefined;
   selected: Coords | null;
   perimeterM: number | null;
@@ -88,6 +91,8 @@ export function MapFullscreenPortal({
   onMeasureModeChange,
   edgeSnap,
   onEdgeSnapChange,
+  lineColor,
+  onLineColorChange,
   polygon,
   selected,
   perimeterM,
@@ -242,6 +247,7 @@ export function MapFullscreenPortal({
         parcelSnapTargets(polygon as [number, number][][] | null | undefined)
       );
       measureToolRef.current.setEdgeSnap(edgeSnap);
+      measureToolRef.current.setLineColor(lineColor);
       if (measureModeRef.current !== "off") {
         measureToolRef.current.setMode(measureModeRef.current);
       }
@@ -310,6 +316,11 @@ export function MapFullscreenPortal({
 
   useEffect(() => {
     if (!open) return;
+    measureToolRef.current?.setLineColor(lineColor);
+  }, [open, lineColor]);
+
+  useEffect(() => {
+    if (!open) return;
     const layer = polyRef.current as unknown as
       | { setParcelOptions?: (o: ParcelCanvasOpts) => void }
       | null;
@@ -341,6 +352,7 @@ export function MapFullscreenPortal({
     measureUndo: lp.measureUndo,
     measureSnapOn: lp.measureSnapOn,
     measureEdgeSnap: lp.measureEdgeSnap,
+    measureLineColor: lp.measureLineColor,
     measureHintDistance: lp.measureHintDistance,
     measureHintArea: lp.measureHintArea,
     dimensionsArea: lp.dimensionsArea,
@@ -400,6 +412,8 @@ export function MapFullscreenPortal({
             hasParcelSnap={snapTargets.length > 0}
             edgeSnap={edgeSnap}
             onEdgeSnapChange={onEdgeSnapChange}
+            lineColor={lineColor}
+            onLineColorChange={onLineColorChange}
             lang={lang}
             variant="dark"
             labels={measureLabels}
@@ -431,6 +445,8 @@ export function MapFullscreenPortal({
             hasParcelSnap={snapTargets.length > 0}
             edgeSnap={edgeSnap}
             onEdgeSnapChange={onEdgeSnapChange}
+            lineColor={lineColor}
+            onLineColorChange={onLineColorChange}
             lang={lang}
             variant="dark"
             labels={measureLabels}

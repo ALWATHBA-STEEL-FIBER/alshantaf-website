@@ -1,6 +1,7 @@
 "use client";
 
 import type { MeasureMode, MeasureSnapshot } from "@/lib/measureDraw";
+import { MEASURE_LINE_COLORS } from "@/lib/measureDraw";
 import { formatDlsArea, formatMeters } from "@/lib/mapCoords";
 
 export type MeasureToolbarLabels = {
@@ -15,6 +16,7 @@ export type MeasureToolbarLabels = {
   measureUndo: string;
   measureSnapOn: string;
   measureEdgeSnap: string;
+  measureLineColor: string;
   measureHintDistance: string;
   measureHintArea: string;
   dimensionsArea: string;
@@ -26,6 +28,8 @@ type Props = {
   hasParcelSnap: boolean;
   edgeSnap: boolean;
   onEdgeSnapChange: (v: boolean) => void;
+  lineColor: string;
+  onLineColorChange: (hex: string) => void;
   lang: "ar" | "en";
   labels: MeasureToolbarLabels;
   /** Dark gold-on-green chrome (fullscreen) vs light (inline map). */
@@ -157,6 +161,8 @@ export function MeasureToolbar({
   hasParcelSnap,
   edgeSnap,
   onEdgeSnapChange,
+  lineColor,
+  onLineColorChange,
   lang,
   labels: lp,
   variant = "light",
@@ -310,6 +316,34 @@ export function MeasureToolbar({
             {lp.measureFinish}
           </button>
         )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={`text-[10px] font-bold px-0.5 ${muted}`}>{lp.measureLineColor}</span>
+        <div
+          className="inline-flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label={lp.measureLineColor}
+        >
+          {MEASURE_LINE_COLORS.map((c) => {
+            const selected = lineColor.toLowerCase() === c.hex.toLowerCase();
+            const name = lang === "ar" ? c.labelAr : c.labelEn;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => onLineColorChange(c.hex)}
+                className={`relative h-9 w-9 rounded-full border-2 transition-transform ${
+                  selected ? "scale-110 border-white shadow-[0_0_0_2px_rgba(15,52,47,.85)]" : "border-black/20 opacity-90 hover:opacity-100"
+                }`}
+                style={{ backgroundColor: c.hex }}
+                aria-label={name}
+                aria-pressed={selected}
+                title={name}
+              />
+            );
+          })}
+        </div>
       </div>
 
       <p className={`text-[11px] leading-snug px-0.5 ${hintCls}`}>

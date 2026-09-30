@@ -10,6 +10,30 @@ import {
 
 export type MeasureMode = "off" | "distance" | "area";
 
+/** Preset measure line colors (architecture overlay). */
+export const MEASURE_LINE_COLORS = [
+  { id: "gold", hex: "#caa064", labelEn: "Gold", labelAr: "ذهبي" },
+  { id: "white", hex: "#f5f5f0", labelEn: "White", labelAr: "أبيض" },
+  { id: "cyan", hex: "#2ec4b6", labelEn: "Cyan", labelAr: "سماوي" },
+  { id: "orange", hex: "#f4a261", labelEn: "Orange", labelAr: "برتقالي" },
+  { id: "red", hex: "#e63946", labelEn: "Red", labelAr: "أحمر" },
+  { id: "lime", hex: "#a8e063", labelEn: "Lime", labelAr: "ليموني" },
+  { id: "blue", hex: "#4ea8de", labelEn: "Blue", labelAr: "أزرق" },
+  { id: "violet", hex: "#9b5de5", labelEn: "Violet", labelAr: "بنفسجي" },
+] as const;
+
+export type MeasureLineColorId = (typeof MEASURE_LINE_COLORS)[number]["id"];
+
+export const DEFAULT_MEASURE_LINE_COLOR = MEASURE_LINE_COLORS[0]!.hex;
+
+function vertexHtml(color: string) {
+  return `<span style="display:block;width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #0f342f;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span>`;
+}
+
+function cursorSnapHtml(color: string) {
+  return `<span style="display:block;width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #f5e6c8;box-shadow:0 0 0 3px rgba(15,52,47,.55),0 2px 8px rgba(0,0,0,.35);opacity:.9"></span>`;
+}
+
 export type MeasureSnapshot = {
   mode: MeasureMode;
   points: Coords[];
@@ -26,12 +50,8 @@ export type MeasureSnapshot = {
 type LeafletNS = typeof import("leaflet");
 type LeafletMap = import("leaflet").Map;
 
-const VERTEX_HTML =
-  '<span style="display:block;width:12px;height:12px;border-radius:50%;background:#caa064;border:2px solid #0f342f;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span>';
 const SNAP_VERTEX_HTML =
   '<span style="display:block;width:10px;height:10px;border-radius:50%;background:rgba(202,160,100,.35);border:1.5px solid #caa064;box-shadow:0 0 0 1px rgba(15,52,47,.45)"></span>';
-const CURSOR_SNAP_HTML =
-  '<span style="display:block;width:16px;height:16px;border-radius:50%;background:rgba(202,160,100,.55);border:2px solid #f5e6c8;box-shadow:0 0 0 3px rgba(15,52,47,.55),0 2px 8px rgba(0,0,0,.35)"></span>';
 const CURSOR_FREE_HTML =
   '<span style="display:block;width:10px;height:10px;border-radius:50%;background:rgba(245,230,200,.85);border:1.5px solid #0f342f;opacity:.85"></span>';
 
@@ -190,6 +210,7 @@ export function attachMeasureTool(
   let liveSegmentM: number | null = null;
   let snapTargets: Coords[] = [];
   let edgeSnap = true;
+  let lineColor = DEFAULT_MEASURE_LINE_COLOR;
   let clickHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let moveHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
   let dblHandler: ((e: import("leaflet").LeafletMouseEvent) => void) | null = null;
@@ -241,16 +262,16 @@ export function attachMeasureTool(
     const latlngs = points.map((p) => L.latLng(p.lat, p.lng));
     if (mode === "area" && (closed || points.length >= 2)) {
       L.polygon(latlngs, {
-        color: "#caa064",
+        color: lineColor,
         weight: 2.5,
-        fillColor: "#caa064",
+        fillColor: lineColor,
         fillOpacity: closed ? 0.2 : 0.1,
         dashArray: closed ? undefined : "6 4",
         interactive: false,
       }).addTo(group);
     } else if (points.length >= 2) {
       L.polyline(latlngs, {
-        color: "#caa064",
+        color: lineColor,
         weight: 3,
         interactive: false,
       }).addTo(group);
@@ -288,7 +309,7 @@ export function attachMeasureTool(
         keyboard: false,
         icon: L.divIcon({
           className: "",
-          html: `<span style="display:inline-block;padding:2px 7px;border-radius:999px;background:rgba(15,52,47,.94);color:#f5e6c8;font:700 11px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35);letter-spacing:.01em">${label}</span>`,
+          html: `<span style="display:inline-block;padding:2px 7px;border-radius:999px;background:rgba(15,52,47,.94);color:${lineColor};font:700 11px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35);letter-spacing:.01em">${label}</span>`,
           iconSize: [1, 1],
           iconAnchor: [0, 0],
         }),
@@ -301,7 +322,7 @@ export function attachMeasureTool(
         keyboard: false,
         icon: L.divIcon({
           className: "",
-          html: VERTEX_HTML,
+          html: vertexHtml(lineColor),
           iconSize: [12, 12],
           iconAnchor: [6, 6],
         }),
@@ -367,7 +388,7 @@ export function attachMeasureTool(
         keyboard: false,
         icon: L.divIcon({
           className: "",
-          html: snapped.kind === "none" ? CURSOR_FREE_HTML : CURSOR_SNAP_HTML,
+          html: snapped.kind === "none" ? CURSOR_FREE_HTML : cursorSnapHtml(lineColor),
           iconSize: snapped.kind === "none" ? [10, 10] : [16, 16],
           iconAnchor: snapped.kind === "none" ? [5, 5] : [8, 8],
         }),
@@ -382,7 +403,7 @@ export function attachMeasureTool(
             [snapped.point.lat, snapped.point.lng],
           ],
           {
-            color: "#caa064",
+            color: lineColor,
             weight: 2,
             dashArray: "4 5",
             opacity: 0.85,
@@ -399,7 +420,7 @@ export function attachMeasureTool(
             keyboard: false,
             icon: L.divIcon({
               className: "",
-              html: `<span style="display:inline-block;padding:2px 6px;border-radius:999px;background:rgba(15,52,47,.88);color:#f5e6c8;font:700 10px/1.2 system-ui,sans-serif;white-space:nowrap;opacity:.95">${formatMeters(liveSegmentM, opts.lang)}</span>`,
+              html: `<span style="display:inline-block;padding:2px 6px;border-radius:999px;background:rgba(15,52,47,.88);color:${lineColor};font:700 10px/1.2 system-ui,sans-serif;white-space:nowrap;opacity:.95">${formatMeters(liveSegmentM, opts.lang)}</span>`,
               iconSize: [1, 1],
               iconAnchor: [0, 0],
             }),
@@ -458,6 +479,12 @@ export function attachMeasureTool(
     },
     setEdgeSnap(enabled: boolean) {
       edgeSnap = Boolean(enabled);
+    },
+    setLineColor(hex: string) {
+      const next = String(hex || "").trim();
+      if (!/^#[0-9a-fA-F]{6}$/.test(next)) return;
+      lineColor = next;
+      redrawMeasure();
     },
     finish() {
       if (mode === "area" && points.length >= 3) {

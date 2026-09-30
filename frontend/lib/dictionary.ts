@@ -658,6 +658,7 @@ export const dictionary = {
       measureUndo: "تراجع",
       measureSnapOn: "التقاط لرؤوس القطعة",
       measureEdgeSnap: "التقاط للحواف",
+      measureLineColor: "لون الخط",
       measureHintDistance:
         "انقر نقاطًا لقياس المسافة. يلتقط تلقائيًا لرؤوس القطعة (ويمكن إيقاف التقاط الحواف). استخدم تراجع أو إنهاء القياس.",
       measureHintArea:
@@ -2100,6 +2101,7 @@ export const dictionary = {
       measureUndo: "Undo",
       measureSnapOn: "Snap to vertices",
       measureEdgeSnap: "Edge snap",
+      measureLineColor: "Line color",
       measureHintDistance:
         "Tap points to measure distance. Auto-snaps to parcel vertices (edge snap can be turned off). Use Undo or Exit measure.",
       measureHintArea:
