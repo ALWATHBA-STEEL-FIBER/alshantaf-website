@@ -1,5 +1,6 @@
 import type { Coords } from "@/lib/mapCoords";
 import {
+  formatDlsArea,
   formatMeters,
   fromLocalEnu,
   planarMeters,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/mapCoords";
 
 export type MeasureMode = "off" | "distance" | "area";
+export type MeasureKind = "distance" | "area";
 
 /** Preset measure line colors (architecture overlay). */
 export const MEASURE_LINE_COLORS = [
@@ -26,25 +28,28 @@ export type MeasureLineColorId = (typeof MEASURE_LINE_COLORS)[number]["id"];
 
 export const DEFAULT_MEASURE_LINE_COLOR: string = MEASURE_LINE_COLORS[0]!.hex;
 
-function vertexHtml(color: string) {
-  return `<span style="display:block;width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #0f342f;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span>`;
-}
-
-function cursorSnapHtml(color: string) {
-  return `<span style="display:block;width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #f5e6c8;box-shadow:0 0 0 3px rgba(15,52,47,.55),0 2px 8px rgba(0,0,0,.35);opacity:.9"></span>`;
-}
+export type MeasureThread = {
+  id: string;
+  kind: MeasureKind;
+  points: Coords[];
+  color: string;
+  lengthM: number;
+  areaSqm: number | null;
+};
 
 export type MeasureSnapshot = {
   mode: MeasureMode;
+  /** Finished measurements kept on the map (distance + area can coexist). */
+  threads: MeasureThread[];
+  /** Active draft being drawn. */
   points: Coords[];
-  /** Live total for distance, or perimeter while drawing an area. */
+  /** Live total for the active draft. */
   lengthM: number;
   areaSqm: number | null;
   closed: boolean;
-  /** True when the last placed point snapped to a parcel vertex/edge. */
   lastSnapped: boolean;
-  /** Live segment length from previous point to cursor (measure mode only). */
   liveSegmentM: number | null;
+  lineColor: string;
 };
 
 type LeafletNS = typeof import("leaflet");
@@ -54,6 +59,24 @@ const SNAP_VERTEX_HTML =
   '<span style="display:block;width:10px;height:10px;border-radius:50%;background:rgba(202,160,100,.35);border:1.5px solid #caa064;box-shadow:0 0 0 1px rgba(15,52,47,.45)"></span>';
 const CURSOR_FREE_HTML =
   '<span style="display:block;width:10px;height:10px;border-radius:50%;background:rgba(245,230,200,.85);border:1.5px solid #0f342f;opacity:.85"></span>';
+
+function vertexHtml(color: string) {
+  return `<span style="display:block;width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #0f342f;box-shadow:0 1px 4px rgba(0,0,0,.35)"></span>`;
+}
+
+function cursorSnapHtml(color: string) {
+  return `<span style="display:block;width:16px;height:16px;border-radius:50%;background:${color};border:2px solid #f5e6c8;box-shadow:0 0 0 3px rgba(15,52,47,.55),0 2px 8px rgba(0,0,0,.35);opacity:.9"></span>`;
+}
+
+function nextThreadId() {
+  return `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function nextColorAfter(hex: string): string {
+  const i = MEASURE_LINE_COLORS.findIndex((c) => c.hex.toLowerCase() === hex.toLowerCase());
+  if (i < 0) return MEASURE_LINE_COLORS[1]?.hex ?? DEFAULT_MEASURE_LINE_COLOR;
+  return MEASURE_LINE_COLORS[(i + 1) % MEASURE_LINE_COLORS.length]!.hex;
+}
 
 /** Deduped parcel vertices suitable for snap targets. */
 export function parcelSnapTargets(rings: [number, number][][] | null | undefined): Coords[] {
@@ -76,11 +99,9 @@ export function parcelSnapTargets(rings: [number, number][][] | null | undefined
 function parcelEdges(vertices: Coords[]): [Coords, Coords][] {
   if (vertices.length < 2) return [];
   const edges: [Coords, Coords][] = [];
-  // Prefer a closed ring when points look like a parcel outline (≥3).
   const n = vertices.length;
   const closed =
-    n >= 3 &&
-    planarMeters(vertices[0]!, vertices[n - 1]!) > 0.05;
+    n >= 3 && planarMeters(vertices[0]!, vertices[n - 1]!) > 0.05;
   const count = closed ? n : n - 1;
   for (let i = 0; i < count; i++) {
     const a = vertices[i]!;
@@ -91,7 +112,6 @@ function parcelEdges(vertices: Coords[]): [Coords, Coords][] {
   return edges;
 }
 
-/** Project a click onto the nearest point on segment AB in local ENU. */
 function projectOnSegment(click: Coords, a: Coords, b: Coords): Coords {
   const origin = { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
   const pa = toLocalEnu(a.lat, a.lng, origin.lat, origin.lng);
@@ -111,9 +131,6 @@ export type SnapResult = {
   kind: "vertex" | "edge" | "none";
 };
 
-/**
- * Snap to parcel vertices first, then optionally edges. Radius is metres on the ground.
- */
 export function snapMeasureClick(
   click: Coords,
   targets: Coords[],
@@ -132,7 +149,6 @@ export function snapMeasureClick(
       bestV = v;
     }
   }
-  // Prefer exact vertices within ~85% of snap radius.
   if (bestV && bestVd <= maxMeters * 0.85) {
     return { point: { lat: bestV.lat, lng: bestV.lng }, kind: "vertex" };
   }
@@ -159,7 +175,6 @@ export function snapMeasureClick(
   return { point: click, kind: "none" };
 }
 
-/** Path length with a shared ENU origin for consistent cadastral accuracy. */
 function pathLengthShared(pts: Coords[]): number {
   if (pts.length < 2) return 0;
   const origin = {
@@ -175,10 +190,23 @@ function pathLengthShared(pts: Coords[]): number {
   return sum;
 }
 
+function draftStats(kind: MeasureKind, points: Coords[], closed: boolean) {
+  const lengthM =
+    kind === "area" && points.length >= 2
+      ? closed
+        ? ringPerimeterMeters(points.map((p) => [p.lat, p.lng] as [number, number]))
+        : pathLengthShared(points)
+      : pathLengthShared(points);
+  const areaSqm =
+    kind === "area" && closed && points.length >= 3
+      ? ringAreaSqm(points.map((p) => [p.lat, p.lng] as [number, number]))
+      : null;
+  return { lengthM, areaSqm };
+}
+
 function snapRadiusMeters(L: LeafletNS, map: LeafletMap): number {
   const center = map.getCenter();
   const p1 = map.latLngToContainerPoint(center);
-  // ~28 CSS px — comfortable finger target on mobile, tight enough on desktop.
   const p2 = L.point(p1.x + 28, p1.y);
   const ll2 = map.containerPointToLatLng(p2);
   const r = planarMeters(
@@ -188,9 +216,81 @@ function snapRadiusMeters(L: LeafletNS, map: LeafletMap): number {
   return Math.max(1.2, Math.min(r, 35));
 }
 
+function drawFeature(
+  L: LeafletNS,
+  group: import("leaflet").LayerGroup,
+  kind: MeasureKind,
+  points: Coords[],
+  color: string,
+  closed: boolean,
+  lang: "ar" | "en"
+) {
+  if (points.length === 0) return;
+  const latlngs = points.map((p) => L.latLng(p.lat, p.lng));
+
+  if (kind === "area" && (closed || points.length >= 2)) {
+    L.polygon(latlngs, {
+      color,
+      weight: 2.5,
+      fillColor: color,
+      fillOpacity: closed ? 0.18 : 0.08,
+      dashArray: closed ? undefined : "6 4",
+      interactive: false,
+    }).addTo(group);
+  } else if (points.length >= 2) {
+    L.polyline(latlngs, {
+      color,
+      weight: 3,
+      interactive: false,
+    }).addTo(group);
+  }
+
+  const labelPairs: [Coords, Coords][] = [];
+  for (let i = 1; i < points.length; i++) labelPairs.push([points[i - 1]!, points[i]!]);
+  if (kind === "area" && closed && points.length >= 3) {
+    labelPairs.push([points[points.length - 1]!, points[0]!]);
+  }
+
+  const origin = {
+    lat: points.reduce((s, p) => s + p.lat, 0) / points.length,
+    lng: points.reduce((s, p) => s + p.lng, 0) / points.length,
+  };
+
+  for (const [a, b] of labelPairs) {
+    const mid = L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2);
+    const pa = toLocalEnu(a.lat, a.lng, origin.lat, origin.lng);
+    const pb = toLocalEnu(b.lat, b.lng, origin.lat, origin.lng);
+    const dist = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+    const label = formatMeters(dist, lang);
+    L.marker(mid, {
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({
+        className: "",
+        html: `<span style="display:inline-block;padding:2px 7px;border-radius:999px;background:rgba(15,52,47,.94);color:${color};font:700 11px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35);letter-spacing:.01em">${label}</span>`,
+        iconSize: [1, 1],
+        iconAnchor: [0, 0],
+      }),
+    }).addTo(group);
+  }
+
+  for (const p of points) {
+    L.marker([p.lat, p.lng], {
+      interactive: false,
+      keyboard: false,
+      icon: L.divIcon({
+        className: "",
+        html: vertexHtml(color),
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+      }),
+    }).addTo(group);
+  }
+}
+
 /**
- * Interactive architecture measure overlay (distance / area) with snap-to-parcel
- * vertices & edges. Independent of parcel lockEditing.
+ * Architecture measure overlay: multiple finished distance/area threads can
+ * coexist, each with its own color. Active tool draws the current draft.
  */
 export function attachMeasureTool(
   L: LeafletNS,
@@ -204,6 +304,7 @@ export function attachMeasureTool(
   const snapGroup = L.layerGroup().addTo(map);
   const cursorGroup = L.layerGroup().addTo(map);
   let mode: MeasureMode = "off";
+  let threads: MeasureThread[] = [];
   let points: Coords[] = [];
   let closed = false;
   let lastSnapped = false;
@@ -219,24 +320,21 @@ export function attachMeasureTool(
   let prevDoubleClickZoom = true;
 
   function emit() {
-    const lengthM =
-      mode === "area" && points.length >= 2
-        ? closed
-          ? ringPerimeterMeters(points.map((p) => [p.lat, p.lng] as [number, number]))
-          : pathLengthShared(points)
-        : pathLengthShared(points);
-    const areaSqm =
-      mode === "area" && closed && points.length >= 3
-        ? ringAreaSqm(points.map((p) => [p.lat, p.lng] as [number, number]))
-        : null;
+    const kind: MeasureKind = mode === "area" ? "area" : "distance";
+    const stats = draftStats(kind, points, closed);
     opts.onChange({
       mode,
+      threads: threads.map((t) => ({
+        ...t,
+        points: t.points.map((p) => ({ ...p })),
+      })),
       points: [...points],
-      lengthM,
-      areaSqm,
+      lengthM: stats.lengthM,
+      areaSqm: stats.areaSqm,
       closed,
       lastSnapped,
       liveSegmentM,
+      lineColor,
     });
   }
 
@@ -257,106 +355,64 @@ export function attachMeasureTool(
     }
   }
 
-  function redrawMeasure() {
+  function redrawAll() {
     group.clearLayers();
-    if (points.length === 0) return;
-
-    const latlngs = points.map((p) => L.latLng(p.lat, p.lng));
-    if (mode === "area" && (closed || points.length >= 2)) {
-      L.polygon(latlngs, {
-        color: lineColor,
-        weight: 2.5,
-        fillColor: lineColor,
-        fillOpacity: closed ? 0.2 : 0.1,
-        dashArray: closed ? undefined : "6 4",
-        interactive: false,
-      }).addTo(group);
-    } else if (points.length >= 2) {
-      L.polyline(latlngs, {
-        color: lineColor,
-        weight: 3,
-        interactive: false,
-      }).addTo(group);
+    for (const t of threads) {
+      drawFeature(L, group, t.kind, t.points, t.color, true, opts.lang);
     }
-
-    const labelPairs: [Coords, Coords][] = [];
-    for (let i = 1; i < points.length; i++) {
-      labelPairs.push([points[i - 1]!, points[i]!]);
-    }
-    if (mode === "area" && closed && points.length >= 3) {
-      labelPairs.push([points[points.length - 1]!, points[0]!]);
-    }
-
-    const origin =
-      points.length > 0
-        ? {
-            lat: points.reduce((s, p) => s + p.lat, 0) / points.length,
-            lng: points.reduce((s, p) => s + p.lng, 0) / points.length,
-          }
-        : null;
-
-    for (const [a, b] of labelPairs) {
-      const mid = L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2);
-      const dist =
-        origin != null
-          ? (() => {
-              const pa = toLocalEnu(a.lat, a.lng, origin.lat, origin.lng);
-              const pb = toLocalEnu(b.lat, b.lng, origin.lat, origin.lng);
-              return Math.hypot(pb.x - pa.x, pb.y - pa.y);
-            })()
-          : planarMeters(a, b);
-      const label = formatMeters(dist, opts.lang);
-      L.marker(mid, {
-        interactive: false,
-        keyboard: false,
-        icon: L.divIcon({
-          className: "",
-          html: `<span style="display:inline-block;padding:2px 7px;border-radius:999px;background:rgba(15,52,47,.94);color:${lineColor};font:700 11px/1.2 system-ui,sans-serif;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.35);letter-spacing:.01em">${label}</span>`,
-          iconSize: [1, 1],
-          iconAnchor: [0, 0],
-        }),
-      }).addTo(group);
-    }
-
-    for (const p of points) {
-      L.marker([p.lat, p.lng], {
-        interactive: false,
-        keyboard: false,
-        icon: L.divIcon({
-          className: "",
-          html: vertexHtml(lineColor),
-          iconSize: [12, 12],
-          iconAnchor: [6, 6],
-        }),
-      }).addTo(group);
+    if (mode !== "off" && points.length > 0) {
+      drawFeature(L, group, mode, points, lineColor, closed, opts.lang);
     }
   }
 
   function resolveClick(raw: Coords): SnapResult {
-    const radius = snapRadiusMeters(L, map);
-    return snapMeasureClick(raw, snapTargets, radius, { edgeSnap });
+    return snapMeasureClick(raw, snapTargets, snapRadiusMeters(L, map), { edgeSnap });
+  }
+
+  function commitDraftToThread(): boolean {
+    if (mode === "off" || points.length === 0) return false;
+    const kind: MeasureKind = mode === "area" ? "area" : "distance";
+    const canCommit =
+      kind === "distance" ? points.length >= 2 : points.length >= 3;
+    if (!canCommit) return false;
+    const stats = draftStats(kind, points, true);
+    threads = [
+      ...threads,
+      {
+        id: nextThreadId(),
+        kind,
+        points: points.map((p) => ({ ...p })),
+        color: lineColor,
+        lengthM: stats.lengthM,
+        areaSqm: kind === "area" ? stats.areaSqm : null,
+      },
+    ];
+    return true;
+  }
+
+  function resetDraft(keepColor = true) {
+    points = [];
+    closed = false;
+    lastSnapped = false;
+    liveSegmentM = null;
+    cursorGroup.clearLayers();
+    if (!keepColor) lineColor = DEFAULT_MEASURE_LINE_COLOR;
   }
 
   function placePoint(raw: Coords) {
     if (mode === "off" || closed) return;
     const snapped = resolveClick(raw);
-    // Close area when tapping near the first vertex.
     if (mode === "area" && points.length >= 3) {
       const first = points[0]!;
       if (planarMeters(first, snapped.point) <= Math.max(1.5, snapRadiusMeters(L, map) * 0.65)) {
-        closed = true;
-        lastSnapped = true;
-        liveSegmentM = null;
-        cursorGroup.clearLayers();
-        redrawMeasure();
-        emit();
+        finishLine({ autoNew: true });
         return;
       }
     }
     points.push(snapped.point);
     lastSnapped = snapped.kind !== "none";
     liveSegmentM = null;
-    redrawMeasure();
+    redrawAll();
     emit();
   }
 
@@ -375,23 +431,18 @@ export function attachMeasureTool(
     cursorGroup.clearLayers();
   }
 
-  function finishLine() {
+  function finishLine(optsFinish?: { autoNew?: boolean }) {
     if (mode === "off" || closed) return;
-    if (mode === "distance" && points.length >= 2) {
-      closed = true;
-      liveSegmentM = null;
-      cursorGroup.clearLayers();
-      redrawMeasure();
-      emit();
-      return;
-    }
-    if (mode === "area" && points.length >= 3) {
-      closed = true;
-      liveSegmentM = null;
-      cursorGroup.clearLayers();
-      redrawMeasure();
-      emit();
-    }
+    const kind: MeasureKind = mode === "area" ? "area" : "distance";
+    const ok = kind === "distance" ? points.length >= 2 : points.length >= 3;
+    if (!ok) return;
+
+    commitDraftToThread();
+    const advanceColor = optsFinish?.autoNew !== false;
+    resetDraft(true);
+    if (advanceColor) lineColor = nextColorAfter(lineColor);
+    redrawAll();
+    emit();
   }
 
   function bindMap() {
@@ -400,7 +451,6 @@ export function attachMeasureTool(
       if (mode === "off" || closed) return;
       L.DomEvent.stopPropagation(e.originalEvent);
       const coords = { lat: e.latlng.lat, lng: e.latlng.lng };
-      // Delay placement so a double-click can cancel the second tap and finish the line.
       if (pendingClickTimer != null) window.clearTimeout(pendingClickTimer);
       pendingClickCoords = coords;
       pendingClickTimer = window.setTimeout(() => {
@@ -475,7 +525,7 @@ export function attachMeasureTool(
         pendingClickTimer = null;
         pendingClickCoords = null;
       }
-      finishLine();
+      finishLine({ autoNew: true });
     };
     map.on("click", clickHandler);
     map.on("mousemove", moveHandler);
@@ -484,25 +534,45 @@ export function attachMeasureTool(
 
   return {
     setMode(next: MeasureMode) {
-      mode = next;
-      points = [];
-      closed = false;
-      lastSnapped = false;
-      liveSegmentM = null;
-      group.clearLayers();
-      cursorGroup.clearLayers();
-      if (mode === "off") {
+      if (next === mode) {
+        emit();
+        return;
+      }
+
+      // Leaving measure entirely — wipe everything.
+      if (next === "off") {
+        mode = "off";
+        threads = [];
+        resetDraft(false);
         unbindMap();
+        group.clearLayers();
+        snapGroup.clearLayers();
         if (prevDoubleClickZoom) map.doubleClickZoom.enable();
         map.getContainer().style.cursor = "";
-        snapGroup.clearLayers();
+        emit();
+        return;
+      }
+
+      // Switching tools: keep finished threads; commit current draft if possible.
+      if (mode !== "off") {
+        commitDraftToThread();
+        resetDraft(true);
       } else {
         prevDoubleClickZoom = map.doubleClickZoom.enabled();
         bindMap();
         map.doubleClickZoom.disable();
         map.getContainer().style.cursor = "crosshair";
-        drawSnapTargets();
       }
+
+      mode = next;
+      // Keep map handlers when already measuring.
+      if (!clickHandler) {
+        bindMap();
+        map.doubleClickZoom.disable();
+        map.getContainer().style.cursor = "crosshair";
+      }
+      drawSnapTargets();
+      redrawAll();
       emit();
     },
     setSnapTargets(targets: Coords[]) {
@@ -516,30 +586,51 @@ export function attachMeasureTool(
       const next = String(hex || "").trim();
       if (!/^#[0-9a-fA-F]{6}$/.test(next)) return;
       lineColor = next;
-      redrawMeasure();
+      redrawAll();
+      emit();
+    },
+    /** Finish current draft into a thread, then start another with a new color. */
+    newThread() {
+      if (mode === "off") return;
+      if (points.length > 0) finishLine({ autoNew: true });
+      else {
+        lineColor = nextColorAfter(lineColor);
+        emit();
+      }
     },
     finish() {
-      finishLine();
+      finishLine({ autoNew: true });
     },
     undo() {
       if (closed) {
         closed = false;
       } else if (points.length > 0) {
         points.pop();
+      } else if (threads.length > 0) {
+        const last = threads[threads.length - 1]!;
+        threads = threads.slice(0, -1);
+        // Restore last thread as editable draft of matching kind.
+        mode = last.kind;
+        points = last.points.map((p) => ({ ...p }));
+        lineColor = last.color;
+        closed = false;
       }
       lastSnapped = false;
       liveSegmentM = null;
       cursorGroup.clearLayers();
-      redrawMeasure();
+      redrawAll();
       emit();
     },
     clear() {
-      points = [];
-      closed = false;
-      lastSnapped = false;
-      liveSegmentM = null;
+      threads = [];
+      resetDraft(true);
       group.clearLayers();
       cursorGroup.clearLayers();
+      emit();
+    },
+    removeThread(id: string) {
+      threads = threads.filter((t) => t.id !== id);
+      redrawAll();
       emit();
     },
     destroy() {
@@ -557,3 +648,11 @@ export function attachMeasureTool(
 }
 
 export type MeasureTool = ReturnType<typeof attachMeasureTool>;
+
+/** Format a finished thread for the results list. */
+export function formatThreadSummary(thread: MeasureThread, lang: "ar" | "en") {
+  if (thread.kind === "area" && thread.areaSqm != null && thread.areaSqm > 0) {
+    return formatDlsArea(thread.areaSqm, lang);
+  }
+  return formatMeters(thread.lengthM, lang);
+}

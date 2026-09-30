@@ -38,6 +38,8 @@ type Labels = {
   measureClear: string;
   measureFinish: string;
   measureUndo: string;
+  measureNewLine: string;
+  measureThreads: string;
   measureSnapOn: string;
   measureEdgeSnap: string;
   measureLineColor: string;
@@ -320,6 +322,17 @@ export function MapFullscreenPortal({
   }, [open, lineColor]);
 
   useEffect(() => {
+    if (!open || !measureSnap) return;
+    if (measureSnap.lineColor && measureSnap.lineColor !== lineColor) {
+      onLineColorChange(measureSnap.lineColor);
+    }
+    if (measureSnap.mode !== "off" && measureSnap.mode !== measureMode) {
+      onMeasureModeChange(measureSnap.mode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, measureSnap?.lineColor, measureSnap?.mode]);
+
+  useEffect(() => {
     if (!open) return;
     const layer = polyRef.current as unknown as
       | { setParcelOptions?: (o: ParcelCanvasOpts) => void }
@@ -350,6 +363,8 @@ export function MapFullscreenPortal({
     measureClear: lp.measureClear,
     measureFinish: lp.measureFinish,
     measureUndo: lp.measureUndo,
+    measureNewLine: lp.measureNewLine,
+    measureThreads: lp.measureThreads,
     measureSnapOn: lp.measureSnapOn,
     measureEdgeSnap: lp.measureEdgeSnap,
     measureLineColor: lp.measureLineColor,
@@ -426,6 +441,8 @@ export function MapFullscreenPortal({
             onUndo={() => measureToolRef.current?.undo()}
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
+            onNewLine={() => measureToolRef.current?.newThread()}
+            onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
           />
         )}
         <button
@@ -459,6 +476,8 @@ export function MapFullscreenPortal({
             onUndo={() => measureToolRef.current?.undo()}
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
+            onNewLine={() => measureToolRef.current?.newThread()}
+            onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
           />
         </div>
       )}

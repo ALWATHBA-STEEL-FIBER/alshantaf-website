@@ -1,7 +1,7 @@
 "use client";
 
 import type { MeasureMode, MeasureSnapshot } from "@/lib/measureDraw";
-import { MEASURE_LINE_COLORS } from "@/lib/measureDraw";
+import { MEASURE_LINE_COLORS, formatThreadSummary } from "@/lib/measureDraw";
 import { formatDlsArea, formatMeters } from "@/lib/mapCoords";
 
 export type MeasureToolbarLabels = {
@@ -14,6 +14,8 @@ export type MeasureToolbarLabels = {
   measureClear: string;
   measureFinish: string;
   measureUndo: string;
+  measureNewLine: string;
+  measureThreads: string;
   measureSnapOn: string;
   measureEdgeSnap: string;
   measureLineColor: string;
@@ -32,7 +34,6 @@ type Props = {
   onLineColorChange: (hex: string) => void;
   lang: "ar" | "en";
   labels: MeasureToolbarLabels;
-  /** Dark gold-on-green chrome (fullscreen) vs light (inline map). */
   variant?: "light" | "dark";
   onEnter: () => void;
   onExit: () => void;
@@ -40,6 +41,8 @@ type Props = {
   onUndo: () => void;
   onClear: () => void;
   onFinish: () => void;
+  onNewLine: () => void;
+  onRemoveThread?: (id: string) => void;
 };
 
 function IconRuler({ className = "w-4 h-4" }: { className?: string }) {
@@ -137,6 +140,14 @@ function IconClose({ className = "w-4 h-4" }: { className?: string }) {
   );
 }
 
+function IconPlus({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function IconMagnet({ className = "w-3.5 h-3.5" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -152,8 +163,7 @@ function IconMagnet({ className = "w-3.5 h-3.5" }: { className?: string }) {
 }
 
 /**
- * Architecture measure chrome — enter/exit + tool strip.
- * Touch targets ≥44px; wraps cleanly on narrow screens.
+ * Architecture measure chrome — multi-thread distance/area with per-line colors.
  */
 export function MeasureToolbar({
   mode,
@@ -172,6 +182,8 @@ export function MeasureToolbar({
   onUndo,
   onClear,
   onFinish,
+  onNewLine,
+  onRemoveThread,
 }: Props) {
   const dark = variant === "dark";
   const measuring = mode !== "off";
@@ -206,7 +218,7 @@ export function MeasureToolbar({
       <button
         type="button"
         onClick={onEnter}
-        className={`inline-flex items-center gap-2 min-h-11 px-3.5 rounded-full border text-[12px] font-bold transition-colors ${btnIdle} ${dark ? "" : ""}`}
+        className={`inline-flex items-center gap-2 min-h-11 px-3.5 rounded-full border text-[12px] font-bold transition-colors ${btnIdle}`}
         aria-label={lp.measureEnter}
       >
         <IconRuler className="w-[18px] h-[18px] shrink-0" />
@@ -215,12 +227,16 @@ export function MeasureToolbar({
     );
   }
 
+  const threads = snap?.threads ?? [];
   const canFinish =
     Boolean(snap) &&
     !snap!.closed &&
     ((mode === "area" && snap!.points.length >= 3) ||
       (mode === "distance" && snap!.points.length >= 2));
-  const canUndo = Boolean(snap && (snap.points.length > 0 || snap.closed));
+  const canUndo = Boolean(
+    snap && (snap.points.length > 0 || snap.closed || snap.threads.length > 0)
+  );
+  const canClear = canUndo;
   const totalLive =
     snap && snap.points.length > 0
       ? snap.lengthM + (snap.closed || snap.liveSegmentM == null ? 0 : snap.liveSegmentM)
@@ -255,9 +271,7 @@ export function MeasureToolbar({
             </button>
           </>
         )}
-        {snap?.lastSnapped && (
-          <span className={`text-[10px] font-bold ${title}`}>●</span>
-        )}
+        {snap?.lastSnapped && <span className={`text-[10px] font-bold ${title}`}>●</span>}
         <div className="ms-auto flex flex-wrap items-center gap-1.5">
           <button
             type="button"
@@ -282,7 +296,9 @@ export function MeasureToolbar({
         >
           <IconRuler className="w-[18px] h-[18px]" />
           {lp.measureDistance}
-          {mode === "distance" && <span className="text-[9px] font-extrabold tracking-wide opacity-90">●</span>}
+          {mode === "distance" && (
+            <span className="text-[9px] font-extrabold tracking-wide opacity-90">●</span>
+          )}
         </button>
         <button
           type="button"
@@ -294,7 +310,19 @@ export function MeasureToolbar({
         >
           <IconPolygon className="w-[18px] h-[18px]" />
           {lp.measureArea}
-          {mode === "area" && <span className="text-[9px] font-extrabold tracking-wide opacity-90">●</span>}
+          {mode === "area" && (
+            <span className="text-[9px] font-extrabold tracking-wide opacity-90">●</span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onNewLine}
+          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[4.25rem] px-2 rounded-xl border text-[11px] font-bold ${btnAccent}`}
+          aria-label={lp.measureNewLine}
+          title={lp.measureNewLine}
+        >
+          <IconPlus className="w-[18px] h-[18px]" />
+          {lp.measureNewLine}
         </button>
         <button
           type="button"
@@ -309,7 +337,7 @@ export function MeasureToolbar({
         <button
           type="button"
           onClick={onClear}
-          disabled={!canUndo}
+          disabled={!canClear}
           className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[3.75rem] px-2 rounded-xl border text-[11px] font-bold disabled:opacity-40 ${btnIdle}`}
           aria-label={lp.measureClear}
         >
@@ -363,6 +391,39 @@ export function MeasureToolbar({
         {mode === "distance" ? lp.measureHintDistance : lp.measureHintArea}
       </p>
 
+      {threads.length > 0 && (
+        <div className={`${panelCls} px-3 py-2`}>
+          <p className={`text-[10px] font-bold tracking-wide mb-1.5 ${title}`}>
+            {lp.measureThreads} ({threads.length})
+          </p>
+          <ul className="space-y-1.5">
+            {threads.map((t, i) => (
+              <li key={t.id} className="flex items-center gap-2 text-[11px] leading-snug">
+                <span
+                  className="h-3 w-3 shrink-0 rounded-full border border-black/20"
+                  style={{ backgroundColor: t.color }}
+                  aria-hidden
+                />
+                <span className={muted}>
+                  {t.kind === "area" ? lp.measureArea : lp.measureDistance} {i + 1}:
+                </span>
+                <b className="min-w-0 truncate">{formatThreadSummary(t, lang)}</b>
+                {onRemoveThread && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveThread(t.id)}
+                    className={`ms-auto shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${btnIdle}`}
+                    aria-label={lp.measureClear}
+                  >
+                    ×
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {snap && (snap.points.length > 0 || (snap.liveSegmentM != null && snap.liveSegmentM > 0)) && (
         <div className={`${panelCls} px-3 py-2`}>
           <ul className="space-y-0.5 text-[11px] leading-snug">
@@ -371,10 +432,7 @@ export function MeasureToolbar({
                 <span className={muted}>{lp.measureTotal}: </span>
                 <b>{formatMeters(totalLive, lang)}</b>
                 {snap.liveSegmentM != null && snap.liveSegmentM > 0 && !snap.closed && (
-                  <span className={muted}>
-                    {" "}
-                    (+{formatMeters(snap.liveSegmentM, lang)})
-                  </span>
+                  <span className={muted}> (+{formatMeters(snap.liveSegmentM, lang)})</span>
                 )}
               </li>
             )}

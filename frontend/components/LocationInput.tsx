@@ -440,6 +440,25 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   );
   const measuring = measureMode !== "off";
   const dimsOnCanvas = Boolean(drawDimensions && showDimensions && !measuring);
+  const measureLabels = {
+    measureEnter: lp.measureEnter,
+    measureExit: lp.measureExit,
+    measureLabel: lp.measureLabel,
+    measureDistance: lp.measureDistance,
+    measureArea: lp.measureArea,
+    measureTotal: lp.measureTotal,
+    measureClear: lp.measureClear,
+    measureFinish: lp.measureFinish,
+    measureUndo: lp.measureUndo,
+    measureNewLine: lp.measureNewLine,
+    measureThreads: lp.measureThreads,
+    measureSnapOn: lp.measureSnapOn,
+    measureEdgeSnap: lp.measureEdgeSnap,
+    measureLineColor: lp.measureLineColor,
+    measureHintDistance: lp.measureHintDistance,
+    measureHintArea: lp.measureHintArea,
+    dimensionsArea: lp.dimensionsArea,
+  };
 
   // Attach measure tool once the map is ready.
   useEffect(() => {
@@ -480,6 +499,18 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   useEffect(() => {
     measureToolRef.current?.setLineColor(lineColor);
   }, [lineColor]);
+
+  // Keep React chrome in sync when the tool auto-advances color / restores a thread.
+  useEffect(() => {
+    if (!measureSnap) return;
+    if (measureSnap.lineColor && measureSnap.lineColor !== lineColor) {
+      setLineColor(measureSnap.lineColor);
+    }
+    if (measureSnap.mode !== "off" && measureSnap.mode !== measureMode) {
+      setMeasureMode(measureSnap.mode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measureSnap?.lineColor, measureSnap?.mode]);
 
   // Allow deeper overzoom only while architecture-measuring.
   useEffect(() => {
@@ -892,23 +923,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               onLineColorChange={setLineColor}
               lang={lang}
               variant="light"
-              labels={{
-                measureEnter: lp.measureEnter,
-                measureExit: lp.measureExit,
-                measureLabel: lp.measureLabel,
-                measureDistance: lp.measureDistance,
-                measureArea: lp.measureArea,
-                measureTotal: lp.measureTotal,
-                measureClear: lp.measureClear,
-                measureFinish: lp.measureFinish,
-                measureUndo: lp.measureUndo,
-                measureSnapOn: lp.measureSnapOn,
-                measureEdgeSnap: lp.measureEdgeSnap,
-                measureLineColor: lp.measureLineColor,
-                measureHintDistance: lp.measureHintDistance,
-                measureHintArea: lp.measureHintArea,
-                dimensionsArea: lp.dimensionsArea,
-              }}
+              labels={measureLabels}
               onEnter={() => setMeasureMode("distance")}
               onExit={() => {
                 measureToolRef.current?.clear();
@@ -918,6 +933,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               onUndo={() => measureToolRef.current?.undo()}
               onClear={() => measureToolRef.current?.clear()}
               onFinish={() => measureToolRef.current?.finish()}
+              onNewLine={() => measureToolRef.current?.newThread()}
+              onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
             />
           )}
           <button
@@ -941,23 +958,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             onLineColorChange={setLineColor}
             lang={lang}
             variant="light"
-            labels={{
-              measureEnter: lp.measureEnter,
-              measureExit: lp.measureExit,
-              measureLabel: lp.measureLabel,
-              measureDistance: lp.measureDistance,
-              measureArea: lp.measureArea,
-              measureTotal: lp.measureTotal,
-              measureClear: lp.measureClear,
-              measureFinish: lp.measureFinish,
-              measureUndo: lp.measureUndo,
-              measureSnapOn: lp.measureSnapOn,
-              measureEdgeSnap: lp.measureEdgeSnap,
-              measureLineColor: lp.measureLineColor,
-              measureHintDistance: lp.measureHintDistance,
-              measureHintArea: lp.measureHintArea,
-              dimensionsArea: lp.dimensionsArea,
-            }}
+            labels={measureLabels}
             onEnter={() => setMeasureMode("distance")}
             onExit={() => {
               measureToolRef.current?.clear();
@@ -967,6 +968,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             onUndo={() => measureToolRef.current?.undo()}
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
+            onNewLine={() => measureToolRef.current?.newThread()}
+            onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
           />
         )}
 
@@ -1060,6 +1063,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           measureClear: lp.measureClear,
           measureFinish: lp.measureFinish,
           measureUndo: lp.measureUndo,
+          measureNewLine: lp.measureNewLine,
+          measureThreads: lp.measureThreads,
           measureSnapOn: lp.measureSnapOn,
           measureEdgeSnap: lp.measureEdgeSnap,
           measureLineColor: lp.measureLineColor,
