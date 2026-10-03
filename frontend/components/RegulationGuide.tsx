@@ -12,7 +12,7 @@ type Props = {
   readOnly?: boolean;
   /** Hide allowed/restricted/setbacks — select (or title) only. */
   hideDetails?: boolean;
-  /** Land-check shows all zoning; listing/owner forms stay industrial-only. */
+  /** Full zoning list (industrial + residential + commercial) vs industrial-only. */
   scope?: "all" | "industrial";
   /** Mark the select as required (land-check gate before DLS fetch). */
   required?: boolean;

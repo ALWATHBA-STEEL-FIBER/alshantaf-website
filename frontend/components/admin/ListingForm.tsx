@@ -310,7 +310,7 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
           </div>
           <div className="sm:col-span-2">
             <RegulationGuide
-              scope="industrial"
+              scope="all"
               value={fields.industryType}
               onChange={(value) => {
                 if (value) setFields((f) => ({ ...f, industryType: value }));

@@ -570,7 +570,7 @@ export function OwnerForm() {
 
           <p className="text-xs font-bold text-green">{t.owners.regulationSection}</p>
           <RegulationGuide
-            scope="industrial"
+            scope="all"
             value={fields.industryType}
             onChange={(value) => setFields((f) => ({ ...f, industryType: value }))}
             required
