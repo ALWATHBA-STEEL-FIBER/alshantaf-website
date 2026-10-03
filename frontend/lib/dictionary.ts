@@ -668,9 +668,9 @@ export const dictionary = {
         "ارسم خط مسافة. نقرة مزدوجة أو «إنهاء» يحفظه ويبدأ خطًا بلون جديد. المساحة والخطوط تبقى معًا على الخريطة.",
       measureHintArea:
         "ارسم مضلع مساحة. إنهاء يحفظه دون مسح خطوط المسافة. بدّل الأداة بحرية — القياسات المحفوظة تبقى.",
-      measureExportCad: "تنزيل رسم أوتوكاد (DXF)",
+      measureExportCad: "تنزيل DXF (أوتوكاد)",
       measureExportCadHint:
-        "ملف DXF لأوتوكاد: حدود القطعة وأبعادها وجميع خطوط القياس بالمتر — بلا خريطة أو صورة قمر صناعي.",
+        "ملف DXF إنجليزي يفتح في أوتوكاد: حدود القطعة وأبعادها وخطوط القياس بالمتر — بيانات alshantaf.com فقط، بلا طبقة نص.",
       mapSectionTitle: "خريطة القطعة",
       topoSectionTitle: "طبوغرافيا ثلاثية الأبعاد",
       sideViewTitle: "منظر جانبي طبوغرافي ثلاثي الأبعاد",
@@ -2121,9 +2121,9 @@ export const dictionary = {
         "Draw a distance line. Double-click or Done saves it and starts another in a new color. Areas and lines stay on the map together.",
       measureHintArea:
         "Draw an area polygon. Finishing keeps all distance lines. Switch tools freely — saved measurements stay.",
-      measureExportCad: "Download AutoCAD drawing (DXF)",
+      measureExportCad: "Download DXF (AutoCAD)",
       measureExportCadHint:
-        "DXF for AutoCAD: parcel boundary, edge dimensions, and all measure lines in metres — no map or satellite image.",
+        "English DXF for AutoCAD: parcel boundary, dimension lines, and measure polylines in metres — alshantaf.com metadata only, no text layer. (True DWG is proprietary; AutoCAD opens DXF natively.)",
       mapSectionTitle: "Parcel map",
       topoSectionTitle: "3D topography",
       sideViewTitle: "3D topographic side view",

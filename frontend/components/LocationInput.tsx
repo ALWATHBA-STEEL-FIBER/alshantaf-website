@@ -476,7 +476,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     try {
       downloadParcelCadDxf({
         ring,
-        lang,
         parcelNumber: blueprint?.parcel,
         areaSqm,
         perimeterM,
@@ -1034,10 +1033,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           />
         )}
 
-        <div className="relative">
+        <div className="relative z-0 overflow-hidden rounded-xl border border-line isolate">
           <div
             ref={mapDivRef}
-            className="location-map-pane relative z-0 w-full h-72 sm:h-[28rem] overflow-hidden rounded-xl border border-line bg-[#e8eef0]"
+            className="location-map-pane relative z-0 w-full h-72 sm:h-[28rem] overflow-hidden bg-[#e8eef0]"
           />
           {measuring && (
             <MeasureThreadsOverlay
@@ -1056,7 +1055,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             />
           )}
           {loading && (
-            <div className="absolute inset-0 z-30 rounded-xl bg-white/75 flex flex-col items-center justify-center gap-3 px-4 text-center">
+            <div className="absolute inset-0 z-30 bg-white/75 flex flex-col items-center justify-center gap-3 px-4 text-center">
               <Spinner className="w-7 h-7" />
               <p className="text-sm font-bold text-ink">{loadingLabel || lp.loading}</p>
             </div>

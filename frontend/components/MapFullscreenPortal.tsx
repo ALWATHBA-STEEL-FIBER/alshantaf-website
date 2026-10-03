@@ -174,7 +174,6 @@ export function MapFullscreenPortal({
     try {
       downloadParcelCadDxf({
         ring,
-        lang,
         parcelNumber,
         areaSqm,
         perimeterM,

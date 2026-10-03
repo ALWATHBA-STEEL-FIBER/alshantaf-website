@@ -1,7 +1,5 @@
 import type { Coords } from "@/lib/mapCoords";
 import {
-  formatDlsArea,
-  formatMeters,
   ringAreaSqm,
   ringEdgeDimensions,
   ringPerimeterMeters,
@@ -11,7 +9,6 @@ import type { MeasureSnapshot, MeasureThread } from "@/lib/measureDraw";
 
 export type ParcelCadExportInput = {
   ring: [number, number][];
-  lang: "ar" | "en";
   parcelNumber?: string | null;
   areaSqm?: number | null;
   perimeterM?: number | null;
@@ -20,6 +17,8 @@ export type ParcelCadExportInput = {
 };
 
 type Pt = { x: number; y: number };
+
+const SITE = "https://alshantaf.com";
 
 function n(v: number, digits = 4) {
   return Number.isFinite(v) ? v.toFixed(digits) : "0";
@@ -44,15 +43,11 @@ function ringCentroidLatLng(pts: [number, number][]): Coords {
   return { lat: lat / pts.length, lng: lng / pts.length };
 }
 
-/** Escape DXF text control characters. */
-function dxfText(s: string) {
-  return s.replace(/\\/g, "\\\\").replace(/\n/g, "\\P");
-}
-
 /**
  * Minimal AutoCAD-compatible ASCII DXF (AC1015 / R2000).
- * True binary DWG is proprietary — DXF opens directly in AutoCAD / Civil 3D / LibreCAD.
- * Drawing is plan-view metres in local ENU (X=East, Y=North), no imagery.
+ * Geometry only (English layer names) — no TEXT entities.
+ * File comments carry alshantaf.com metadata.
+ * True binary DWG is proprietary; AutoCAD / Civil 3D open this DXF directly.
  */
 export function buildParcelCadDxf(input: ParcelCadExportInput): string {
   const pts = uniqueRing(input.ring);
@@ -66,9 +61,7 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
   const ringXy = pts.map(([lat, lng]) => toXy({ lat, lng }));
 
   const area =
-    input.areaSqm != null && input.areaSqm > 0
-      ? input.areaSqm
-      : ringAreaSqm(input.ring);
+    input.areaSqm != null && input.areaSqm > 0 ? input.areaSqm : ringAreaSqm(input.ring);
   const peri =
     input.perimeterM != null && input.perimeterM > 0
       ? input.perimeterM
@@ -81,6 +74,18 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
       lines.push(String(pairs[i]), String(pairs[i + 1]));
     }
   };
+  /** DXF comment (group 999) — metadata only, not a drawing entity. */
+  const comment = (text: string) => {
+    lines.push("999", text);
+  };
+
+  const parcelBit = input.parcelNumber?.trim() || "";
+  comment(`${SITE} — parcel CAD export`);
+  comment(`Units: metres | X=East Y=North | local origin at parcel centroid`);
+  if (parcelBit) comment(`Parcel: ${parcelBit}`);
+  comment(`Area_m2: ${n(area, 3)} | Perimeter_m: ${n(peri, 3)}`);
+  comment(`WGS84_centroid: ${origin.lat.toFixed(6)}, ${origin.lng.toFixed(6)}`);
+  comment(`Advisory geometry — confirm with an official survey before construction`);
 
   // HEADER
   push(0, "SECTION", 2, "HEADER");
@@ -91,7 +96,6 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
   push(9, "$LUPREC", 70, 3);
   push(9, "$AUNITS", 70, 0);
   push(9, "$AUPREC", 70, 2);
-  // Approximate extents
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -104,15 +108,15 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
   };
   ringXy.forEach(grow);
   push(9, "$EXTMIN", 10, n(minX - 5), 20, n(minY - 5), 30, 0);
-  push(9, "$EXTMAX", 10, n(maxX + 5), 20, n(maxY + 12), 30, 0);
+  push(9, "$EXTMAX", 10, n(maxX + 5), 20, n(maxY + 5), 30, 0);
   push(0, "ENDSEC");
 
-  // TABLES — layers
+  // TABLES — layers (geometry only; no TEXT layer)
   push(0, "SECTION", 2, "TABLES");
   push(0, "TABLE", 2, "LTYPE", 70, 1);
   push(0, "LTYPE", 2, "CONTINUOUS", 70, 0, 3, "Solid line", 72, 65, 73, 0, 40, 0);
   push(0, "ENDTAB");
-  push(0, "TABLE", 2, "LAYER", 70, 5);
+  push(0, "TABLE", 2, "LAYER", 70, 4);
   const layer = (name: string, color: number) => {
     push(0, "LAYER", 2, name, 70, 0, 62, color, 6, "CONTINUOUS");
   };
@@ -120,18 +124,12 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
   layer("PARCEL", 3); // green
   layer("DIMS", 1); // red
   layer("MEASURE", 5); // blue
-  layer("TEXT", 7); // white/black
-  push(0, "ENDTAB");
-  push(0, "TABLE", 2, "STYLE", 70, 1);
-  push(0, "STYLE", 2, "STANDARD", 70, 0, 40, 0, 41, 1, 50, 0, 71, 0, 42, 1, 3, "txt", 4, "");
   push(0, "ENDTAB");
   push(0, "ENDSEC");
 
-  // BLOCKS (empty required section)
   push(0, "SECTION", 2, "BLOCKS");
   push(0, "ENDSEC");
 
-  // ENTITIES
   push(0, "SECTION", 2, "ENTITIES");
 
   // Parcel outline
@@ -140,9 +138,8 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
     push(10, n(p.x), 20, n(p.y));
   }
 
-  // Edge dimensions — offset parallel dimension line + ticks + length text
+  // Edge dimension geometry only (extension ticks + dim line — no labels)
   const dimOffset = Math.max(2, Math.min(8, (maxX - minX + maxY - minY) * 0.03));
-  const textH = Math.max(0.6, Math.min(2.2, dimOffset * 0.35));
 
   for (const edge of edges) {
     const a = toXy(edge.start);
@@ -152,7 +149,6 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const len = Math.hypot(dx, dy) || 1;
-    // outward normal (approx: away from origin/centroid at 0,0)
     let nx = -dy / len;
     let ny = dx / len;
     const midX = (a.x + b.x) / 2;
@@ -163,41 +159,9 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
     }
     const a2 = { x: a.x + nx * dimOffset, y: a.y + ny * dimOffset };
     const b2 = { x: b.x + nx * dimOffset, y: b.y + ny * dimOffset };
-    // extension ticks from edge toward dim line
     push(0, "LINE", 8, "DIMS", 10, n(a.x), 20, n(a.y), 11, n(a2.x), 21, n(a2.y));
     push(0, "LINE", 8, "DIMS", 10, n(b.x), 20, n(b.y), 11, n(b2.x), 21, n(b2.y));
-    // dimension line
     push(0, "LINE", 8, "DIMS", 10, n(a2.x), 20, n(a2.y), 11, n(b2.x), 21, n(b2.y));
-    // length label
-    const label = formatMeters(edge.lengthM, input.lang);
-    const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
-    let rot = ang;
-    if (rot > 90) rot -= 180;
-    if (rot < -90) rot += 180;
-    const tx = midX + nx * (dimOffset + textH * 0.35);
-    const ty = midY + ny * (dimOffset + textH * 0.35);
-    push(
-      0,
-      "TEXT",
-      8,
-      "DIMS",
-      10,
-      n(tx),
-      20,
-      n(ty),
-      40,
-      n(textH, 3),
-      1,
-      dxfText(label),
-      50,
-      n(rot, 3),
-      72,
-      1,
-      11,
-      n(tx),
-      21,
-      n(ty)
-    );
   }
 
   const writePolyline = (layerName: string, points: Pt[], closed: boolean) => {
@@ -213,94 +177,11 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
     const xy = thread.points.map(toXy);
     if (xy.length < 2) return;
     writePolyline(layerName, xy, thread.kind === "area" && xy.length >= 3);
-    // Segment length labels
-    for (let i = 0; i < xy.length - 1; i++) {
-      const p0 = xy[i]!;
-      const p1 = xy[i + 1]!;
-      const seg = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-      if (seg < 0.05) continue;
-      const mx = (p0.x + p1.x) / 2;
-      const my = (p0.y + p1.y) / 2;
-      let rot = (Math.atan2(p1.y - p0.y, p1.x - p0.x) * 180) / Math.PI;
-      if (rot > 90) rot -= 180;
-      if (rot < -90) rot += 180;
-      push(
-        0,
-        "TEXT",
-        8,
-        layerName,
-        10,
-        n(mx),
-        20,
-        n(my + textH * 0.4),
-        40,
-        n(textH * 0.85, 3),
-        1,
-        dxfText(formatMeters(seg, input.lang)),
-        50,
-        n(rot, 3),
-        72,
-        1,
-        11,
-        n(mx),
-        21,
-        n(my + textH * 0.4)
-      );
-    }
-    if (thread.kind === "area" && thread.areaSqm != null && thread.areaSqm > 0) {
-      let cx = 0;
-      let cy = 0;
-      for (const p of xy) {
-        cx += p.x;
-        cy += p.y;
-      }
-      cx /= xy.length;
-      cy /= xy.length;
-      push(
-        0,
-        "TEXT",
-        8,
-        layerName,
-        10,
-        n(cx),
-        20,
-        n(cy),
-        40,
-        n(textH * 1.1, 3),
-        1,
-        dxfText(formatDlsArea(thread.areaSqm, input.lang)),
-        72,
-        1,
-        11,
-        n(cx),
-        21,
-        n(cy)
-      );
-    } else if (thread.kind === "distance" && thread.lengthM > 0) {
-      const last = xy[xy.length - 1]!;
-      push(
-        0,
-        "TEXT",
-        8,
-        layerName,
-        10,
-        n(last.x),
-        20,
-        n(last.y + textH),
-        40,
-        n(textH, 3),
-        1,
-        dxfText(`Σ ${formatMeters(thread.lengthM, input.lang)}`),
-        72,
-        0
-      );
-    }
   };
 
   const measure = input.measure;
   if (measure) {
     for (const t of measure.threads) writeThread(t);
-    // Active draft
     if (measure.points.length >= 2) {
       writeThread({
         id: "draft",
@@ -313,86 +194,25 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
     }
   }
 
-  // Title / notes (above parcel)
-  const titleY = maxY + dimOffset + textH * 3;
-  const titleX = (minX + maxX) / 2;
-  const parcelBit = input.parcelNumber?.trim() || "";
-  const title =
-    input.lang === "ar"
-      ? `قطعة${parcelBit ? ` ${parcelBit}` : ""} — مخطط أبعاد (أوتوكاد)`
-      : `Parcel${parcelBit ? ` ${parcelBit}` : ""} — dimension drawing (AutoCAD)`;
-  push(
-    0,
-    "TEXT",
-    8,
-    "TEXT",
-    10,
-    n(titleX),
-    20,
-    n(titleY),
-    40,
-    n(textH * 1.4, 3),
-    1,
-    dxfText(title),
-    72,
-    1,
-    11,
-    n(titleX),
-    21,
-    n(titleY)
-  );
-
-  const metaLines = [
-    input.lang === "ar"
-      ? `المساحة: ${formatDlsArea(area, "ar")} · المحيط: ${formatMeters(peri, "ar")}`
-      : `Area: ${formatDlsArea(area, "en")} · Perimeter: ${formatMeters(peri, "en")}`,
-    input.lang === "ar"
-      ? "وحدات: متر · محور X شرق / Y شمال · أصل محلي عند مركز القطعة — بلا صورة قمر صناعي"
-      : "Units: metres · X=East / Y=North · local origin at parcel centroid — no satellite imagery",
-    input.lang === "ar"
-      ? `مرجع WGS84 للمركز: ${origin.lat.toFixed(6)}, ${origin.lng.toFixed(6)}`
-      : `WGS84 centroid ref: ${origin.lat.toFixed(6)}, ${origin.lng.toFixed(6)}`,
-    input.lang === "ar"
-      ? "إرشادي — أكّد القياسات بمسح مساحي رسمي قبل التنفيذ"
-      : "Advisory — confirm with an official survey before construction",
-  ];
-  metaLines.forEach((line, i) => {
-    push(
-      0,
-      "TEXT",
-      8,
-      "TEXT",
-      10,
-      n(titleX),
-      20,
-      n(titleY - textH * 1.8 * (i + 1)),
-      40,
-      n(textH * 0.85, 3),
-      1,
-      dxfText(line),
-      72,
-      1,
-      11,
-      n(titleX),
-      21,
-      n(titleY - textH * 1.8 * (i + 1))
-    );
-  });
-
   push(0, "ENDSEC");
   push(0, "EOF");
   return lines.join("\n") + "\n";
 }
 
+function safeFileBase(parcelNumber?: string | null) {
+  const parcelBit = parcelNumber?.trim() ? `-${parcelNumber.trim()}` : "";
+  return `alshantaf-parcel${parcelBit}`.replace(/[^\w.\-]+/g, "_");
+}
+
+/** Download English geometry DXF (opens in AutoCAD). Binary DWG is not generated client-side. */
 export function downloadParcelCadDxf(input: ParcelCadExportInput, fileName?: string) {
   const dxf = buildParcelCadDxf(input);
-  const parcelBit = input.parcelNumber?.trim() ? `-${input.parcelNumber.trim()}` : "";
-  const name = (fileName || `alshantaf-parcel${parcelBit}.dxf`).replace(/[^\w.\-]+/g, "_");
+  const name = (fileName || `${safeFileBase(input.parcelNumber)}.dxf`).replace(/[^\w.\-]+/g, "_");
   const blob = new Blob([dxf], { type: "application/dxf;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = name;
+  a.download = name.endsWith(".dxf") ? name : `${name}.dxf`;
   a.rel = "noopener";
   document.body.appendChild(a);
   a.click();

@@ -54,9 +54,9 @@ export function MeasureThreadsOverlay({
 
   return (
     <div
-      className={`map-measure-overlay pointer-events-none absolute z-[500] max-h-[42%] max-w-[min(18rem,72%)] overflow-y-auto rounded-xl border px-2.5 py-2 ${shell}`}
+      className={`map-measure-overlay pointer-events-none absolute z-20 max-h-[42%] max-w-[min(18rem,72%)] overflow-y-auto rounded-xl border px-2.5 py-2 ${shell}`}
       style={{
-        top: "max(0.5rem, env(safe-area-inset-top, 0px))",
+        top: "0.5rem",
         insetInlineStart: "0.5rem",
       }}
       dir={lang === "ar" ? "rtl" : "ltr"}
