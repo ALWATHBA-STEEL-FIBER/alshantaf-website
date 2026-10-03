@@ -1,3 +1,4 @@
+import { toWesternDigits } from "@/lib/arabicDigits";
 import { GOVERNORATE_EN, DIRECTORATE_EN, COMMON_PLACE_EN } from "@/lib/dlsTranslations";
 import { transliterate } from "@/lib/transliterate";
 
@@ -38,6 +39,36 @@ export function localizeSizeLabel(size: string | null | undefined, lang: "ar" | 
   if (!size) return "";
   if (lang === "en") return size.replace(/م²/g, "m²").replace(/دونم/g, "dunums");
   return size.replace(/m²/g, "م²").replace(/\bdunums?\b/gi, "دونم");
+}
+
+/**
+ * Display asking price with localized currency + /m².
+ * Bare rates like "60" (how most listings are stored) become "60 دينار / م²" or "60 JOD / m²".
+ */
+export function localizePriceLabel(price: string | null | undefined, lang: "ar" | "en"): string {
+  if (!price?.trim()) return "";
+  const raw = toWesternDigits(price.trim()).replace(/\s+/g, " ");
+  const currency = lang === "ar" ? "دينار" : "JOD";
+  const perSqm = lang === "ar" ? "/ م²" : "/ m²";
+
+  if (/(?:م²|m²|م2|m2|sq\.?\s*m)/i.test(raw)) {
+    let s = raw;
+    if (lang === "en") {
+      s = s.replace(/دينار/g, "JOD").replace(/م²|م2/g, "m²");
+    } else {
+      s = s.replace(/\bJOD\b|\bJD\b/gi, "دينار").replace(/m²|m2/gi, "م²");
+    }
+    return s.replace(/\s*\/\s*/g, " / ").trim();
+  }
+
+  const bare = raw.match(/^([\d,.]+)\s*(?:دينار|JOD|JD)?\s*$/i);
+  if (bare) {
+    const n = bare[1]!.replace(/,/g, "");
+    return `${n} ${currency} ${perSqm}`;
+  }
+
+  if (lang === "en") return raw.replace(/دينار/g, "JOD").replace(/م²/g, "m²");
+  return raw.replace(/\bJOD\b|\bJD\b/gi, "دينار").replace(/m²/gi, "م²");
 }
 
 export function isAutoIndustrialTitle(title: string): boolean {

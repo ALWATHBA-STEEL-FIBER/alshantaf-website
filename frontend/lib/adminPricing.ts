@@ -24,17 +24,26 @@ export function adminMedianEstimate(ratePerSqm: number, areaSqm: number): number
 
 /**
  * Parse an asking rate per m² from listing price text
- * (e.g. "60 دينار / م²", "60 JOD/m2"). Returns null for lump-sum prices.
+ * (e.g. "60 دينار / م²", "60 JOD/m2", or bare "60"). Returns null for lump-sum prices.
  */
 export function parsePricePerSqm(price: string | null | undefined): number | null {
   if (!price) return null;
-  const text = toWesternDigits(price).replace(/,/g, "");
+  const text = toWesternDigits(price).replace(/,/g, "").trim();
   const per = text.match(
     /([\d.]+)\s*(?:دينار|JOD|JD|jd)?\s*(?:\/|لكل|per)?\s*(?:م²|m²|م2|m2|sq\.?\s*m)/i
   );
-  if (!per) return null;
-  const n = Number(per[1]);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  if (per) {
+    const n = Number(per[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  // Most published listings store the rate as a bare number ("60").
+  const bare = text.match(/^([\d.]+)\s*(?:دينار|JOD|JD|jd)?\s*$/i);
+  if (bare) {
+    const n = Number(bare[1]);
+    // Guard: values this high are almost certainly totals, not per-m² rates.
+    if (Number.isFinite(n) && n > 0 && n < 5000) return n;
+  }
+  return null;
 }
 
 export function formatMoney(value: number, lang: "ar" | "en"): string {

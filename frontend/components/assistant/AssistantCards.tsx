@@ -4,7 +4,12 @@ import Link from "next/link";
 import { useSettings } from "@/lib/SettingsProvider";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { offerWhatsappLink } from "@/lib/whatsapp";
-import { localizeListingTitle, localizePlaceName, localizeSizeLabel } from "@/lib/localizePlace";
+import {
+  localizeListingTitle,
+  localizePlaceName,
+  localizePriceLabel,
+  localizeSizeLabel,
+} from "@/lib/localizePlace";
 import type { AssistantOfferCard, AssistantServiceCard } from "@/lib/types";
 
 export function AssistantOfferCardView({ offer }: { offer: AssistantOfferCard }) {
@@ -13,6 +18,7 @@ export function AssistantOfferCardView({ offer }: { offer: AssistantOfferCard })
   const title = localizeListingTitle(offer.title, lang);
   const area = localizePlaceName(offer.area, lang);
   const size = localizeSizeLabel(offer.size, lang);
+  const price = localizePriceLabel(offer.price, lang);
 
   return (
     <article className="overflow-hidden rounded-2xl border border-line bg-white shadow-[0_12px_28px_-22px_rgba(15,52,47,0.45)]">
@@ -50,7 +56,7 @@ export function AssistantOfferCardView({ offer }: { offer: AssistantOfferCard })
           </div>
           <div>
             <small className="block text-[10px] text-ink-soft">{t.offers.price}</small>
-            <b className="font-bold">{offer.price || t.assistant.onRequest}</b>
+            <b className="font-bold">{price || t.assistant.onRequest}</b>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 pt-1">

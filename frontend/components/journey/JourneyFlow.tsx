@@ -11,7 +11,7 @@ import { AREA_GUIDE_SLUGS, AREA_OTHER_SLUGS, areaFilterBySlug, areaFilterLabel }
 import { INDUSTRIAL_ORDER } from "@/lib/regulations";
 import { SETBACKS } from "@/lib/setbacks";
 import { toWesternDigits } from "@/lib/arabicDigits";
-import { localizeSizeLabel } from "@/lib/localizePlace";
+import { localizePriceLabel, localizeSizeLabel } from "@/lib/localizePlace";
 import type { IndustryType, Listing } from "@/lib/types";
 
 const AREA_PRESETS = [500, 1000, 2000, 5000, 10000];
@@ -235,7 +235,7 @@ export function JourneyFlow({ listings }: { listings: Listing[] }) {
                     <p className="text-xs text-ink-soft mt-1">
                       {listing.area}
                       {listing.size ? ` · ${localizeSizeLabel(listing.size, lang)}` : ""}
-                      {listing.price ? ` · ${listing.price}` : ""}
+                      {listing.price ? ` · ${localizePriceLabel(listing.price, lang)}` : ""}
                     </p>
                   </div>
                   {kind === "budget_alt" && (

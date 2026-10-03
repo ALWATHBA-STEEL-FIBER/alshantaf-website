@@ -20,6 +20,7 @@ import {
 import {
   localizeListingTitle,
   localizePlaceName,
+  localizePriceLabel,
   localizePropertyType,
   localizeSizeLabel,
 } from "@/lib/localizePlace";
@@ -156,6 +157,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     areaSqm != null && areaSqm > 0 ? formatDlsArea(areaSqm, lang) : listing.size,
     lang
   );
+  const priceLabel = localizePriceLabel(listing.price, lang);
   const basinLabel = listing.basin ? localizePlaceName(listing.basin, lang) : "";
   const presenter =
     listing.showPresenter && (listing.presenterRole || listing.presenterName)
@@ -461,7 +463,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
             {listing.propertyType && <Fact k={t.offers.type} v={propertyType} />}
             {sizeLabel && <Fact k={t.offers.size} v={sizeLabel} />}
-            {listing.price && <Fact k={t.offers.price} v={listing.price} />}
+            {priceLabel && <Fact k={t.offers.price} v={priceLabel} />}
             {(listing.basin || listing.parcel) && (
               <Fact k={t.offers.basinParcel} v={`${basinLabel || "—"} / ${listing.parcel || "—"}`} />
             )}
@@ -496,7 +498,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           <div className="rounded-3xl border border-line bg-white p-6 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]">
             <p className="text-xs font-bold text-ink-soft">{t.offers.price}</p>
             <p className="text-2xl font-bold text-green mt-1 [overflow-wrap:anywhere]">
-              {listing.price || t.offers.onRequest}
+              {priceLabel || t.offers.onRequest}
             </p>
             {sizeLabel && (
               <p className="text-sm text-ink-soft mt-2 [overflow-wrap:anywhere]">

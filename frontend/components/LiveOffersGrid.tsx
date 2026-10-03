@@ -9,6 +9,7 @@ import { buildSrcSet } from "@/lib/imageSrcSet";
 import {
   localizeListingTitle,
   localizePlaceName,
+  localizePriceLabel,
   localizePropertyType,
   localizeSizeLabel,
 } from "@/lib/localizePlace";
@@ -182,6 +183,7 @@ export function LiveOffersGrid({
             const areaLabel = offer.area ? localizePlaceName(offer.area, lang) : t.offers.areaFallback;
             const propertyType = localizePropertyType(offer.propertyType, lang, t.offers.propertyTypeFallback);
             const sizeLabel = localizeSizeLabel(offer.size, lang);
+            const priceLabel = localizePriceLabel(offer.price, lang);
             const sold = offer.status === "sold";
             return (
               <article
@@ -237,7 +239,7 @@ export function LiveOffersGrid({
                     </div>
                     <div className="min-w-0">
                       <small className="block text-[10px] text-ink-soft">{t.offers.price}</small>
-                      <b className="block text-sm [overflow-wrap:anywhere]">{offer.price || t.offers.onRequest}</b>
+                      <b className="block text-sm [overflow-wrap:anywhere]">{priceLabel || t.offers.onRequest}</b>
                     </div>
                   </div>
                   <div className="mt-auto pt-4 grid grid-cols-2 gap-2">
