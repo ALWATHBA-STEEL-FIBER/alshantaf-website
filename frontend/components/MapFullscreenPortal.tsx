@@ -169,11 +169,12 @@ export function MapFullscreenPortal({
   };
 
   function exportArchitectureCad() {
-    const ring = polygon?.[0];
-    if (!ring?.length) return;
+    // Pass a copy of rings for DXF only — does not change map polygon state.
+    const rings = (polygon ?? []).filter((r) => r?.length >= 2).map((r) => r.slice() as [number, number][]);
+    if (!rings.length) return;
     try {
       downloadParcelCadDxf({
-        ring,
+        rings,
         parcelNumber,
         areaSqm,
         perimeterM,
