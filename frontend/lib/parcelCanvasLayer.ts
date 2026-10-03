@@ -23,7 +23,8 @@ type ParcelLayerInst = import("leaflet").Layer & {
   options: ParcelCanvasOpts;
   _map?: LeafletMap;
   _canvas?: HTMLCanvasElement;
-  _poly?: import("leaflet").Polygon;
+  /** One polygon per cadastral ring (multi-land). */
+  _polys?: import("leaflet").FeatureGroup;
   _corners?: import("leaflet").LayerGroup;
   _onRedraw?: () => void;
   _onZoomStart?: () => void;
@@ -33,11 +34,26 @@ type ParcelLayerInst = import("leaflet").Layer & {
   getBounds: () => import("leaflet").LatLngBounds;
 };
 
+const POLY_STYLE = {
+  color: "#0f342f",
+  weight: 2.5,
+  opacity: 1,
+  fillColor: "#c8a064",
+  fillOpacity: 0.22,
+  lineJoin: "round" as const,
+  lineCap: "round" as const,
+  interactive: false,
+  className: "parcel-dls-outline",
+};
+
+function validRings(rings: [number, number][][] | undefined): [number, number][][] {
+  return (rings ?? []).filter((r) => r?.length >= 3);
+}
+
 /**
  * DLS-accurate parcel overlay:
- * - Native Leaflet polygon + corner markers track the map projection through zoom/pan.
+ * - Native Leaflet polygons + corner markers for every ring (multi-land).
  * - A viewport canvas draws length chips + parcel number in fixed screen pixels.
- * - No CSS zoom-scale on the geometry (that was drifting the outline off the land).
  */
 export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): ParcelLayerInst {
   const ParcelOverlay = L.Layer.extend({
@@ -48,21 +64,9 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
     onAdd(this: ParcelLayerInst) {
       const map = this._map!;
 
-      this._poly = L.polygon([], {
-        color: "#0f342f",
-        weight: 2.5,
-        opacity: 1,
-        fillColor: "#c8a064",
-        fillOpacity: 0.22,
-        lineJoin: "round",
-        lineCap: "round",
-        interactive: false,
-        className: "parcel-dls-outline",
-      }).addTo(map);
-
+      this._polys = L.featureGroup().addTo(map);
       this._corners = L.layerGroup().addTo(map);
 
-      // Labels above outline/corners (overlayPane=400) — stay inside the map.
       if (!map.getPane("parcelLabelPane")) {
         map.createPane("parcelLabelPane");
         const pane = map.getPane("parcelLabelPane")!;
@@ -99,7 +103,6 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
       map.on("move viewreset resize", this._onRedraw);
       map.on("zoomstart", this._onZoomStart);
       map.on("zoomend", this._onZoomEnd);
-      // Instant zoom (no animation) still needs a mid-zoom redraw
       map.on("zoom", this._onRedraw);
 
       syncGeometry(L, this);
@@ -115,9 +118,10 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
         if (this._onZoomStart) this._map.off("zoomstart", this._onZoomStart);
         if (this._onZoomEnd) this._map.off("zoomend", this._onZoomEnd);
       }
-      if (this._poly) {
-        this._poly.remove();
-        this._poly = undefined;
+      if (this._polys) {
+        this._polys.clearLayers();
+        this._polys.remove();
+        this._polys = undefined;
       }
       if (this._corners) {
         this._corners.clearLayers();
@@ -135,9 +139,10 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
     },
 
     getBounds(this: ParcelLayerInst) {
-      const ring = this.options.rings[0];
-      if (!ring?.length) return L.latLngBounds([0, 0], [0, 0]);
-      return L.latLngBounds(ring.map(([lat, lng]) => [lat, lng] as [number, number]));
+      const rings = validRings(this.options.rings);
+      if (!rings.length) return L.latLngBounds([0, 0], [0, 0]);
+      const pts = rings.flat().map(([lat, lng]) => [lat, lng] as [number, number]);
+      return L.latLngBounds(pts);
     },
   });
 
@@ -145,31 +150,36 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
 }
 
 function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
-  const ring = layer.options.rings[0];
-  if (!ring?.length || !layer._poly || !layer._corners) return;
+  const rings = validRings(layer.options.rings);
+  if (!layer._polys || !layer._corners) return;
 
-  const latlngs = ring.map(([lat, lng]) => L.latLng(lat, lng));
-  layer._poly.setLatLngs(latlngs);
-
+  layer._polys.clearLayers();
   layer._corners.clearLayers();
-  const hard = new Set(
-    ringCornerPoints(ring).map((c) => `${c.lat.toFixed(7)},${c.lng.toFixed(7)}`)
-  );
+  if (!rings.length) return;
+
   const seen = new Set<string>();
-  for (const [lat, lng] of ring) {
-    const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const isHard = hard.has(key);
-    L.circleMarker([lat, lng], {
-      radius: isHard ? 5 : 3.5,
-      color: "#f5e6c8",
-      weight: 1.5,
-      fillColor: "#caa064",
-      fillOpacity: 1,
-      opacity: 1,
-      interactive: false,
-    }).addTo(layer._corners);
+  for (const ring of rings) {
+    const latlngs = ring.map(([lat, lng]) => L.latLng(lat, lng));
+    L.polygon(latlngs, POLY_STYLE).addTo(layer._polys);
+
+    const hard = new Set(
+      ringCornerPoints(ring).map((c) => `${c.lat.toFixed(7)},${c.lng.toFixed(7)}`)
+    );
+    for (const [lat, lng] of ring) {
+      const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const isHard = hard.has(key);
+      L.circleMarker([lat, lng], {
+        radius: isHard ? 5 : 3.5,
+        color: "#f5e6c8",
+        weight: 1.5,
+        fillColor: "#caa064",
+        fillOpacity: 1,
+        opacity: 1,
+        interactive: false,
+      }).addTo(layer._corners);
+    }
   }
 }
 
@@ -180,8 +190,8 @@ function paintLabels(
   canvas: HTMLCanvasElement,
   opts: ParcelCanvasOpts
 ) {
-  const ring = opts.rings[0];
-  if (!ring?.length) return;
+  const rings = validRings(opts.rings);
+  if (!rings.length) return;
 
   const size = map.getSize();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -199,60 +209,99 @@ function paintLabels(
   ctx.clearRect(0, 0, size.x, size.y);
 
   if (opts.showDimensions) {
-    const edges = ringEdgeDimensions(ring);
-    const sum = edges.reduce((s, e) => s + e.lengthM, 0);
-    const scale =
-      opts.perimeterM != null &&
-      opts.perimeterM > 0 &&
-      sum > 0 &&
-      Math.abs(opts.perimeterM - sum) / opts.perimeterM <= 0.05
-        ? opts.perimeterM / sum
-        : 1;
+    // Scale each ring independently when a single official perimeter is provided
+    // for one lot; for multi-land, leave scale at 1 (sum of sides ≈ SHAPE.LEN per ring).
+    const multi = rings.length > 1;
+    for (const ring of rings) {
+      const edges = ringEdgeDimensions(ring);
+      const sum = edges.reduce((s, e) => s + e.lengthM, 0);
+      const scale =
+        !multi &&
+        opts.perimeterM != null &&
+        opts.perimeterM > 0 &&
+        sum > 0 &&
+        Math.abs(opts.perimeterM - sum) / opts.perimeterM <= 0.05
+          ? opts.perimeterM / sum
+          : 1;
 
-    for (const edge of edges) {
-      const mid = map.latLngToContainerPoint([edge.mid.lat, edge.mid.lng]);
-      const text = formatSideMeters(edge.lengthM * scale, opts.lang, edge.kind);
-      const rad = (edge.bearingDeg * Math.PI) / 180;
+      for (const edge of edges) {
+        const mid = map.latLngToContainerPoint([edge.mid.lat, edge.mid.lng]);
+        const text = formatSideMeters(edge.lengthM * scale, opts.lang, edge.kind);
+        const rad = (edge.bearingDeg * Math.PI) / 180;
 
-      ctx.save();
-      ctx.translate(mid.x, mid.y);
-      ctx.rotate(rad);
-      ctx.font = '700 11px system-ui, "IBM Plex Sans Arabic", sans-serif';
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      const tw = ctx.measureText(text).width;
-      const bw = tw + 16;
-      const bh = 22;
-      roundRect(ctx, -bw / 2, -bh / 2, bw, bh, bh / 2);
-      ctx.fillStyle = "rgba(15,52,47,0.96)";
-      ctx.fill();
-      ctx.strokeStyle = "#caa064";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(text, 0, 0.5);
-      ctx.restore();
+        ctx.save();
+        ctx.translate(mid.x, mid.y);
+        ctx.rotate(rad);
+        ctx.font = '700 11px system-ui, "IBM Plex Sans Arabic", sans-serif';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const tw = ctx.measureText(text).width;
+        const bw = tw + 16;
+        const bh = 22;
+        roundRect(ctx, -bw / 2, -bh / 2, bw, bh, bh / 2);
+        ctx.fillStyle = "rgba(15,52,47,0.96)";
+        ctx.fill();
+        ctx.strokeStyle = "#caa064";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(text, 0, 0.5);
+        ctx.restore();
+      }
     }
   }
 
   const parcelNo = opts.parcelNumber?.trim();
   if (parcelNo) {
-    const center = ringInteriorCentroid(ring);
-    if (center) {
-      const c = map.latLngToContainerPoint([center.lat, center.lng]);
-      ctx.save();
-      ctx.translate(c.x, c.y);
-      ctx.font = '800 14px system-ui, "IBM Plex Sans Arabic", sans-serif';
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.lineWidth = 3.5;
-      ctx.strokeStyle = "rgba(255,255,255,0.95)";
-      ctx.strokeText(parcelNo, 0, 0);
-      ctx.fillStyle = "#0f342f";
-      ctx.fillText(parcelNo, 0, 0);
-      ctx.restore();
+    // Label each ring with its own number when "706, 707, …"; else one label at center.
+    const parts = parcelNo.split(/[,،]+/).map((s) => s.trim()).filter(Boolean);
+    if (parts.length === rings.length && parts.length > 1) {
+      for (let i = 0; i < rings.length; i++) {
+        const center = ringInteriorCentroid(rings[i]!);
+        if (!center) continue;
+        drawParcelLabel(ctx, map, center.lat, center.lng, parts[i]!);
+      }
+    } else {
+      const center =
+        rings.length === 1
+          ? ringInteriorCentroid(rings[0]!)
+          : (() => {
+              let lat = 0;
+              let lng = 0;
+              let n = 0;
+              for (const ring of rings) {
+                for (const p of ring) {
+                  lat += p[0]!;
+                  lng += p[1]!;
+                  n++;
+                }
+              }
+              return n ? { lat: lat / n, lng: lng / n } : null;
+            })();
+      if (center) drawParcelLabel(ctx, map, center.lat, center.lng, parcelNo);
     }
   }
+}
+
+function drawParcelLabel(
+  ctx: CanvasRenderingContext2D,
+  map: LeafletMap,
+  lat: number,
+  lng: number,
+  text: string
+) {
+  const c = map.latLngToContainerPoint([lat, lng]);
+  ctx.save();
+  ctx.translate(c.x, c.y);
+  ctx.font = '800 14px system-ui, "IBM Plex Sans Arabic", sans-serif';
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 3.5;
+  ctx.strokeStyle = "rgba(255,255,255,0.95)";
+  ctx.strokeText(text, 0, 0);
+  ctx.fillStyle = "#0f342f";
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
 }
 
 function roundRect(
