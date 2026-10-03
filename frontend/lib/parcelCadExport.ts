@@ -63,7 +63,19 @@ function edgeKey(a: Pt, b: Pt): string {
   return ka <= kb ? `${ka}|${kb}` : `${kb}|${ka}`;
 }
 
-type DimEdge = { a: Pt; b: Pt; count: number };
+type DimEdge = { a: Pt; b: Pt; count: number; lengthM: number };
+
+/** English length label for DXF TEXT (always Western digits + "m"). */
+function formatLenM(meters: number): string {
+  if (!Number.isFinite(meters) || meters <= 0) return "0 m";
+  if (meters >= 100) return `${(Math.round(meters * 10) / 10).toFixed(1)} m`;
+  if (meters >= 10) return `${(Math.round(meters * 10) / 10).toFixed(1)} m`;
+  return `${(Math.round(meters * 100) / 100).toFixed(2)} m`;
+}
+
+function dxfText(s: string) {
+  return s.replace(/\\/g, "\\\\").replace(/\n/g, "\\P");
+}
 
 /**
  * Logical sides from every ring, keyed so a shared multi-land border collapses to one entry.
@@ -82,7 +94,7 @@ function collectDimensionEdges(
       const key = edgeKey(a, b);
       const prev = map.get(key);
       if (prev) prev.count += 1;
-      else map.set(key, { a, b, count: 1 });
+      else map.set(key, { a, b, count: 1, lengthM: edge.lengthM > 0 ? edge.lengthM : len });
     }
   }
   return [...map.values()];
@@ -90,9 +102,9 @@ function collectDimensionEdges(
 
 /**
  * Minimal AutoCAD-compatible ASCII DXF (AC1015 / R2000).
- * Geometry only — no TEXT layer. Multi-land: one closed polyline per lot;
- * dimension ticks only once per unique edge (shared borders not doubled).
- * Does not affect map rendering.
+ * Multi-land: one closed polyline per lot; English length TEXT + parcel IDs
+ * on DIMS/PARCEL. Shared borders get one dimension set only.
+ * DXF-only — does not affect map rendering.
  */
 export function buildParcelCadDxf(input: ParcelCadExportInput): string {
   const rings = collectRings(input);
@@ -175,6 +187,10 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
   layer("DIMS", 1);
   layer("MEASURE", 5);
   push(0, "ENDTAB");
+  // Text style required for length labels (DXF-only; not used on the map).
+  push(0, "TABLE", 2, "STYLE", 70, 1);
+  push(0, "STYLE", 2, "STANDARD", 70, 0, 40, 0, 41, 1, 50, 0, 71, 0, 42, 1, 3, "txt", 4, "");
+  push(0, "ENDTAB");
   push(0, "ENDSEC");
 
   push(0, "SECTION", 2, "BLOCKS");
@@ -190,14 +206,16 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
     }
   }
 
-  // Dimension ticks once per unique edge (shared borders: count >= 2 → skip)
+  // Dimension ticks + English length numbers once per unique edge
+  // (shared borders: count >= 2 → skip so numbers are not duplicated).
   const span = Math.max(maxX - minX, maxY - minY, 1);
   const dimOffset = Math.max(2, Math.min(8, span * 0.03));
+  const textH = Math.max(0.55, Math.min(2.0, dimOffset * 0.38));
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
 
   for (const e of dimEdges) {
-    if (e.count >= 2) continue; // shared border — no duplicate dim ticks
+    if (e.count >= 2) continue; // shared border — no duplicate dims/numbers
     const a = e.a;
     const b = e.b;
     const dx = b.x - a.x;
@@ -216,6 +234,85 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
     push(0, "LINE", 8, "DIMS", 10, n(a.x), 20, n(a.y), 11, n(a2.x), 21, n(a2.y));
     push(0, "LINE", 8, "DIMS", 10, n(b.x), 20, n(b.y), 11, n(b2.x), 21, n(b2.y));
     push(0, "LINE", 8, "DIMS", 10, n(a2.x), 20, n(a2.y), 11, n(b2.x), 21, n(b2.y));
+
+    // Length number on the dim line (English only — DXF file, not map UI)
+    let rot = (Math.atan2(dy, dx) * 180) / Math.PI;
+    if (rot > 90) rot -= 180;
+    if (rot < -90) rot += 180;
+    const tx = midX + nx * (dimOffset + textH * 0.45);
+    const ty = midY + ny * (dimOffset + textH * 0.45);
+    push(
+      0,
+      "TEXT",
+      8,
+      "DIMS",
+      7,
+      "STANDARD",
+      10,
+      n(tx),
+      20,
+      n(ty),
+      40,
+      n(textH, 3),
+      1,
+      dxfText(formatLenM(e.lengthM)),
+      50,
+      n(rot, 3),
+      72,
+      1,
+      11,
+      n(tx),
+      21,
+      n(ty)
+    );
+  }
+
+  // Parcel numbers at each lot centroid (English digits; multi-land splits "706, 707")
+  const parcelParts = (input.parcelNumber ?? "")
+    .split(/[,،]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (let i = 0; i < ringsXy.length; i++) {
+    const ringXy = ringsXy[i]!;
+    let sx = 0;
+    let sy = 0;
+    for (const p of ringXy) {
+      sx += p.x;
+      sy += p.y;
+    }
+    const label =
+      parcelParts.length === ringsXy.length
+        ? parcelParts[i]!
+        : parcelParts[0] && ringsXy.length === 1
+          ? parcelParts[0]
+          : ringsXy.length > 1
+            ? `P${i + 1}`
+            : parcelParts[0] || "";
+    if (!label) continue;
+    const lx = sx / ringXy.length;
+    const ly = sy / ringXy.length;
+    push(
+      0,
+      "TEXT",
+      8,
+      "PARCEL",
+      7,
+      "STANDARD",
+      10,
+      n(lx),
+      20,
+      n(ly),
+      40,
+      n(textH * 1.35, 3),
+      1,
+      dxfText(label),
+      72,
+      1,
+      11,
+      n(lx),
+      21,
+      n(ly)
+    );
   }
 
   const writePolyline = (layerName: string, points: Pt[], closed: boolean) => {
