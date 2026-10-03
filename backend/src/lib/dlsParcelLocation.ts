@@ -38,7 +38,9 @@ export interface DlsParcelLocationResult {
 export class DlsParcelLocationError extends Error {}
 
 function pad(value: string, width: number): string {
-  const digits = toWesternDigits(value).replace(/\D/g, "");
+  // First contiguous digit group only — prevents "706, 707" becoming "706707".
+  const match = toWesternDigits(value).match(/\d+/);
+  const digits = match?.[0] ?? "";
   if (!digits) throw new DlsParcelLocationError("Missing numeric DLS code");
   return digits.length >= width ? digits : digits.padStart(width, "0");
 }

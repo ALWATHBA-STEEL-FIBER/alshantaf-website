@@ -5,16 +5,15 @@ import { createPortal } from "react-dom";
 import {
   contourBandsForRelief,
   contourSegments,
-  elevRangeInsidePoly,
+  elevRangeInsideAnyPoly,
   elevTintRgb,
   evenSpreadContourLevels,
-  pointInPoly,
+  pointInAnyPoly,
   smoothElevGrid,
 } from "@/lib/elevationContours";
 import {
   formatMeters,
   ringOrientedExtents,
-  ringToLocalEnu,
   toLocalEnu,
 } from "@/lib/mapCoords";
 import {
@@ -166,7 +165,6 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
   },
   ref
 ) {
-  const ring = polygon?.[0];
   const mountRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<SceneBundle | null>(null);
@@ -181,30 +179,42 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
   fullscreenRef.current = fullscreen;
 
   const model = useMemo(() => {
-    if (!ring?.length) return null;
-    const pts = ring.slice();
-    const first = pts[0]!;
-    const last = pts[pts.length - 1]!;
-    if (first[0] === last[0] && first[1] === last[1]) pts.pop();
-    if (pts.length < 3) return null;
+    if (!polygon?.length) return null;
+    const rings: [number, number][][] = [];
+    for (const raw of polygon) {
+      if (!raw?.length) continue;
+      const pts = raw.slice();
+      const first = pts[0]!;
+      const last = pts[pts.length - 1]!;
+      if (first[0] === last[0] && first[1] === last[1]) pts.pop();
+      if (pts.length >= 3) rings.push(pts);
+    }
+    if (!rings.length) return null;
 
-    const origin = ringCentroidLatLng(pts);
-    const enu = ringToLocalEnu(pts);
-    const extents = ringOrientedExtents(pts);
-    const bbox = ringBBox(pts);
+    const allPts = rings.flat();
+    const origin = ringCentroidLatLng(allPts);
+    const enuRings = rings.map((ring) =>
+      ring.map(([lat, lng]) => toLocalEnu(lat, lng, origin.lat, origin.lng))
+    );
+    const primary = rings[0]!;
+    // Oriented extents of the combined footprint (better for adjacent multi-parcel).
+    const extents = ringOrientedExtents(allPts.length >= 3 ? allPts : primary);
+    const bbox = ringBBox(allPts);
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
     let maxY = -Infinity;
-    for (const p of enu) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
+    for (const ring of enuRings) {
+      for (const p of ring) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      }
     }
     const span = Math.max(maxX - minX, maxY - minY, 1);
-    return { pts, enu, origin, extents, span, bbox, centroid: origin };
-  }, [ring]);
+    return { pts: primary, rings, enuRings, origin, extents, span, bbox, centroid: origin };
+  }, [polygon]);
 
   const modelRef = useRef(model);
   modelRef.current = model;
@@ -241,7 +251,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       if (contourPng.length < 4000) throw new Error("contour-failed");
       if (contextPng.length < 2000) throw new Error("context-failed");
       const elev = smoothElevGrid(Float32Array.from(grid.elevations), grid.cols, grid.rows, 3);
-      const { min: elevMinM, max: elevMaxM } = elevRangeInsidePoly(
+      const { min: elevMinM, max: elevMaxM } = elevRangeInsideAnyPoly(
         elev,
         grid.cols,
         grid.rows,
@@ -250,7 +260,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
           const lng = grid.minLng + ((c + 0.5) / grid.cols) * (grid.maxLng - grid.minLng);
           return toLocalEnu(lat, lng, modelNow.origin.lat, modelNow.origin.lng);
         },
-        modelNow.enu.map((p) => ({ x: p.x, y: p.y }))
+        modelNow.enuRings.map((ring) => ring.map((p) => ({ x: p.x, y: p.y })))
       );
 
       await printParcelBlueprint({
@@ -347,16 +357,16 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       const rawElev = Float32Array.from(grid.elevations);
       const elev = smoothElevGrid(rawElev, grid.cols, grid.rows, 3);
       const origin = model.origin;
-      const polyEnu = model.enu.map((p) => ({ x: p.x, y: p.y }));
+      const polyRings = model.enuRings.map((ring) => ring.map((p) => ({ x: p.x, y: p.y })));
       const latAt = (row: number) => grid.maxLat - ((row + 0.5) / grid.rows) * (grid.maxLat - grid.minLat);
       const lngAt = (col: number) => grid.minLng + ((col + 0.5) / grid.cols) * (grid.maxLng - grid.minLng);
       // Elevation range from the land itself (not the padded DEM around it)
-      const { min: zMin, max: zMax } = elevRangeInsidePoly(
+      const { min: zMin, max: zMax } = elevRangeInsideAnyPoly(
         elev,
         grid.cols,
         grid.rows,
         (c, r) => toLocalEnu(latAt(r), lngAt(c), origin.lat, origin.lng),
-        polyEnu
+        polyRings
       );
       const relief = Math.max(0.05, zMax - zMin);
       // Near true vertical scale (1 m ≈ 1 m). Mild boost only on nearly flat parcels.
@@ -432,7 +442,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
           const midEnu = toLocalEnu(midLat, midLng, origin.lat, origin.lng);
           const a = toWorldFrac(x0, y0, level);
           const b = toWorldFrac(x1, y1, level);
-          const inside = pointInPoly(midEnu.x, midEnu.y, polyEnu);
+          const inside = pointInAnyPoly(midEnu.x, midEnu.y, polyRings);
           if (inside) {
             positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
             const len = a.distanceTo(b);
@@ -487,7 +497,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const enu = toLocalEnu(latAt(r), lngAt(c), origin.lat, origin.lng);
-            inside[r * cols + c] = pointInPoly(enu.x, enu.y, polyEnu) ? 1 : 0;
+            inside[r * cols + c] = pointInAnyPoly(enu.x, enu.y, polyRings) ? 1 : 0;
             const e = elev[r * cols + c]!;
             const v = toWorld(c, r, e);
             positions.push(v.x, v.y, v.z);
@@ -544,29 +554,33 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       }
 
       {
-        const outline: number[] = [];
-        for (let i = 0; i <= model.enu.length; i++) {
-          const p = model.enu[i % model.enu.length]!;
-          const [lat, lng] = model.pts[i % model.pts.length]!;
-          const col = Math.max(
-            0,
-            Math.min(grid.cols - 1, Math.round(((lng - grid.minLng) / (grid.maxLng - grid.minLng)) * (grid.cols - 1)))
-          );
-          const row = Math.max(
-            0,
-            Math.min(grid.rows - 1, Math.round(((grid.maxLat - lat) / (grid.maxLat - grid.minLat)) * (grid.rows - 1)))
-          );
-          const e = elev[row * grid.cols + col]!;
-          outline.push(p.x, (e - zMin) * exag + 0.45, -p.y);
-        }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.Float32BufferAttribute(outline, 3));
-        disposables.push(geo);
         const mat = new THREE.LineBasicMaterial({ color: 0xe8c98a, linewidth: 2 });
         disposables.push(mat);
-        const line = new THREE.Line(geo, mat);
-        line.renderOrder = 3;
-        scene.add(line);
+        for (let ri = 0; ri < model.enuRings.length; ri++) {
+          const enuRing = model.enuRings[ri]!;
+          const latLngRing = model.rings[ri]!;
+          const outline: number[] = [];
+          for (let i = 0; i <= enuRing.length; i++) {
+            const p = enuRing[i % enuRing.length]!;
+            const [lat, lng] = latLngRing[i % latLngRing.length]!;
+            const col = Math.max(
+              0,
+              Math.min(grid.cols - 1, Math.round(((lng - grid.minLng) / (grid.maxLng - grid.minLng)) * (grid.cols - 1)))
+            );
+            const row = Math.max(
+              0,
+              Math.min(grid.rows - 1, Math.round(((grid.maxLat - lat) / (grid.maxLat - grid.minLat)) * (grid.rows - 1)))
+            );
+            const e = elev[row * grid.cols + col]!;
+            outline.push(p.x, (e - zMin) * exag + 0.45, -p.y);
+          }
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute("position", new THREE.Float32BufferAttribute(outline, 3));
+          disposables.push(geo);
+          const line = new THREE.Line(geo, mat);
+          line.renderOrder = 3;
+          scene.add(line);
+        }
       }
 
       const orbit = new OrbitControls(camera, renderer.domElement);

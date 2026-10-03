@@ -12,6 +12,8 @@ import { toWesternDigits } from "@/lib/arabicDigits";
 import { adminMedianEstimate } from "@/lib/adminPricing";
 import { parseCoords, coordsToString, formatDlsArea } from "@/lib/mapCoords";
 import { loadDlsLocations, codesForSelection } from "@/lib/dlsLocations";
+import { fetchMergedParcelLocation } from "@/lib/fetchParcelLocations";
+import { parseParcelNumbers } from "@/lib/parcelNumbers";
 import { CheckIcon } from "@/components/icons";
 import { useJourney } from "@/lib/journey/JourneyProvider";
 import type { IndustryType } from "@/lib/types";
@@ -186,6 +188,7 @@ export function LandCheckForm() {
       setAreaSqm(null);
       setPerimeterM(null);
 
+      const primaryParcel = parseParcelNumbers(parcelNo)[0] || parcelNo;
       const valuePromise = api
         .dlsAdministrativeValuePublic({
           governorate,
@@ -193,7 +196,7 @@ export function LandCheckForm() {
           village,
           basin,
           neighborhood,
-          parcelNumber: parcelNo,
+          parcelNumber: primaryParcel,
         })
         .then((result) => {
           if (!cancelled) {
@@ -219,7 +222,9 @@ export function LandCheckForm() {
             }
             return;
           }
-          const location = await api.dlsParcelLocationPublic({ ...codes, parcelNumber: parcelNo });
+          const location = await fetchMergedParcelLocation(codes, parcelNo, (q) =>
+            api.dlsParcelLocationPublic(q)
+          );
           if (cancelled) return;
           setParcelPolygon(location.rings);
           setDlsKey(location.dlsKey);

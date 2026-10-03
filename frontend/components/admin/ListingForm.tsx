@@ -23,6 +23,8 @@ import {
 import { toWesternDigits } from "@/lib/arabicDigits";
 import { parseAreaSqm } from "@/lib/adminPricing";
 import { loadDlsLocations, codesForSelection } from "@/lib/dlsLocations";
+import { fetchMergedParcelLocation } from "@/lib/fetchParcelLocations";
+import { parseParcelNumbers } from "@/lib/parcelNumbers";
 
 interface MediaItem {
   url: string;
@@ -125,8 +127,9 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
         const data = await loadDlsLocations();
         const codes = codesForSelection(data, governorate, directorate, village, basin, neighborhood);
         if (!codes || cancelled) return;
+        const primaryParcel = parseParcelNumbers(parcelNo)[0] || parcelNo;
         const [location, adminValue] = await Promise.all([
-          api.dlsParcelLocation({ ...codes, parcelNumber: parcelNo }),
+          fetchMergedParcelLocation(codes, parcelNo, (q) => api.dlsParcelLocation(q)),
           api
             .dlsAdministrativeValue({
               governorate,
@@ -134,7 +137,7 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
               village,
               basin,
               neighborhood,
-              parcelNumber: parcelNo,
+              parcelNumber: primaryParcel,
             })
             .catch(() => null),
         ]);

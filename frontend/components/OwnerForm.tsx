@@ -17,6 +17,8 @@ import { LocationInput } from "@/components/LocationInput";
 import { FilePickerButton } from "@/components/FilePickerButton";
 import { parseCoords, coordsToString, formatDlsArea } from "@/lib/mapCoords";
 import { loadDlsLocations, codesForSelection } from "@/lib/dlsLocations";
+import { fetchMergedParcelLocation } from "@/lib/fetchParcelLocations";
+import { parseParcelNumbers } from "@/lib/parcelNumbers";
 import type { IndustryType } from "@/lib/types";
 
 const ACTIVITY_KEYS = ["food", "pharma", "packaging", "logistics", "plastic", "wood", "metal", "stone", "blocks", "other"] as const;
@@ -119,6 +121,7 @@ export function OwnerForm() {
       setDlsKey(null);
       setAreaSqm(null);
 
+      const primaryParcel = parseParcelNumbers(parcel)[0] || parcel;
       const valuePromise = api
         .dlsAdministrativeValuePublic({
           governorate,
@@ -126,7 +129,7 @@ export function OwnerForm() {
           village,
           basin,
           neighborhood,
-          parcelNumber: parcel,
+          parcelNumber: primaryParcel,
         })
         .then((result) => {
           if (!cancelled) {
@@ -157,10 +160,9 @@ export function OwnerForm() {
             }
             return;
           }
-          const location = await api.dlsParcelLocationPublic({
-            ...codes,
-            parcelNumber: parcel,
-          });
+          const location = await fetchMergedParcelLocation(codes, parcel, (q) =>
+            api.dlsParcelLocationPublic(q)
+          );
           if (cancelled) return;
           setParcelPolygon(location.rings);
           setDlsKey(location.dlsKey);

@@ -7,8 +7,9 @@ import { useSettings } from "@/lib/SettingsProvider";
 import { offerWhatsappLink } from "@/lib/whatsapp";
 import { api } from "@/lib/api";
 import { buildSrcSet } from "@/lib/imageSrcSet";
-import { coordsToString, parseCoords } from "@/lib/mapCoords";
+import { coordsToString, formatDlsArea, parseCoords } from "@/lib/mapCoords";
 import { codesForSelection, loadDlsLocations } from "@/lib/dlsLocations";
+import { fetchMergedParcelLocation } from "@/lib/fetchParcelLocations";
 import {
   adminMedianEstimate,
   formatAreaSqm,
@@ -83,11 +84,13 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           listing.basin!,
           listing.neighborhood!
         );
-        if (!codes || cancelled) return;
-        const location = await api.dlsParcelLocationPublic({
-          ...codes,
-          parcelNumber: listing.parcel!.trim(),
-        });
+        if (!codes || cancelled) {
+          if (!cancelled) setTopoReady(true);
+          return;
+        }
+        const location = await fetchMergedParcelLocation(codes, listing.parcel!.trim(), (q) =>
+          api.dlsParcelLocationPublic(q)
+        );
         if (cancelled) return;
         setParcelPolygon(location.rings);
         setPerimeterM(location.perimeterM);
@@ -149,7 +152,10 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   const title = localizeListingTitle(listing.title, lang);
   const areaLabel = listing.area ? localizePlaceName(listing.area, lang) : "";
   const propertyType = localizePropertyType(listing.propertyType, lang, t.offers.propertyTypeFallback);
-  const sizeLabel = localizeSizeLabel(listing.size, lang);
+  const sizeLabel = localizeSizeLabel(
+    areaSqm != null && areaSqm > 0 ? formatDlsArea(areaSqm, lang) : listing.size,
+    lang
+  );
   const basinLabel = listing.basin ? localizePlaceName(listing.basin, lang) : "";
   const presenter =
     listing.showPresenter && (listing.presenterRole || listing.presenterName)

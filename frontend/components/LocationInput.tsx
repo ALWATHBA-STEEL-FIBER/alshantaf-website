@@ -634,9 +634,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   // Sync pin + DLS polygon overlay (native Leaflet path + label canvas).
   // Fit bounds only when the ring geometry actually changes — not on every render/zoom.
   const polygonKey = useMemo(() => {
-    const ring = polygon?.[0];
-    if (!ring?.length) return "";
-    return ring.map(([lat, lng]) => `${lat.toFixed(7)},${lng.toFixed(7)}`).join("|");
+    if (!polygon?.length) return "";
+    return polygon
+      .map((ring) => ring.map(([lat, lng]) => `${lat.toFixed(7)},${lng.toFixed(7)}`).join("|"))
+      .join("||");
   }, [polygon]);
 
   useEffect(() => {
