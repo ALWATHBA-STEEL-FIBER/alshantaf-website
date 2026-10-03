@@ -23,6 +23,8 @@ export type MeasureToolbarLabels = {
   measureLineColor: string;
   measureHintDistance: string;
   measureHintArea: string;
+  measureExportCad: string;
+  measureExportCadHint: string;
   dimensionsArea: string;
 };
 
@@ -47,6 +49,9 @@ type Props = {
   onClear: () => void;
   onFinish: () => void;
   onNewLine: () => void;
+  /** Download AutoCAD DXF (parcel + dims + measure lines). */
+  onExportCad?: () => void;
+  canExportCad?: boolean;
 };
 
 function IconRuler({ className = "w-4 h-4" }: { className?: string }) {
@@ -144,6 +149,21 @@ function IconPlus({ className = "w-4 h-4" }: { className?: string }) {
   );
 }
 
+function IconCad({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 6.5h16v11H4z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <path d="M8 10h8M8 14h5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      <path d="M4 9h3v6H4M17 9h3v6h-3" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /**
  * Architecture measure chrome — multi-thread distance/area with per-line colors.
  */
@@ -168,6 +188,8 @@ export function MeasureToolbar({
   onClear,
   onFinish,
   onNewLine,
+  onExportCad,
+  canExportCad = false,
 }: Props) {
   const dark = variant === "dark";
   const measuring = mode !== "off";
@@ -378,6 +400,23 @@ export function MeasureToolbar({
       <p className={`text-[11px] leading-snug px-0.5 ${hintCls}`}>
         {mode === "distance" ? lp.measureHintDistance : lp.measureHintArea}
       </p>
+
+      {onExportCad && (
+        <div className="flex flex-col gap-1 pt-0.5">
+          <button
+            type="button"
+            onClick={onExportCad}
+            disabled={!canExportCad}
+            className={`inline-flex items-center justify-center gap-2 min-h-11 w-full px-3 rounded-xl border text-[12px] font-bold transition-all disabled:opacity-40 ${btnAccent}`}
+            aria-label={lp.measureExportCad}
+            title={lp.measureExportCadHint}
+          >
+            <IconCad className="w-[18px] h-[18px] shrink-0" />
+            <span>{lp.measureExportCad}</span>
+          </button>
+          <p className={`text-[10px] leading-snug px-0.5 ${muted}`}>{lp.measureExportCadHint}</p>
+        </div>
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
 } from "@/lib/measureDraw";
 import { MeasureToolbar } from "@/components/MeasureToolbar";
 import { MeasureThreadsOverlay } from "@/components/MeasureThreadsOverlay";
+import { downloadParcelCadDxf } from "@/lib/parcelCadExport";
 import type { ParcelRing } from "@/components/LocationInput";
 import "leaflet/dist/leaflet.css";
 
@@ -50,6 +51,8 @@ type Labels = {
   measureLineColor: string;
   measureHintDistance: string;
   measureHintArea: string;
+  measureExportCad: string;
+  measureExportCadHint: string;
 };
 
 type Props = {
@@ -139,6 +142,48 @@ export function MapFullscreenPortal({
   );
   const measuring = measureMode !== "off";
   const dimsOnCanvas = Boolean(drawDimensions && showDimensions && !measuring);
+
+  const measureLabels = {
+    measureEnter: lp.measureEnter,
+    measureExit: lp.measureExit,
+    measureLabel: lp.measureLabel,
+    measureDistance: lp.measureDistance,
+    measureArea: lp.measureArea,
+    measureTotal: lp.measureTotal,
+    measureClear: lp.measureClear,
+    measureFinish: lp.measureFinish,
+    measureUndo: lp.measureUndo,
+    measureNewLine: lp.measureNewLine,
+    measureThreads: lp.measureThreads,
+    measureSnapOn: lp.measureSnapOn,
+    measureEdgeSnap: lp.measureEdgeSnap,
+    measureLineSnap: lp.measureLineSnap,
+    measureFixed1m: lp.measureFixed1m,
+    measureFixed5m: lp.measureFixed5m,
+    measureLineColor: lp.measureLineColor,
+    measureHintDistance: lp.measureHintDistance,
+    measureHintArea: lp.measureHintArea,
+    measureExportCad: lp.measureExportCad,
+    measureExportCadHint: lp.measureExportCadHint,
+    dimensionsArea: lp.dimensionsArea,
+  };
+
+  function exportArchitectureCad() {
+    const ring = polygon?.[0];
+    if (!ring?.length) return;
+    try {
+      downloadParcelCadDxf({
+        ring,
+        lang,
+        parcelNumber,
+        areaSqm,
+        perimeterM,
+        measure: measureSnap,
+      });
+    } catch {
+      // ignore
+    }
+  }
 
   // Body scroll lock + Escape; block iOS rubber-band scroll outside the map pane
   useEffect(() => {
@@ -378,29 +423,6 @@ export function MapFullscreenPortal({
   const hasInfo =
     Boolean(areaLabel || areaSqm != null || (perimeterM != null && perimeterM > 0) || extents);
 
-  const measureLabels = {
-    measureEnter: lp.measureEnter,
-    measureExit: lp.measureExit,
-    measureLabel: lp.measureLabel,
-    measureDistance: lp.measureDistance,
-    measureArea: lp.measureArea,
-    measureTotal: lp.measureTotal,
-    measureClear: lp.measureClear,
-    measureFinish: lp.measureFinish,
-    measureUndo: lp.measureUndo,
-    measureNewLine: lp.measureNewLine,
-    measureThreads: lp.measureThreads,
-    measureSnapOn: lp.measureSnapOn,
-    measureEdgeSnap: lp.measureEdgeSnap,
-    measureLineSnap: lp.measureLineSnap,
-    measureFixed1m: lp.measureFixed1m,
-    measureFixed5m: lp.measureFixed5m,
-    measureLineColor: lp.measureLineColor,
-    measureHintDistance: lp.measureHintDistance,
-    measureHintArea: lp.measureHintArea,
-    dimensionsArea: lp.dimensionsArea,
-  };
-
   return createPortal(
     <div
       className="map-fs-portal fixed inset-0 z-[10000] flex flex-col gap-2 bg-[#0a1f1c] p-2 sm:p-3 overflow-hidden"
@@ -470,6 +492,8 @@ export function MapFullscreenPortal({
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
             onNewLine={() => measureToolRef.current?.newThread()}
+            onExportCad={exportArchitectureCad}
+            canExportCad={Boolean(polygon?.[0]?.length)}
           />
         )}
         {measuring && (
@@ -520,6 +544,8 @@ export function MapFullscreenPortal({
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
             onNewLine={() => measureToolRef.current?.newThread()}
+            onExportCad={exportArchitectureCad}
+            canExportCad={Boolean(polygon?.[0]?.length)}
           />
         </div>
       )}

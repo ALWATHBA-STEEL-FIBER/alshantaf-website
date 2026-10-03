@@ -27,6 +27,7 @@ import {
 } from "@/lib/measureDraw";
 import { MeasureToolbar } from "@/components/MeasureToolbar";
 import { MeasureThreadsOverlay } from "@/components/MeasureThreadsOverlay";
+import { downloadParcelCadDxf } from "@/lib/parcelCadExport";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
@@ -464,8 +465,27 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     measureLineColor: lp.measureLineColor,
     measureHintDistance: lp.measureHintDistance,
     measureHintArea: lp.measureHintArea,
+    measureExportCad: lp.measureExportCad,
+    measureExportCadHint: lp.measureExportCadHint,
     dimensionsArea: lp.dimensionsArea,
   };
+
+  function exportArchitectureCad() {
+    const ring = polygon?.[0];
+    if (!ring?.length) return;
+    try {
+      downloadParcelCadDxf({
+        ring,
+        lang,
+        parcelNumber: blueprint?.parcel,
+        areaSqm,
+        perimeterM,
+        measure: measureSnap,
+      });
+    } catch {
+      // ignore empty ring
+    }
+  }
 
   // Attach measure tool once the map is ready.
   useEffect(() => {
@@ -956,6 +976,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               onClear={() => measureToolRef.current?.clear()}
               onFinish={() => measureToolRef.current?.finish()}
               onNewLine={() => measureToolRef.current?.newThread()}
+              onExportCad={exportArchitectureCad}
+              canExportCad={Boolean(polygon?.[0]?.length)}
             />
           )}
           {measuring && (
@@ -1006,6 +1028,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             onClear={() => measureToolRef.current?.clear()}
             onFinish={() => measureToolRef.current?.finish()}
             onNewLine={() => measureToolRef.current?.newThread()}
+            onExportCad={exportArchitectureCad}
+            canExportCad={Boolean(polygon?.[0]?.length)}
           />
         )}
 
@@ -1129,6 +1153,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           measureLineColor: lp.measureLineColor,
           measureHintDistance: lp.measureHintDistance,
           measureHintArea: lp.measureHintArea,
+          measureExportCad: lp.measureExportCad,
+          measureExportCadHint: lp.measureExportCadHint,
         }}
       />
 
