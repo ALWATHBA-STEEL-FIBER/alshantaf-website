@@ -29,6 +29,7 @@ import { LocationInput } from "@/components/LocationInput";
 import { DlsPricingHint } from "@/components/DlsPricingHint";
 import { RegulationGuide } from "@/components/RegulationGuide";
 import { useAnalyticsAllowed } from "@/components/CookieConsent";
+import { ShareIcon } from "@/components/icons";
 
 export function OfferDetail({ listing }: { listing: Listing }) {
   const { t, lang } = useLanguage();
@@ -39,6 +40,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   const [areaSqm, setAreaSqm] = useState<number | null>(() => parseAreaSqm(listing.size));
   const [activePhoto, setActivePhoto] = useState(0);
   const [photoFsOpen, setPhotoFsOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const expectsParcel = Boolean(
     listing.governorate &&
       listing.directorate &&
@@ -230,6 +232,26 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     }
     const thumb = thumbRailRef.current?.children[index] as HTMLElement | undefined;
     thumb?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }
+
+  async function shareOffer() {
+    const url = window.location.href;
+    const shareData = { title, text: title, url };
+    try {
+      if (typeof navigator.share === "function") {
+        await navigator.share(shareData);
+        return;
+      }
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 2000);
+    } catch {
+      /* ignore — no clipboard permission */
+    }
   }
 
   function onStageScroll() {
@@ -521,6 +543,14 @@ export function OfferDetail({ listing }: { listing: Listing }) {
             >
               {t.offers.whatsapp}
             </a>
+            <button
+              type="button"
+              onClick={() => void shareOffer()}
+              className="mt-3 flex h-12 w-full rounded-full border border-line bg-white text-green font-bold items-center justify-center gap-2 hover:bg-surface-2 transition-colors"
+            >
+              <ShareIcon className="w-4 h-4" />
+              {shareCopied ? t.offers.shareCopied : t.offers.share}
+            </button>
           </div>
 
           <RegulationGuide

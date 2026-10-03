@@ -203,6 +203,17 @@ export function MessageIcon({ className = "w-4 h-4" }: { className?: string }) {
   );
 }
 
+export function ShareIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <circle cx="14.5" cy="4.5" r="2" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="14.5" cy="15.5" r="2" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="5.5" cy="10" r="2" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M7.3 9.1 12.7 5.9M7.3 10.9l5.4 3.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function HardDriveIcon({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
