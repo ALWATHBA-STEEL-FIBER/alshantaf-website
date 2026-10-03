@@ -1,16 +1,14 @@
 import type { Coords } from "@/lib/mapCoords";
 import {
   ringAreaSqm,
+  ringEdgeDimensions,
   ringPerimeterMeters,
   toLocalEnu,
 } from "@/lib/mapCoords";
 import type { MeasureSnapshot, MeasureThread } from "@/lib/measureDraw";
 
 export type ParcelCadExportInput = {
-  /** Single-parcel ring (legacy). Prefer `rings` for multi-land. */
-  ring?: [number, number][];
-  /** One or more cadastral rings ([lat,lng][]). Shared borders are drawn once. */
-  rings?: [number, number][][];
+  ring: [number, number][];
   parcelNumber?: string | null;
   areaSqm?: number | null;
   perimeterM?: number | null;
@@ -21,8 +19,6 @@ export type ParcelCadExportInput = {
 type Pt = { x: number; y: number };
 
 const SITE = "https://alshantaf.com";
-/** Snap tolerance (m) for matching shared multi-parcel borders. */
-const EDGE_SNAP_M = 0.08;
 
 function n(v: number, digits = 4) {
   return Number.isFinite(v) ? v.toFixed(digits) : "0";
@@ -37,11 +33,6 @@ function uniqueRing(ring: [number, number][]): [number, number][] {
   return pts;
 }
 
-function collectRings(input: ParcelCadExportInput): [number, number][][] {
-  const raw = input.rings?.length ? input.rings : input.ring?.length ? [input.ring] : [];
-  return raw.map(uniqueRing).filter((r) => r.length >= 2);
-}
-
 function ringCentroidLatLng(pts: [number, number][]): Coords {
   let lat = 0;
   let lng = 0;
@@ -52,78 +43,38 @@ function ringCentroidLatLng(pts: [number, number][]): Coords {
   return { lat: lat / pts.length, lng: lng / pts.length };
 }
 
-function snapKey(x: number, y: number): string {
-  return `${Math.round(x / EDGE_SNAP_M)},${Math.round(y / EDGE_SNAP_M)}`;
-}
-
-function edgeKey(a: Pt, b: Pt): string {
-  const ka = snapKey(a.x, a.y);
-  const kb = snapKey(b.x, b.y);
-  return ka <= kb ? `${ka}|${kb}` : `${kb}|${ka}`;
-}
-
-type UniqueEdge = { a: Pt; b: Pt; count: number; lengthM: number };
-
-/**
- * Collect ring edges and collapse shared multi-parcel borders to a single segment.
- * `count === 1` → exterior edge; `count >= 2` → shared internal border.
- */
-function uniqueEdgesFromRings(ringsXy: Pt[][]): UniqueEdge[] {
-  const map = new Map<string, UniqueEdge>();
-  for (const ring of ringsXy) {
-    if (ring.length < 2) continue;
-    const nPts = ring.length;
-    for (let i = 0; i < nPts; i++) {
-      const a = ring[i]!;
-      const b = ring[(i + 1) % nPts]!;
-      const lengthM = Math.hypot(b.x - a.x, b.y - a.y);
-      if (lengthM < EDGE_SNAP_M * 0.5) continue;
-      const key = edgeKey(a, b);
-      const prev = map.get(key);
-      if (prev) {
-        prev.count += 1;
-      } else {
-        map.set(key, { a, b, count: 1, lengthM });
-      }
-    }
-  }
-  return [...map.values()];
-}
-
 /**
  * Minimal AutoCAD-compatible ASCII DXF (AC1015 / R2000).
  * Geometry only (English layer names) — no TEXT entities.
- * Multi-land shared borders are emitted once (not doubled).
+ * File comments carry alshantaf.com metadata.
+ * True binary DWG is proprietary; AutoCAD / Civil 3D open this DXF directly.
  */
 export function buildParcelCadDxf(input: ParcelCadExportInput): string {
-  const rings = collectRings(input);
-  if (!rings.length) throw new Error("parcel-ring");
+  const pts = uniqueRing(input.ring);
+  if (pts.length < 2) throw new Error("parcel-ring");
 
-  const allPts = rings.flat();
-  const origin = ringCentroidLatLng(allPts);
+  const origin = ringCentroidLatLng(pts);
   const toXy = (c: Coords): Pt => {
     const p = toLocalEnu(c.lat, c.lng, origin.lat, origin.lng);
     return { x: p.x, y: p.y };
   };
-  const ringsXy = rings.map((ring) => ring.map(([lat, lng]) => toXy({ lat, lng })));
-  const edges = uniqueEdgesFromRings(ringsXy);
-  if (!edges.length) throw new Error("parcel-ring");
+  const ringXy = pts.map(([lat, lng]) => toXy({ lat, lng }));
 
   const area =
-    input.areaSqm != null && input.areaSqm > 0
-      ? input.areaSqm
-      : rings.reduce((sum, ring) => sum + ringAreaSqm(ring), 0);
-  // Exterior-only perimeter (shared borders counted once as internal → excluded)
-  const exteriorPeri = edges.filter((e) => e.count === 1).reduce((s, e) => s + e.lengthM, 0);
+    input.areaSqm != null && input.areaSqm > 0 ? input.areaSqm : ringAreaSqm(input.ring);
   const peri =
-    input.perimeterM != null && input.perimeterM > 0 ? input.perimeterM : exteriorPeri;
+    input.perimeterM != null && input.perimeterM > 0
+      ? input.perimeterM
+      : ringPerimeterMeters(input.ring);
 
+  const edges = ringEdgeDimensions(input.ring);
   const lines: string[] = [];
   const push = (...pairs: Array<string | number>) => {
     for (let i = 0; i < pairs.length; i += 2) {
       lines.push(String(pairs[i]), String(pairs[i + 1]));
     }
   };
+  /** DXF comment (group 999) — metadata only, not a drawing entity. */
   const comment = (text: string) => {
     lines.push("999", text);
   };
@@ -132,11 +83,19 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
   comment(`${SITE} — parcel CAD export`);
   comment(`Units: metres | X=East Y=North | local origin at parcel centroid`);
   if (parcelBit) comment(`Parcel: ${parcelBit}`);
-  if (rings.length > 1) comment(`Rings: ${rings.length} (shared borders deduplicated)`);
   comment(`Area_m2: ${n(area, 3)} | Perimeter_m: ${n(peri, 3)}`);
   comment(`WGS84_centroid: ${origin.lat.toFixed(6)}, ${origin.lng.toFixed(6)}`);
   comment(`Advisory geometry — confirm with an official survey before construction`);
 
+  // HEADER
+  push(0, "SECTION", 2, "HEADER");
+  push(9, "$ACADVER", 1, "AC1015");
+  push(9, "$INSUNITS", 70, 6); // metres
+  push(9, "$MEASUREMENT", 70, 1); // metric
+  push(9, "$LUNITS", 70, 2);
+  push(9, "$LUPREC", 70, 3);
+  push(9, "$AUNITS", 70, 0);
+  push(9, "$AUPREC", 70, 2);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -147,34 +106,22 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
     maxX = Math.max(maxX, p.x);
     maxY = Math.max(maxY, p.y);
   };
-  for (const e of edges) {
-    grow(e.a);
-    grow(e.b);
-  }
-
-  push(0, "SECTION", 2, "HEADER");
-  push(9, "$ACADVER", 1, "AC1015");
-  push(9, "$INSUNITS", 70, 6);
-  push(9, "$MEASUREMENT", 70, 1);
-  push(9, "$LUNITS", 70, 2);
-  push(9, "$LUPREC", 70, 3);
-  push(9, "$AUNITS", 70, 0);
-  push(9, "$AUPREC", 70, 2);
+  ringXy.forEach(grow);
   push(9, "$EXTMIN", 10, n(minX - 5), 20, n(minY - 5), 30, 0);
   push(9, "$EXTMAX", 10, n(maxX + 5), 20, n(maxY + 5), 30, 0);
   push(0, "ENDSEC");
 
+  // TABLES — layers (geometry only; no TEXT layer)
   push(0, "SECTION", 2, "TABLES");
   push(0, "TABLE", 2, "LTYPE", 70, 1);
   push(0, "LTYPE", 2, "CONTINUOUS", 70, 0, 3, "Solid line", 72, 65, 73, 0, 40, 0);
   push(0, "ENDTAB");
-  push(0, "TABLE", 2, "LAYER", 70, 5);
+  push(0, "TABLE", 2, "LAYER", 70, 4);
   const layer = (name: string, color: number) => {
     push(0, "LAYER", 2, name, 70, 0, 62, color, 6, "CONTINUOUS");
   };
   layer("0", 7);
-  layer("PARCEL", 3); // green — exterior + unique edges
-  layer("SHARED", 8); // dark grey — internal shared borders (once)
+  layer("PARCEL", 3); // green
   layer("DIMS", 1); // red
   layer("MEASURE", 5); // blue
   push(0, "ENDTAB");
@@ -185,22 +132,20 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
 
   push(0, "SECTION", 2, "ENTITIES");
 
-  // Unique edge segments — shared multi-land borders appear once
-  for (const e of edges) {
-    const layerName = e.count >= 2 ? "SHARED" : "PARCEL";
-    push(0, "LINE", 8, layerName, 10, n(e.a.x), 20, n(e.a.y), 11, n(e.b.x), 21, n(e.b.y));
+  // Parcel outline
+  push(0, "LWPOLYLINE", 8, "PARCEL", 90, ringXy.length, 70, 1, 43, 0);
+  for (const p of ringXy) {
+    push(10, n(p.x), 20, n(p.y));
   }
 
-  // Dimension ticks only on exterior edges (not shared internals)
-  const exterior = edges.filter((e) => e.count === 1);
-  const span = Math.max(maxX - minX, maxY - minY, 1);
-  const dimOffset = Math.max(2, Math.min(8, span * 0.03));
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
+  // Edge dimension geometry only (extension ticks + dim line — no labels)
+  const dimOffset = Math.max(2, Math.min(8, (maxX - minX + maxY - minY) * 0.03));
 
-  for (const e of exterior) {
-    const a = e.a;
-    const b = e.b;
+  for (const edge of edges) {
+    const a = toXy(edge.start);
+    const b = toXy(edge.end);
+    grow(a);
+    grow(b);
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const len = Math.hypot(dx, dy) || 1;
@@ -208,8 +153,7 @@ export function buildParcelCadDxf(input: ParcelCadExportInput): string {
     let ny = dx / len;
     const midX = (a.x + b.x) / 2;
     const midY = (a.y + b.y) / 2;
-    // Push dimension outward from the overall footprint center
-    if ((midX - cx) * nx + (midY - cy) * ny < 0) {
+    if (midX * nx + midY * ny < 0) {
       nx = -nx;
       ny = -ny;
     }

@@ -471,11 +471,11 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   };
 
   function exportArchitectureCad() {
-    const rings = (polygon ?? []).filter((r) => r?.length >= 2);
-    if (!rings.length) return;
+    const ring = polygon?.[0];
+    if (!ring?.length) return;
     try {
       downloadParcelCadDxf({
-        rings,
+        ring,
         parcelNumber: blueprint?.parcel,
         areaSqm,
         perimeterM,
