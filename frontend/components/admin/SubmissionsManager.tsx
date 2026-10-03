@@ -17,7 +17,7 @@ const STATUS_STYLE: Record<SubmissionStatus, string> = {
   rejected: "bg-red-50 text-red-600",
 };
 
-type Action = "needs_info" | "rejected";
+type Action = "needs_info" | "rejected" | "delete";
 type Tab = "all" | SubmissionStatus;
 
 export function SubmissionsManager() {
@@ -226,19 +226,37 @@ export function SubmissionsManager() {
                   {isBusy(s.id, "needs_info") && <Spinner className="w-3.5 h-3.5" />}
                   {t.admin.needsInfo}
                 </button>
-                <button
-                  onClick={() =>
-                    runAction(s.id, "rejected", t.admin.submissionRejected, () =>
-                      api.updateSubmission(s.id, { status: "rejected", reviewer: "Alshantaf Admin" })
-                    )
-                  }
-                  disabled={rowBusy(s.id)}
-                  type="button"
-                  className="h-9 px-3 rounded-lg bg-red-50 text-red-600 text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
-                >
-                  {isBusy(s.id, "rejected") && <Spinner className="w-3.5 h-3.5" />}
-                  {t.admin.reject}
-                </button>
+                {s.status !== "rejected" && (
+                  <button
+                    onClick={() =>
+                      runAction(s.id, "rejected", t.admin.submissionRejected, () =>
+                        api.updateSubmission(s.id, { status: "rejected", reviewer: "Alshantaf Admin" })
+                      )
+                    }
+                    disabled={rowBusy(s.id)}
+                    type="button"
+                    className="h-9 px-3 rounded-lg bg-red-50 text-red-600 text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {isBusy(s.id, "rejected") && <Spinner className="w-3.5 h-3.5" />}
+                    {t.admin.reject}
+                  </button>
+                )}
+                {s.status === "rejected" && (
+                  <button
+                    onClick={() => {
+                      if (!confirm(t.admin.deleteRejectedConfirm)) return;
+                      void runAction(s.id, "delete", t.admin.submissionDeleted, () =>
+                        api.deleteSubmission(s.id)
+                      );
+                    }}
+                    disabled={rowBusy(s.id)}
+                    type="button"
+                    className="h-9 px-3 rounded-lg bg-red-600 text-white text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {isBusy(s.id, "delete") && <Spinner className="w-3.5 h-3.5" />}
+                    {t.admin.deleteRejectedSubmission}
+                  </button>
+                )}
               </div>
             </article>
           ))}

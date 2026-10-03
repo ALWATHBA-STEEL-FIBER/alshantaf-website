@@ -1,10 +1,12 @@
 import { Router } from "express";
+import path from "node:path";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { requireAdmin, requirePermission } from "../middleware/auth";
 import { nextListingNo } from "../lib/listingNo";
 import { nextOwnerAccessCode } from "../lib/ownerAccess";
 import { notifyListingOwner, smsPublished } from "../lib/listingNotify";
+import { deleteUploadedFiles } from "../lib/uploadSecurity";
 import { audit } from "../lib/audit";
 import { asyncHandler } from "../lib/asyncHandler";
 import { INDUSTRY_TYPES, type IndustryTypeKey } from "../lib/industryTypes";
@@ -13,6 +15,8 @@ import { westernDigitsString } from "../lib/arabicDigits";
 export const adminSubmissionsRouter = Router();
 adminSubmissionsRouter.use(requireAdmin);
 adminSubmissionsRouter.use(requirePermission("submissions"));
+
+const UPLOAD_DIR = path.resolve(__dirname, "../../uploads");
 
 const listSchema = z.object({
   status: z.string().optional(),
@@ -74,6 +78,40 @@ adminSubmissionsRouter.patch(
       ip: req.ip,
     });
     res.json(submission);
+  })
+);
+
+adminSubmissionsRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const existing = await prisma.submission.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (existing.status !== "rejected") {
+      res.status(409).json({ error: "Only rejected submissions can be permanently deleted" });
+      return;
+    }
+
+    await prisma.submission.delete({ where: { id: existing.id } });
+    await deleteUploadedFiles([...existing.images, existing.video, existing.document], UPLOAD_DIR);
+    await audit({
+      actorEmail: req.session!.email,
+      action: "submission.delete",
+      targetType: "submission",
+      targetId: existing.id,
+      metadata: {
+        serialNo: existing.serialNo,
+        trackingCode: existing.trackingCode,
+        applicant: existing.applicant,
+        village: existing.village,
+        parcel: existing.parcel,
+        status: existing.status,
+      },
+      ip: req.ip,
+    });
+    res.status(204).end();
   })
 );
 

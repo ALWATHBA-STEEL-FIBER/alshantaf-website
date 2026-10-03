@@ -1441,6 +1441,9 @@ export const dictionary = {
       submissionSearchPlaceholder: "ابحث بالاسم أو رقم الطلب أو رمز التتبع...",
       requestedInfoFrom: "تم طلب معلومات إضافية من",
       submissionRejected: "تم رفض الطلب",
+      deleteRejectedSubmission: "حذف نهائي",
+      deleteRejectedConfirm: "حذف هذا الطلب المرفوض وملفاته نهائيًا؟ لا يمكن التراجع.",
+      submissionDeleted: "تم حذف الطلب نهائيًا",
       location: {
         link: "رابط",
         coordinates: "إحداثيات",
@@ -2895,6 +2898,9 @@ export const dictionary = {
       submissionSearchPlaceholder: "Search by name, reference number, or tracking code...",
       requestedInfoFrom: "Requested more info from",
       submissionRejected: "Submission rejected",
+      deleteRejectedSubmission: "Delete forever",
+      deleteRejectedConfirm: "Permanently delete this rejected submission and its files? This cannot be undone.",
+      submissionDeleted: "Submission permanently deleted",
       location: {
         link: "Link",
         coordinates: "Coordinates",

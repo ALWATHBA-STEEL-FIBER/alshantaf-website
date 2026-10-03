@@ -212,6 +212,7 @@ export const api = {
   adminSubmissions: (query?: string) => clientFetch<Submission[]>(`/admin/submissions${query ? `?${query}` : ""}`),
   updateSubmission: (id: string, data: Record<string, unknown>) =>
     clientFetch<Submission>(`/admin/submissions/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteSubmission: (id: string) => clientFetch<void>(`/admin/submissions/${id}`, { method: "DELETE" }),
   approveSubmission: (
     id: string,
     data: {
