@@ -5,3 +5,11 @@ backend/uploads/*
 !backend/uploads/.gitkeep
 frontend/.next/
 frontend/node_modules/
+
+# Secrets & local artifacts (never commit)
+certbot/conf/
+backups/
+*.bak.*
+frontend.bak.*/
+.env
+.env.*
