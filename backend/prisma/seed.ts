@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { INDUSTRY_TYPE_CATALOG } from "../src/lib/industryTypeCatalog";
+import { syncMarketIntelligenceSeed } from "../src/lib/marketIntelligence/sync";
 
 const prisma = new PrismaClient();
 
@@ -17,7 +21,54 @@ async function main() {
     create: { email, passwordHash, name: "Alshantaf Admin", permissions: ["*"] },
   });
 
-  console.log(`Seeded admin user: ${email}`);
+  await Promise.all(
+    INDUSTRY_TYPE_CATALOG.map((entry) =>
+      prisma.industryTypeCatalog.upsert({
+        where: { industryType: entry.industryType },
+        create: {
+          industryType: entry.industryType,
+          category: entry.category,
+          ammanAutoEligible: entry.ammanAutoEligible,
+          rules: entry.rules as never,
+        },
+        update: {
+          category: entry.category,
+          ammanAutoEligible: entry.ammanAutoEligible,
+          rules: entry.rules as never,
+        },
+      })
+    )
+  );
+
+  try {
+    const playbook = readFileSync(
+      join(__dirname, "../src/knowledge/alshantaf-industrial-master-ar.txt"),
+      "utf8"
+    )
+      .replace(/^\uFEFF/, "")
+      .trim();
+    if (playbook) {
+      const existing = await prisma.setting.findUnique({
+        where: { key: "assistantMasterKnowledge" },
+      });
+      if (!existing) {
+        await prisma.setting.create({
+          data: { key: "assistantMasterKnowledge", value: playbook },
+        });
+      }
+    }
+  } catch {
+    /* bundled playbook optional in some environments */
+  }
+
+  try {
+    const market = await syncMarketIntelligenceSeed();
+    console.log(`Seeded market intelligence: ${market.metrics} metrics, ${market.sources} sources`);
+  } catch (err) {
+    console.warn("Market intelligence seed skipped:", err);
+  }
+
+  console.log(`Seeded admin user + industry catalog: ${email}`);
 }
 
 main()

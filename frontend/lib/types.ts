@@ -3,12 +3,18 @@ export type IndustryType =
   | "light"
   | "mediumSpecial"
   | "medium"
+  | "industrialCraft"
+  | "industrialHeavy"
+  | "industrialTransformative"
+  | "industrialGeneral"
   | "agriToIndustrial"
   | "technical"
   | "residentialA"
   | "residentialB"
   | "residentialC"
   | "residentialD"
+  | "residentialPopular"
+  | "residentialHighDensity"
   | "residentialGreen"
   | "greenWithinA"
   | "greenWithinB"
@@ -16,18 +22,26 @@ export type IndustryType =
   | "greenWithinD"
   | "residentialPrivateA"
   | "residentialPrivateB"
+  | "residentialPrivateC"
   | "residentialRural"
   | "residentialAgri"
   | "agriFacilities"
   | "commercialCentral"
   | "commercialShowrooms"
   | "commercialLinear"
+  | "commercialOffice"
+  | "commercialIndustrial"
+  | "commercialNeighborhoodService"
+  | "commercialCenter"
   | "commercialOrdinaryA"
   | "commercialOrdinaryB"
   | "commercialOrdinaryC"
   | "commercialWithinD"
   | "commercialLocal"
   | "commercialComplex"
+  | "mixedUse"
+  | "mixedUseUrban"
+  | "mixedUseEntertainment"
   | "commercialOutsideCentral"
   | "commercialOutsideShowrooms"
   | "commercialOutsideLinear"
@@ -161,6 +175,13 @@ export interface AuditLogEntry {
   createdAt: string;
 }
 
+export interface SiteViewSeries {
+  days: number;
+  totalViews: number;
+  totalUniques: number;
+  points: Array<{ date: string; views: number; uniqueVisitors: number }>;
+}
+
 export interface DashboardData {
   listings: { total: number; byPublishStatus: Record<string, number>; byStatus: Record<string, number> };
   submissions: { total: number; byStatus: Record<string, number> };
@@ -168,6 +189,11 @@ export interface DashboardData {
   contactRequests: { total: number; byStatus: Record<string, number> };
   storage: { fileCount: number; totalBytes: number };
   recentAudit: AuditLogEntry[];
+  siteViews?: {
+    day1: SiteViewSeries;
+    day7: SiteViewSeries;
+    day30: SiteViewSeries;
+  };
 }
 
 export interface MediaItem {

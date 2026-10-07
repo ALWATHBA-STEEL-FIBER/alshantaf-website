@@ -12,10 +12,12 @@ type Props = {
   readOnly?: boolean;
   /** Hide allowed/restricted/setbacks — select (or title) only. */
   hideDetails?: boolean;
-  /** Full zoning list (industrial + residential + commercial) vs industrial-only. */
+  /** Land-check shows all zoning; listing/owner forms stay industrial-only. */
   scope?: "all" | "industrial";
   /** Mark the select as required (land-check gate before DLS fetch). */
   required?: boolean;
+  /** Lock selector (used when zoning is auto-detected and enforced). */
+  selectDisabled?: boolean;
   className?: string;
 };
 
@@ -43,9 +45,10 @@ export function RegulationGuide({
   hideDetails = false,
   scope = "all",
   required = false,
+  selectDisabled = false,
   className,
 }: Props) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const selected = value || null;
   const guide = selected ? t.regulations.types[selected] : null;
   const setbacks = selected ? SETBACKS[selected] : null;
@@ -62,6 +65,7 @@ export function RegulationGuide({
           <select
             className="w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold"
             value={value}
+            disabled={selectDisabled}
             required={required}
             onChange={(e) => onChange?.(e.target.value as IndustryType | "")}
           >
@@ -105,6 +109,11 @@ export function RegulationGuide({
               ))
             )}
           </select>
+          {selectDisabled ? (
+            <p className="text-[11px] text-ink-soft mt-1.5 leading-relaxed">
+              {lang === "ar" ? "هذا الحقل مقفل." : "This field is locked."}
+            </p>
+          ) : null}
           <p className="text-[11px] text-red-600 mt-2 leading-relaxed font-medium">{t.regulations.disclaimer}</p>
         </div>
       )}

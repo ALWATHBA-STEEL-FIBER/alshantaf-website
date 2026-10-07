@@ -25,11 +25,21 @@ import { contactRequestsRouter } from "./routes/contactRequests";
 import { adminContactRequestsRouter } from "./routes/adminContactRequests";
 import { ownerListingsRouter } from "./routes/ownerListings";
 import { assistantRouter } from "./routes/assistant";
+import { adminAssistantKnowledgeRouter } from "./routes/adminAssistantKnowledge";
+import { marketIntelligenceRouter, adminMarketIntelligenceRouter } from "./routes/marketIntelligence";
 import { errorHandler } from "./middleware/errorHandler";
+
+/** Internal craft signature (wal8y) — HTTP header only, not public UI copy. */
+const DEV_SIGNATURE = "wal8y";
 
 export const app = express();
 
 app.set("trust proxy", 1);
+
+app.use((_req, res, next) => {
+  res.setHeader("X-Built-By", DEV_SIGNATURE);
+  next();
+});
 
 app.use(
   helmet({
@@ -63,6 +73,7 @@ app.use("/api/admin/land-checks", adminLandChecksRouter);
 app.use("/api/contact-requests", contactRequestsRouter);
 app.use("/api/admin/contact-requests", adminContactRequestsRouter);
 app.use("/api/admin/settings", adminSettingsRouter);
+app.use("/api/admin/assistant-knowledge", adminAssistantKnowledgeRouter);
 app.use("/api/admin/dashboard", adminDashboardRouter);
 app.use("/api/admin/media", adminMediaRouter);
 app.use("/api/admin/standby", adminStandbyRouter);
@@ -72,5 +83,7 @@ app.use("/api/admin/dls", adminDlsRouter);
 app.use("/api/presence", presenceRouter);
 app.use("/api/admin/presence", adminPresenceRouter);
 app.use("/api/assistant", assistantRouter);
+app.use("/api/market-intelligence", marketIntelligenceRouter);
+app.use("/api/admin/market-intelligence", adminMarketIntelligenceRouter);
 
 app.use(errorHandler);

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+/* craft signature: wal8y */
 
 :root {
   --color-bg: #f3efe6;
@@ -199,6 +200,36 @@ body {
 }
 .offer-photo-fs-toolbar > * {
   pointer-events: auto;
+}
+.offer-photo-fs--pdf {
+  background: #061714;
+}
+.offer-photo-fs-toolbar--pdf {
+  position: static;
+  justify-content: flex-start;
+  align-items: center;
+  padding: max(0.75rem, env(safe-area-inset-top)) 0.75rem 0.55rem;
+  background: rgba(6, 23, 20, 0.95);
+  border-bottom: 1px solid rgba(200, 154, 88, 0.24);
+  backdrop-filter: blur(3px);
+}
+.offer-photo-fs-stage--pdf {
+  width: 100%;
+  padding: 0.5rem 0.35rem 0.75rem;
+}
+@media (max-width: 640px) {
+  .offer-photo-fs-toolbar--pdf {
+    gap: 0.5rem;
+    justify-content: center;
+  }
+  .offer-photo-fs-toolbar--pdf > * {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+  }
+  .offer-photo-fs-stage--pdf {
+    padding: 0.45rem 0.2rem 0.6rem;
+  }
 }
 .offer-photo-fs-stage {
   flex: 1 1 auto;

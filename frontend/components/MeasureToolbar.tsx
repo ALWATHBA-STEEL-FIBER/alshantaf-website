@@ -49,9 +49,9 @@ type Props = {
   onClear: () => void;
   onFinish: () => void;
   onNewLine: () => void;
-  /** Download AutoCAD DXF (parcel + dims + measure lines). */
   onExportCad?: () => void;
   canExportCad?: boolean;
+  compact?: boolean;
 };
 
 function IconRuler({ className = "w-4 h-4" }: { className?: string }) {
@@ -149,21 +149,6 @@ function IconPlus({ className = "w-4 h-4" }: { className?: string }) {
   );
 }
 
-function IconCad({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M4 6.5h16v11H4z"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinejoin="round"
-      />
-      <path d="M8 10h8M8 14h5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-      <path d="M4 9h3v6H4M17 9h3v6h-3" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 /**
  * Architecture measure chrome — multi-thread distance/area with per-line colors.
  */
@@ -190,6 +175,7 @@ export function MeasureToolbar({
   onNewLine,
   onExportCad,
   canExportCad = false,
+  compact = false,
 }: Props) {
   const dark = variant === "dark";
   const measuring = mode !== "off";
@@ -212,6 +198,14 @@ export function MeasureToolbar({
   const hintCls = dark ? "text-gold/80" : "text-ink-soft";
   const muted = dark ? "text-gold/70" : "text-ink-soft";
   const title = dark ? "text-gold" : "text-green";
+  const shellPad = compact ? "p-1.5" : "p-2";
+  const shellGap = compact ? "space-y-1.5" : "space-y-2";
+  const rowGap = compact ? "gap-1" : "gap-1.5";
+  const chipSize = compact ? "min-h-8 px-2 text-[9px]" : "min-h-9 px-2.5 text-[10px]";
+  const actionSize = compact ? "min-h-10 min-w-[3.7rem] px-1.5 text-[10px]" : "min-h-11 min-w-[4.5rem] px-2.5 text-[11px]";
+  const iconSize = compact ? "w-4 h-4" : "w-[18px] h-[18px]";
+  const colorDotSize = compact ? "h-8 w-8" : "h-9 w-9";
+  const hintText = compact ? "text-[10px]" : "text-[11px]";
 
   if (!measuring) {
     return (
@@ -237,19 +231,24 @@ export function MeasureToolbar({
   );
   const canClear = canUndo;
 
-  return (
-    <div className={`w-full space-y-2 ${shell} p-2`} role="toolbar" aria-label={lp.measureLabel}>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-1.5 ${title}`}>
-          <IconRuler className="w-4 h-4" />
-          {lp.measureLabel}
-        </span>
-        <div className="flex flex-wrap items-center gap-1.5 w-full">
+  if (compact) {
+    return (
+      <div
+        className={`w-full overflow-x-auto ${shell} p-1.5`}
+        role="toolbar"
+        aria-label={lp.measureLabel}
+      >
+        <div className="inline-flex min-w-max items-center gap-1.5">
+          <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1 ${title}`}>
+            <IconRuler className="w-4 h-4" />
+            {lp.measureLabel}
+          </span>
+
           {hasParcelSnap && (
             <button
               type="button"
               onClick={() => onEdgeSnapChange(!edgeSnap)}
-              className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-all ${
+              className={`inline-flex items-center gap-1 h-8 px-2 rounded-full border text-[9px] font-bold transition-all ${
                 edgeSnap ? btnSelectedToggle : btnIdle
               }`}
               aria-pressed={edgeSnap}
@@ -261,7 +260,7 @@ export function MeasureToolbar({
           <button
             type="button"
             onClick={() => onLineSnapChange(!lineSnap)}
-            className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-all ${
+            className={`inline-flex items-center gap-1 h-8 px-2 rounded-full border text-[9px] font-bold transition-all ${
               lineSnap ? btnSelectedToggle : btnIdle
             }`}
             aria-pressed={lineSnap}
@@ -272,7 +271,7 @@ export function MeasureToolbar({
           <button
             type="button"
             onClick={() => onFixedSnapMChange(fixedSnapM === 1 ? 0 : 1)}
-            className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-all ${
+            className={`inline-flex items-center gap-1 h-8 px-2 rounded-full border text-[9px] font-bold transition-all ${
               fixedSnapM === 1 ? btnSelectedToggle : btnIdle
             }`}
             aria-pressed={fixedSnapM === 1}
@@ -283,7 +282,174 @@ export function MeasureToolbar({
           <button
             type="button"
             onClick={() => onFixedSnapMChange(fixedSnapM === 5 ? 0 : 5)}
-            className={`inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-[10px] font-bold transition-all ${
+            className={`inline-flex items-center gap-1 h-8 px-2 rounded-full border text-[9px] font-bold transition-all ${
+              fixedSnapM === 5 ? btnSelectedToggle : btnIdle
+            }`}
+            aria-pressed={fixedSnapM === 5}
+            title={lp.measureFixed5m}
+          >
+            {lp.measureFixed5m}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onModeChange("distance")}
+            className={`inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border text-[10px] font-bold transition-all ${
+              mode === "distance" ? btnActive : btnIdle
+            }`}
+            aria-pressed={mode === "distance"}
+            title={lp.measureDistance}
+          >
+            <IconRuler className="w-4 h-4" />
+            {lp.measureDistance}
+          </button>
+          <button
+            type="button"
+            onClick={() => onModeChange("area")}
+            className={`inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border text-[10px] font-bold transition-all ${
+              mode === "area" ? btnActive : btnIdle
+            }`}
+            aria-pressed={mode === "area"}
+            title={lp.measureArea}
+          >
+            <IconPolygon className="w-4 h-4" />
+            {lp.measureArea}
+          </button>
+          <button
+            type="button"
+            onClick={onNewLine}
+            className={`inline-flex items-center gap-1 h-9 px-2 rounded-lg border text-[10px] font-bold ${btnAccent}`}
+            aria-label={lp.measureNewLine}
+            title={lp.measureNewLine}
+          >
+            <IconPlus className="w-4 h-4" />
+            {lp.measureNewLine}
+          </button>
+          <button
+            type="button"
+            onClick={onUndo}
+            disabled={!canUndo}
+            className={`inline-flex items-center gap-1 h-9 px-2 rounded-lg border text-[10px] font-bold disabled:opacity-40 ${btnIdle}`}
+            aria-label={lp.measureUndo}
+            title={lp.measureUndo}
+          >
+            <IconUndo className="w-4 h-4" />
+            {lp.measureUndo}
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={!canClear}
+            className={`inline-flex items-center gap-1 h-9 px-2 rounded-lg border text-[10px] font-bold disabled:opacity-40 ${btnIdle}`}
+            aria-label={lp.measureClear}
+            title={lp.measureClear}
+          >
+            <IconTrash className="w-4 h-4" />
+            {lp.measureClear}
+          </button>
+          {canFinish && (
+            <button
+              type="button"
+              onClick={onFinish}
+              className={`inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border text-[10px] font-bold ${btnAccent}`}
+              aria-label={lp.measureFinish}
+              title={lp.measureFinish}
+            >
+              <IconCheck className="w-4 h-4" />
+              {lp.measureFinish}
+            </button>
+          )}
+          {onExportCad && (
+            <button
+              type="button"
+              onClick={onExportCad}
+              disabled={!canExportCad}
+              className={`inline-flex items-center gap-1 h-9 px-2.5 rounded-lg border text-[10px] font-bold disabled:opacity-40 ${
+                dark ? "border-gold/40 bg-[#0a1f1c] text-gold/85" : "border-line bg-white text-ink-soft"
+              }`}
+              aria-label={lp.measureExportCad}
+              title={canExportCad ? lp.measureExportCad : lp.measureExportCadHint}
+            >
+              <span className="text-[9px] font-black tracking-wide">DXF</span>
+              {lp.measureExportCad}
+            </button>
+          )}
+
+          <span className={`text-[9px] font-bold px-0.5 ${muted}`}>{lp.measureLineColor}</span>
+          <div className="inline-flex items-center gap-1" role="group" aria-label={lp.measureLineColor}>
+            {MEASURE_LINE_COLORS.map((c) => {
+              const selected = lineColor.toLowerCase() === c.hex.toLowerCase();
+              const name = lang === "ar" ? c.labelAr : c.labelEn;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => onLineColorChange(c.hex)}
+                  className={`relative h-7 w-7 rounded-full border-2 transition-transform ${
+                    selected
+                      ? "scale-110 border-white shadow-[0_0_0_2px_rgba(15,52,47,.9)]"
+                      : "border-black/20 opacity-75 hover:opacity-100"
+                  }`}
+                  style={{ backgroundColor: c.hex }}
+                  aria-label={name}
+                  aria-pressed={selected}
+                  title={name}
+                />
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`w-full ${shellGap} ${shell} ${shellPad}`} role="toolbar" aria-label={lp.measureLabel}>
+      <div className={`flex flex-wrap items-center ${rowGap}`}>
+        <span className={`inline-flex items-center gap-1.5 ${compact ? "text-[10px]" : "text-[11px]"} font-bold px-1.5 ${title}`}>
+          <IconRuler className="w-4 h-4" />
+          {lp.measureLabel}
+        </span>
+        <div className={`flex flex-wrap items-center ${rowGap} w-full`}>
+          {hasParcelSnap && (
+            <button
+              type="button"
+              onClick={() => onEdgeSnapChange(!edgeSnap)}
+              className={`inline-flex items-center gap-1 rounded-full border font-bold transition-all ${chipSize} ${
+                edgeSnap ? btnSelectedToggle : btnIdle
+              }`}
+              aria-pressed={edgeSnap}
+              title={lp.measureEdgeSnap}
+            >
+              {lp.measureEdgeSnap}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onLineSnapChange(!lineSnap)}
+            className={`inline-flex items-center gap-1 rounded-full border font-bold transition-all ${chipSize} ${
+              lineSnap ? btnSelectedToggle : btnIdle
+            }`}
+            aria-pressed={lineSnap}
+            title={lp.measureLineSnap}
+          >
+            {lp.measureLineSnap}
+          </button>
+          <button
+            type="button"
+            onClick={() => onFixedSnapMChange(fixedSnapM === 1 ? 0 : 1)}
+            className={`inline-flex items-center gap-1 rounded-full border font-bold transition-all ${chipSize} ${
+              fixedSnapM === 1 ? btnSelectedToggle : btnIdle
+            }`}
+            aria-pressed={fixedSnapM === 1}
+            title={lp.measureFixed1m}
+          >
+            {lp.measureFixed1m}
+          </button>
+          <button
+            type="button"
+            onClick={() => onFixedSnapMChange(fixedSnapM === 5 ? 0 : 5)}
+            className={`inline-flex items-center gap-1 rounded-full border font-bold transition-all ${chipSize} ${
               fixedSnapM === 5 ? btnSelectedToggle : btnIdle
             }`}
             aria-pressed={fixedSnapM === 5}
@@ -295,16 +461,16 @@ export function MeasureToolbar({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-stretch gap-1.5">
+      <div className={`flex flex-wrap items-stretch ${rowGap}`}>
         <button
           type="button"
           onClick={() => onModeChange("distance")}
-          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[4.5rem] px-2.5 rounded-xl border text-[11px] font-bold transition-all ${
+          className={`inline-flex flex-col items-center justify-center gap-0.5 rounded-xl border font-bold transition-all ${actionSize} ${
             mode === "distance" ? btnActive : btnIdle
           }`}
           aria-pressed={mode === "distance"}
         >
-          <IconRuler className="w-[18px] h-[18px]" />
+          <IconRuler className={iconSize} />
           {lp.measureDistance}
           {mode === "distance" && (
             <span className="text-[9px] font-extrabold tracking-wide opacity-90">●</span>
@@ -313,12 +479,12 @@ export function MeasureToolbar({
         <button
           type="button"
           onClick={() => onModeChange("area")}
-          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[4.5rem] px-2.5 rounded-xl border text-[11px] font-bold transition-all ${
+          className={`inline-flex flex-col items-center justify-center gap-0.5 rounded-xl border font-bold transition-all ${actionSize} ${
             mode === "area" ? btnActive : btnIdle
           }`}
           aria-pressed={mode === "area"}
         >
-          <IconPolygon className="w-[18px] h-[18px]" />
+          <IconPolygon className={iconSize} />
           {lp.measureArea}
           {mode === "area" && (
             <span className="text-[9px] font-extrabold tracking-wide opacity-90">●</span>
@@ -327,50 +493,65 @@ export function MeasureToolbar({
         <button
           type="button"
           onClick={onNewLine}
-          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[4.25rem] px-2 rounded-xl border text-[11px] font-bold ${btnAccent}`}
+          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-10 min-w-[3.5rem] px-1.5 rounded-xl border ${compact ? "text-[10px]" : "text-[11px]"} font-bold ${btnAccent}`}
           aria-label={lp.measureNewLine}
           title={lp.measureNewLine}
         >
-          <IconPlus className="w-[18px] h-[18px]" />
+          <IconPlus className={iconSize} />
           {lp.measureNewLine}
         </button>
         <button
           type="button"
           onClick={onUndo}
           disabled={!canUndo}
-          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[3.75rem] px-2 rounded-xl border text-[11px] font-bold disabled:opacity-40 ${btnIdle}`}
+          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-10 min-w-[3.25rem] px-1.5 rounded-xl border ${compact ? "text-[10px]" : "text-[11px]"} font-bold disabled:opacity-40 ${btnIdle}`}
           aria-label={lp.measureUndo}
         >
-          <IconUndo className="w-[18px] h-[18px]" />
+          <IconUndo className={iconSize} />
           {lp.measureUndo}
         </button>
         <button
           type="button"
           onClick={onClear}
           disabled={!canClear}
-          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[3.75rem] px-2 rounded-xl border text-[11px] font-bold disabled:opacity-40 ${btnIdle}`}
+          className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-10 min-w-[3.25rem] px-1.5 rounded-xl border ${compact ? "text-[10px]" : "text-[11px]"} font-bold disabled:opacity-40 ${btnIdle}`}
           aria-label={lp.measureClear}
         >
-          <IconTrash className="w-[18px] h-[18px]" />
+          <IconTrash className={iconSize} />
           {lp.measureClear}
         </button>
         {canFinish && (
           <button
             type="button"
             onClick={onFinish}
-            className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-11 min-w-[4.25rem] px-2.5 rounded-xl border text-[11px] font-bold ${btnAccent}`}
+            className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-10 min-w-[3.6rem] px-1.5 rounded-xl border ${compact ? "text-[10px]" : "text-[11px]"} font-bold ${btnAccent}`}
             aria-label={lp.measureFinish}
           >
-            <IconCheck className="w-[18px] h-[18px]" />
+            <IconCheck className={iconSize} />
             {lp.measureFinish}
+          </button>
+        )}
+        {onExportCad && (
+          <button
+            type="button"
+            onClick={onExportCad}
+            disabled={!canExportCad}
+            className={`inline-flex flex-col items-center justify-center gap-0.5 min-h-10 min-w-[4rem] px-1.5 rounded-xl border ${compact ? "text-[10px]" : "text-[11px]"} font-bold disabled:opacity-40 ${
+              dark ? "border-gold/40 bg-[#0a1f1c] text-gold/85" : "border-line bg-white text-ink-soft"
+            }`}
+            aria-label={lp.measureExportCad}
+            title={canExportCad ? lp.measureExportCad : lp.measureExportCadHint}
+          >
+            <span className="text-[10px] font-black tracking-wide">DXF</span>
+            {lp.measureExportCad}
           </button>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className={`text-[10px] font-bold px-0.5 ${muted}`}>{lp.measureLineColor}</span>
+      <div className={`flex flex-wrap items-center ${rowGap}`}>
+        <span className={`${compact ? "text-[9px]" : "text-[10px]"} font-bold px-0.5 ${muted}`}>{lp.measureLineColor}</span>
         <div
-          className="inline-flex flex-wrap items-center gap-1.5"
+          className={`inline-flex flex-wrap items-center ${rowGap}`}
           role="group"
           aria-label={lp.measureLineColor}
         >
@@ -382,7 +563,7 @@ export function MeasureToolbar({
                 key={c.id}
                 type="button"
                 onClick={() => onLineColorChange(c.hex)}
-                className={`relative h-9 w-9 rounded-full border-2 transition-transform ${
+                className={`relative ${colorDotSize} rounded-full border-2 transition-transform ${
                   selected
                     ? "scale-110 border-white shadow-[0_0_0_3px_rgba(15,52,47,.9)]"
                     : "border-black/20 opacity-75 hover:opacity-100"
@@ -397,26 +578,9 @@ export function MeasureToolbar({
         </div>
       </div>
 
-      <p className={`text-[11px] leading-snug px-0.5 ${hintCls}`}>
+      <p className={`${hintText} leading-snug px-0.5 ${hintCls}`}>
         {mode === "distance" ? lp.measureHintDistance : lp.measureHintArea}
       </p>
-
-      {onExportCad && (
-        <div className="flex flex-col gap-1 pt-0.5">
-          <button
-            type="button"
-            onClick={onExportCad}
-            disabled={!canExportCad}
-            className={`inline-flex items-center justify-center gap-2 min-h-11 w-full px-3 rounded-xl border text-[12px] font-bold transition-all disabled:opacity-40 ${btnAccent}`}
-            aria-label={lp.measureExportCad}
-            title={lp.measureExportCadHint}
-          >
-            <IconCad className="w-[18px] h-[18px] shrink-0" />
-            <span>{lp.measureExportCad}</span>
-          </button>
-          <p className={`text-[10px] leading-snug px-0.5 ${muted}`}>{lp.measureExportCadHint}</p>
-        </div>
-      )}
     </div>
   );
 }

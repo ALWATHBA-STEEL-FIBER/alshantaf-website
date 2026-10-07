@@ -91,6 +91,10 @@ export async function validateAndStore(
 
   const filename = `${id}.${detected.ext}`;
   await fs.writeFile(path.join(uploadDir, filename), buffer);
+  if (kind === "document" && detected.ext === "pdf") {
+    // Best-effort preview generation: store a long stitched image alongside the PDF.
+    await buildPdfPreviewImage(path.join(uploadDir, filename), `${id}-preview.webp`, uploadDir).catch(() => undefined);
+  }
   return { filename, mime: detected.mime };
 }
 
@@ -132,6 +136,72 @@ async function compressVideo(
   }
 }
 
+async function buildPdfPreviewImage(pdfPath: string, previewFilename: string, uploadDir: string) {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pdf-preview-"));
+  try {
+    const prefix = path.join(tmpDir, "page");
+    await execFileAsync(
+      "pdftoppm",
+      [
+        "-png",
+        "-f",
+        "1",
+        "-l",
+        "20", // protect memory/runtime for unusually large PDFs
+        pdfPath,
+        prefix,
+      ],
+      { timeout: 120_000 }
+    );
+
+    const files = (await fs.readdir(tmpDir))
+      .filter((name) => /^page-\d+\.png$/i.test(name))
+      .sort((a, b) => Number(a.match(/\d+/)?.[0] ?? "0") - Number(b.match(/\d+/)?.[0] ?? "0"));
+    if (!files.length) return;
+
+    const rendered: Array<{ data: Buffer; width: number; height: number }> = [];
+    for (const file of files) {
+      const source = path.join(tmpDir, file);
+      const buffer = await sharp(source)
+        .rotate()
+        .flatten({ background: "#ffffff" })
+        // Remove oversized white margins that some DLS PDFs contain, otherwise
+        // the preview looks like a blank page with a thin strip on one side.
+        .trim({ threshold: 12 })
+        .resize({ width: 1400, withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      const meta = await sharp(buffer).metadata();
+      if (!meta.width || !meta.height) continue;
+      rendered.push({ data: buffer, width: meta.width, height: meta.height });
+    }
+    if (!rendered.length) return;
+
+    const width = Math.max(...rendered.map((item) => item.width));
+    const height = rendered.reduce((sum, item) => sum + item.height, 0);
+    let offsetY = 0;
+    const composite = rendered.map((item) => {
+      const top = offsetY;
+      offsetY += item.height;
+      return { input: item.data, left: 0, top };
+    });
+
+    await sharp({
+      create: {
+        width,
+        height,
+        channels: 3,
+        background: "#ffffff",
+      },
+    })
+      .composite(composite)
+      .webp({ quality: 84 })
+      .toFile(path.join(uploadDir, previewFilename));
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 /** Best-effort delete of uploaded files by their public /uploads/<file> URL. Never throws. */
 export async function deleteUploadedFiles(urls: (string | null | undefined)[], uploadDir: string) {
   await Promise.all(
@@ -139,6 +209,12 @@ export async function deleteUploadedFiles(urls: (string | null | undefined)[], u
       const filename = url.replace("/uploads/", "");
       if (filename.includes("/") || filename.includes("..")) return;
       await fs.unlink(path.join(uploadDir, filename)).catch(() => undefined);
+      // Documents may have a generated stitched preview sibling.
+      const pdfMatch = filename.match(/^(.+)\.pdf$/i);
+      if (pdfMatch) {
+        const [, stem] = pdfMatch;
+        await fs.unlink(path.join(uploadDir, `${stem}-preview.webp`)).catch(() => undefined);
+      }
       // Images are stored as <id>-lg/-md/-sm.webp siblings — delete the other two tiers too.
       const sizeMatch = filename.match(/^(.+)-(sm|md|lg)\.webp$/);
       if (sizeMatch) {

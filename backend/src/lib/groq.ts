@@ -90,16 +90,27 @@ export function guardThreshold() {
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.85;
 }
 
+/** Low default keeps answers grounded; override with GROQ_TEMPERATURE if needed. */
+export function chatTemperature(override?: number) {
+  if (typeof override === "number" && Number.isFinite(override)) {
+    return Math.min(1, Math.max(0, override));
+  }
+  const fromEnv = Number(process.env.GROQ_TEMPERATURE ?? "0.15");
+  return Number.isFinite(fromEnv) ? Math.min(1, Math.max(0, fromEnv)) : 0.15;
+}
+
 export async function groqChatJson(params: {
   messages: GroqMessage[];
   temperature?: number;
 }) {
   const model = process.env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL;
+  const temperature = chatTemperature(params.temperature);
   const data = await groqPost(
     {
       model,
-      temperature: params.temperature ?? 0.3,
-      max_completion_tokens: 900,
+      temperature,
+      top_p: 0.85,
+      max_completion_tokens: 650,
       response_format: { type: "json_object" },
       messages: params.messages,
     },

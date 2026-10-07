@@ -26,6 +26,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     page("/opportunities", { lastModified: now, changeFrequency: "daily", priority: 0.9 }),
     page("/land-check", { lastModified: now, changeFrequency: "weekly", priority: 0.85 }),
     page("/services", { lastModified: now, changeFrequency: "weekly", priority: 0.8 }),
+    page("/jordan-lending-market", { lastModified: now, changeFrequency: "daily", priority: 0.88 }),
     page("/request-publish", { lastModified: now, changeFrequency: "weekly", priority: 0.75 }),
     page("/contact", { lastModified: now, changeFrequency: "monthly", priority: 0.7 }),
     page("/privacy", { lastModified: now, changeFrequency: "yearly", priority: 0.3 }),

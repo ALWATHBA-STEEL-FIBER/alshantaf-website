@@ -26,7 +26,7 @@ const BLUEPRINT_SITE_URL = "https://alshantaf.com";
 const BLUEPRINT_LOCATION_EN = "Al-Qastal Industrial — in front of \u2066JTI\u2069 factory";
 /** LRI/PDI keep the Latin brand "JTI" from jumping to the start in RTL. */
 const BLUEPRINT_LOCATION_AR = "المنطقة الصناعية في القسطل — أمام مصنع \u2066JTI\u2069";
-const BLUEPRINT_MOTTO_EN = "Specialized in industrial real estate for 25+ years";
+const BLUEPRINT_MOTTO_EN = "Specialized in industrial real estate for over 25 years";
 const BLUEPRINT_MOTTO_AR = "متخصصون في العقارات الصناعية لأكثر من 25 عاماً";
 
 export type BlueprintMeta = {
@@ -59,6 +59,11 @@ export type BlueprintMeta = {
   /** Shown next to zoning — discloses user-chosen classification. */
   industryUserChoseNote?: string;
   notesLabel?: string;
+  /** Optional extra rows for context-specific sheets (e.g. offer print). */
+  extraRows?: Array<{
+    label: string;
+    value?: string | null;
+  }>;
   labels: {
     governorate: string;
     directorate: string;
@@ -330,7 +335,8 @@ function drawNorthRose(
  * Parcel-aligned context map: satellite surroundings + boundary + edge dimensions + north.
  */
 export async function drawParcelContextMap(opts: {
-  ring: [number, number][];
+  ring?: [number, number][];
+  rings?: [number, number][][];
   lang: "ar" | "en";
   perimeterM?: number | null;
   width?: number;
@@ -349,7 +355,15 @@ export async function drawParcelContextMap(opts: {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
 
-  const frame = buildFrame(opts.ring);
+  const sourceRings =
+    opts.rings && opts.rings.length
+      ? opts.rings.filter((r) => r.length >= 3)
+      : opts.ring && opts.ring.length >= 3
+        ? [opts.ring]
+        : [];
+  const primaryRing = sourceRings[0];
+  if (!primaryRing) return canvas;
+  const frame = buildFrame(primaryRing);
   if (!frame) return canvas;
   // Smaller pad on large parcels so satellite bbox stays under API limits
   const roughSpan = Math.max(frame.lengthM, frame.widthM);
@@ -363,56 +377,63 @@ export async function drawParcelContextMap(opts: {
     y: oy - (v - bounds.cy) * scale,
   });
 
-  // Satellite backdrop — soft-fallback if Esri/proxy is down (don't block print).
-  const box = latLngBBoxForParcelFrame(frame, bounds);
+  // Backdrop priority:
+  // 1) exact live map snapshot (map/satellite + visible context), if provided
+  // 2) satellite fetch
+  // 3) neutral grid fallback
   let satOk = false;
-  try {
-    const sat = await fetchSatelliteBitmap(box);
-    const imgBox = sat.bbox;
-    const cornerParcel = [
-      toLocalEnu(imgBox.maxLat, imgBox.minLng, frame.origin.lat, frame.origin.lng),
-      toLocalEnu(imgBox.maxLat, imgBox.maxLng, frame.origin.lat, frame.origin.lng),
-      toLocalEnu(imgBox.minLat, imgBox.maxLng, frame.origin.lat, frame.origin.lng),
-      toLocalEnu(imgBox.minLat, imgBox.minLng, frame.origin.lat, frame.origin.lng),
-    ].map(frame.toParcel);
-    const dest = cornerParcel.map((p) => toPx(p.x, p.y));
-    const sw = sat.width;
-    const sh = sat.height;
-    const src = [
-      { x: 0, y: 0 },
-      { x: sw, y: 0 },
-      { x: sw, y: sh },
-      { x: 0, y: sh },
-    ];
-    ctx.save();
-    drawTexturedTri(ctx, sat.source, dest[0]!, dest[1]!, dest[2]!, src[0]!, src[1]!, src[2]!);
-    drawTexturedTri(ctx, sat.source, dest[0]!, dest[2]!, dest[3]!, src[0]!, src[2]!, src[3]!);
-    ctx.restore();
-    if (typeof ImageBitmap !== "undefined" && sat.source instanceof ImageBitmap) {
-      sat.source.close();
-    }
-    satOk = true;
-  } catch {
-    // Prefer the already-loaded Leaflet map (satellite tiles on screen) over empty grid
-    let usedMap = false;
-    if (opts.mapSnapshot) {
-      try {
-        const snap = await loadImage(opts.mapSnapshot);
-        const iw = snap.naturalWidth || snap.width;
-        const ih = snap.naturalHeight || snap.height;
-        if (iw > 0 && ih > 0) {
-          const cover = Math.max(W / iw, H / ih);
-          const dw = iw * cover;
-          const dh = ih * cover;
-          ctx.drawImage(snap, (W - dw) / 2, (H - dh) / 2, dw, dh);
-          usedMap = true;
-          satOk = true;
-        }
-      } catch {
-        usedMap = false;
+  let usedMap = false;
+  if (opts.mapSnapshot) {
+    try {
+      const snap = await loadImage(opts.mapSnapshot);
+      const iw = snap.naturalWidth || snap.width;
+      const ih = snap.naturalHeight || snap.height;
+      if (iw > 0 && ih > 0) {
+        const cover = Math.max(W / iw, H / ih);
+        const dw = iw * cover;
+        const dh = ih * cover;
+        ctx.drawImage(snap, (W - dw) / 2, (H - dh) / 2, dw, dh);
+        usedMap = true;
+        satOk = true;
       }
+    } catch {
+      usedMap = false;
     }
-    if (!usedMap) {
+  }
+  // Exact live-map print mode: do not redraw parcel/dimensions on top of the snapshot.
+  // This avoids duplicate labels and guarantees the PDF map panel matches the current view.
+  if (usedMap) {
+    return canvas;
+  }
+  if (!usedMap) {
+    const box = latLngBBoxForParcelFrame(frame, bounds);
+    try {
+      const sat = await fetchSatelliteBitmap(box);
+      const imgBox = sat.bbox;
+      const cornerParcel = [
+        toLocalEnu(imgBox.maxLat, imgBox.minLng, frame.origin.lat, frame.origin.lng),
+        toLocalEnu(imgBox.maxLat, imgBox.maxLng, frame.origin.lat, frame.origin.lng),
+        toLocalEnu(imgBox.minLat, imgBox.maxLng, frame.origin.lat, frame.origin.lng),
+        toLocalEnu(imgBox.minLat, imgBox.minLng, frame.origin.lat, frame.origin.lng),
+      ].map(frame.toParcel);
+      const dest = cornerParcel.map((p) => toPx(p.x, p.y));
+      const sw = sat.width;
+      const sh = sat.height;
+      const src = [
+        { x: 0, y: 0 },
+        { x: sw, y: 0 },
+        { x: sw, y: sh },
+        { x: 0, y: sh },
+      ];
+      ctx.save();
+      drawTexturedTri(ctx, sat.source, dest[0]!, dest[1]!, dest[2]!, src[0]!, src[1]!, src[2]!);
+      drawTexturedTri(ctx, sat.source, dest[0]!, dest[2]!, dest[3]!, src[0]!, src[2]!, src[3]!);
+      ctx.restore();
+      if (typeof ImageBitmap !== "undefined" && sat.source instanceof ImageBitmap) {
+        sat.source.close();
+      }
+      satOk = true;
+    } catch {
       ctx.fillStyle = "#143d37";
       ctx.fillRect(0, 0, W, H);
       ctx.strokeStyle = "rgba(200,154,88,0.2)";
@@ -437,74 +458,81 @@ export async function drawParcelContextMap(opts: {
   ctx.fillRect(0, 0, W, H);
 
   // Parcel fill + outline
-  ctx.beginPath();
-  bounds.parcelPts.forEach((p, i) => {
-    const q = toPx(p.x, p.y);
-    if (i === 0) ctx.moveTo(q.x, q.y);
-    else ctx.lineTo(q.x, q.y);
-  });
-  ctx.closePath();
-  ctx.fillStyle = "rgba(200,154,88,0.22)";
-  ctx.fill();
-  ctx.strokeStyle = "#e8c98a";
-  ctx.lineWidth = 3.5;
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  ctx.stroke();
-
-  // Corner glow so short edges stay visible on the print sheet
-  for (const p of bounds.parcelPts) {
-    const q = toPx(p.x, p.y);
-    const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, 14);
-    g.addColorStop(0, "rgba(200,160,100,0.9)");
-    g.addColorStop(0.5, "rgba(200,160,100,0.35)");
-    g.addColorStop(1, "rgba(200,160,100,0)");
-    ctx.fillStyle = g;
+  for (const ring of sourceRings) {
+    const points = ring.map(([lat, lng]) =>
+      frame.toParcel(toLocalEnu(lat, lng, frame.origin.lat, frame.origin.lng))
+    );
+    if (!points.length) continue;
     ctx.beginPath();
-    ctx.arc(q.x, q.y, 14, 0, Math.PI * 2);
+    points.forEach((p, i) => {
+      const q = toPx(p.x, p.y);
+      if (i === 0) ctx.moveTo(q.x, q.y);
+      else ctx.lineTo(q.x, q.y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = "rgba(200,154,88,0.22)";
     ctx.fill();
-    ctx.fillStyle = "#caa064";
-    ctx.beginPath();
-    ctx.arc(q.x, q.y, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#f5e6c8";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#e8c98a";
+    ctx.lineWidth = 3.5;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
     ctx.stroke();
+
+    for (const p of points) {
+      const q = toPx(p.x, p.y);
+      const g = ctx.createRadialGradient(q.x, q.y, 0, q.x, q.y, 14);
+      g.addColorStop(0, "rgba(200,160,100,0.9)");
+      g.addColorStop(0.5, "rgba(200,160,100,0.35)");
+      g.addColorStop(1, "rgba(200,160,100,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#caa064";
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#f5e6c8";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
   }
 
   // Edge dimensions — merged sides (curves counted as one total)
-  const edges = ringEdgeDimensions(opts.ring);
-  const sum = edges.reduce((s, e) => s + e.lengthM, 0);
-  const scaleLen =
-    opts.perimeterM != null &&
-    opts.perimeterM > 0 &&
-    sum > 0 &&
-    Math.abs(opts.perimeterM - sum) / opts.perimeterM <= 0.05
-      ? opts.perimeterM / sum
-      : 1;
-  for (const edge of edges) {
-    const midEnu = toLocalEnu(edge.label.lat, edge.label.lng, frame.origin.lat, frame.origin.lng);
-    const mid = frame.toParcel(midEnu);
-    const q = toPx(mid.x, mid.y);
-    const text = formatSideMeters(edge.lengthM * scaleLen, opts.lang, edge.kind);
-    ctx.font = 'bold 28px "IBM Plex Sans Arabic",system-ui,sans-serif';
-    const tw = ctx.measureText(text).width;
-    const boxH = 34;
-    ctx.fillStyle = "rgba(15,52,47,0.94)";
-    ctx.strokeStyle = "#c89a58";
-    ctx.lineWidth = 2;
-    ctx.fillRect(q.x - tw / 2 - 10, q.y - boxH / 2, tw + 20, boxH);
-    ctx.strokeRect(q.x - tw / 2 - 10, q.y - boxH / 2, tw + 20, boxH);
-    ctx.fillStyle = "#fff";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(text, q.x, q.y);
+  for (const ring of sourceRings) {
+    const edges = ringEdgeDimensions(ring);
+    const sum = edges.reduce((s, e) => s + e.lengthM, 0);
+    const scaleLen =
+      opts.perimeterM != null &&
+      opts.perimeterM > 0 &&
+      sum > 0 &&
+      Math.abs(opts.perimeterM - sum) / opts.perimeterM <= 0.05
+        ? opts.perimeterM / sum
+        : 1;
+    for (const edge of edges) {
+      const midEnu = toLocalEnu(edge.label.lat, edge.label.lng, frame.origin.lat, frame.origin.lng);
+      const mid = frame.toParcel(midEnu);
+      const q = toPx(mid.x, mid.y);
+      const text = formatSideMeters(edge.lengthM * scaleLen, opts.lang, edge.kind);
+      ctx.font = 'bold 28px "IBM Plex Sans Arabic",system-ui,sans-serif';
+      const tw = ctx.measureText(text).width;
+      const boxH = 34;
+      ctx.fillStyle = "rgba(15,52,47,0.94)";
+      ctx.strokeStyle = "#c89a58";
+      ctx.lineWidth = 2;
+      ctx.fillRect(q.x - tw / 2 - 10, q.y - boxH / 2, tw + 20, boxH);
+      ctx.strokeRect(q.x - tw / 2 - 10, q.y - boxH / 2, tw + 20, boxH);
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, q.x, q.y);
+    }
   }
 
   // Land number at geometric center of the parcel
   const parcelNo = opts.parcelNumber?.trim();
   if (parcelNo) {
-    const center = ringInteriorCentroid(opts.ring);
+    const center = ringInteriorCentroid(primaryRing);
     if (center) {
       const midEnu = toLocalEnu(center.lat, center.lng, frame.origin.lat, frame.origin.lng);
       const mid = frame.toParcel(midEnu);
@@ -532,7 +560,8 @@ export async function drawParcelContextMap(opts: {
  */
 export function drawParcelContourMap(opts: {
   grid: ElevGridSnapshot;
-  ring: [number, number][];
+  ring?: [number, number][];
+  rings?: [number, number][][];
   lang: "ar" | "en";
   width?: number;
   height?: number;
@@ -546,7 +575,15 @@ export function drawParcelContourMap(opts: {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, W, H);
 
-  const frame = buildFrame(opts.ring);
+  const sourceRings =
+    opts.rings && opts.rings.length
+      ? opts.rings.filter((r) => r.length >= 3)
+      : opts.ring && opts.ring.length >= 3
+        ? [opts.ring]
+        : [];
+  const primaryRing = sourceRings[0];
+  if (!primaryRing) return canvas;
+  const frame = buildFrame(primaryRing);
   if (!frame) return canvas;
   const bounds = parcelBounds(frame, 0.12);
   const scale = Math.min(W, H) / Math.max(bounds.spanX, bounds.spanY);
@@ -559,7 +596,10 @@ export function drawParcelContourMap(opts: {
 
   const elev = smoothElevGrid(Float32Array.from(opts.grid.elevations), opts.grid.cols, opts.grid.rows, 3);
   const { cols, rows, minLat, maxLat, minLng, maxLng } = opts.grid;
-  const poly = frame.enu;
+  const polys = sourceRings.map((ring) =>
+    ring.map(([lat, lng]) => toLocalEnu(lat, lng, frame.origin.lat, frame.origin.lng))
+  );
+  const insideAny = (x: number, y: number) => polys.some((poly) => pointInPoly(x, y, poly));
   const { min: zMin, max: zMax } = elevRangeInsidePoly(
     elev,
     cols,
@@ -569,7 +609,7 @@ export function drawParcelContourMap(opts: {
       const lng = minLng + ((c + 0.5) / cols) * (maxLng - minLng);
       return toLocalEnu(lat, lng, frame.origin.lat, frame.origin.lng);
     },
-    poly
+    polys[0]!
   );
   const relief = Math.max(0.05, zMax - zMin);
   const bands = contourBandsForRelief(relief);
@@ -598,7 +638,7 @@ export function drawParcelContourMap(opts: {
       const a = gridToParcel(x0, y0);
       const b = gridToParcel(x1, y1);
       const midEnu = frame.toEnu({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-      const inside = pointInPoly(midEnu.x, midEnu.y, poly);
+      const inside = insideAny(midEnu.x, midEnu.y);
       const pa = toPx(a.x, a.y);
       const pb = toPx(b.x, b.y);
       if (
@@ -641,16 +681,21 @@ export function drawParcelContourMap(opts: {
     }
   }
 
-  ctx.beginPath();
-  bounds.parcelPts.forEach((p, i) => {
-    const q = toPx(p.x, p.y);
-    if (i === 0) ctx.moveTo(q.x, q.y);
-    else ctx.lineTo(q.x, q.y);
-  });
-  ctx.closePath();
   ctx.strokeStyle = "#000000";
   ctx.lineWidth = 3.6;
-  ctx.stroke();
+  for (const ring of sourceRings) {
+    const points = ring.map(([lat, lng]) =>
+      frame.toParcel(toLocalEnu(lat, lng, frame.origin.lat, frame.origin.lng))
+    );
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const q = toPx(p.x, p.y);
+      if (i === 0) ctx.moveTo(q.x, q.y);
+      else ctx.lineTo(q.x, q.y);
+    });
+    ctx.closePath();
+    ctx.stroke();
+  }
 
   const elevText =
     opts.lang === "ar"
@@ -843,6 +888,72 @@ function drawContainedImage(
   ctx.drawImage(img, dx, dy, dw, dh);
 }
 
+function drawCoveredImage(
+  ctx: CanvasRenderingContext2D,
+  img: CanvasImageSource,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+) {
+  const iw = "naturalWidth" in img && (img as HTMLImageElement).naturalWidth
+    ? (img as HTMLImageElement).naturalWidth
+    : (img as HTMLCanvasElement).width;
+  const ih = "naturalHeight" in img && (img as HTMLImageElement).naturalHeight
+    ? (img as HTMLImageElement).naturalHeight
+    : (img as HTMLCanvasElement).height;
+  if (!iw || !ih) return;
+  const scale = Math.max(w / iw, h / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  const dx = x + (w - dw) / 2;
+  const dy = y + (h - dh) / 2;
+  ctx.drawImage(img, dx, dy, dw, dh);
+}
+
+function drawPaperWatermark(ctx: CanvasRenderingContext2D, W: number, H: number, alpha = 0.08) {
+  ctx.save();
+  ctx.strokeStyle = `rgba(15,52,47,${alpha})`;
+  ctx.fillStyle = `rgba(15,52,47,${alpha})`;
+  ctx.lineWidth = 2;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = '700 34px "Segoe UI", Arial, sans-serif';
+
+  const drawMark = () => {
+    // Minimal backgroundless emblem inspired by the brand mark.
+    ctx.beginPath();
+    ctx.moveTo(-48, -18);
+    ctx.lineTo(-48, -48);
+    ctx.lineTo(-36, -58);
+    ctx.lineTo(-36, -18);
+    ctx.moveTo(-24, -18);
+    ctx.lineTo(-24, -56);
+    ctx.lineTo(-12, -68);
+    ctx.lineTo(-12, -18);
+    ctx.moveTo(0, -18);
+    ctx.lineTo(0, -48);
+    ctx.lineTo(12, -58);
+    ctx.lineTo(12, -18);
+    ctx.moveTo(-56, -12);
+    ctx.lineTo(20, -12);
+    ctx.stroke();
+    ctx.fillText("ALSHANTAF", -18, 30);
+  };
+
+  for (let y = -120; y < H + 180; y += 230) {
+    for (let x = -120; x < W + 220; x += 290) {
+      ctx.save();
+      ctx.translate(x + 145, y + 115);
+      ctx.rotate(-0.33);
+      drawMark();
+      ctx.restore();
+    }
+  }
+
+  ctx.restore();
+}
+
 /**
  * Flatten the letterhead to one A4 JPEG — the only reliable single-page print on iOS Safari
  * (WebKit often ignores overflow:hidden and paginates HTML onto a blank page 2).
@@ -894,15 +1005,26 @@ async function composeBlueprintA4Jpeg(opts: {
   const logoY = y + (headerH - logoH) / 2;
 
   ctx.fillStyle = "#222222";
-  ctx.font = '600 20px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
   ctx.textBaseline = "middle";
-  const mottoLines = wrapCanvasText(ctx, stabilizeRtlAsciiPunct(opts.motto), colW - 8);
-  const mottoBlockH = Math.min(mottoLines.length, 4) * 24;
-  const mottoStartY = y + (headerH - mottoBlockH) / 2;
   ctx.textAlign = "left";
-  mottoLines.slice(0, 4).forEach((line, i) => {
-    ctx.fillText(line, padX, mottoStartY + i * 24 + 10);
-  });
+  if (opts.lang === "ar") {
+    const text = stabilizeRtlAsciiPunct(opts.motto);
+    let size = 20;
+    while (size >= 16) {
+      ctx.font = `600 ${size}px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif`;
+      if (ctx.measureText(text).width <= colW - 8) break;
+      size -= 1;
+    }
+    ctx.fillText(text, padX, y + headerH / 2 + 2);
+  } else {
+    ctx.font = '600 20px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
+    const mottoLines = wrapCanvasText(ctx, stabilizeRtlAsciiPunct(opts.motto), colW - 8);
+    const mottoBlockH = Math.min(mottoLines.length, 4) * 24;
+    const mottoStartY = y + (headerH - mottoBlockH) / 2;
+    mottoLines.slice(0, 4).forEach((line, i) => {
+      ctx.fillText(line, padX, mottoStartY + i * 24 + 10);
+    });
+  }
 
   if (opts.logoDataUrl) {
     try {
@@ -986,7 +1108,7 @@ async function composeBlueprintA4Jpeg(opts: {
     noteY += 18;
   });
 
-  // Context map panel
+  // Topography panel (swapped to top)
   const mapX = padX + paramsW + gap;
   ctx.strokeStyle = "#222222";
   ctx.lineWidth = 2;
@@ -995,7 +1117,7 @@ async function composeBlueprintA4Jpeg(opts: {
   ctx.font = '800 24px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
   ctx.textAlign = rtl ? "right" : "left";
   const mapTitleX = rtl ? mapX + mapW - 14 : mapX + 14;
-  ctx.fillText(opts.topViewLabel, mapTitleX, y + 12, mapW - 28);
+  ctx.fillText(opts.sideViewLabel, mapTitleX, y + 12, mapW - 28);
   ctx.strokeStyle = "#222222";
   ctx.beginPath();
   ctx.moveTo(mapX + 12, y + 44);
@@ -1010,7 +1132,7 @@ async function composeBlueprintA4Jpeg(opts: {
   ctx.lineWidth = 1;
   ctx.strokeRect(frameX, frameY, frameW, frameH);
   try {
-    const mapImg = await loadImage(opts.contextPng);
+    const mapImg = await loadImage(opts.contourPng);
     drawContainedImage(ctx, mapImg, frameX + 4, frameY + 4, frameW - 8, frameH - 8);
   } catch {
     /* skip */
@@ -1018,7 +1140,7 @@ async function composeBlueprintA4Jpeg(opts: {
 
   y += topH + 16;
 
-  // Topo panel
+  // Map panel (swapped to bottom, fills frame)
   const footerReserve = 110;
   const topoH = H - y - footerReserve - edge - 12;
   ctx.strokeStyle = "#222222";
@@ -1028,7 +1150,7 @@ async function composeBlueprintA4Jpeg(opts: {
   ctx.font = '800 24px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
   ctx.textAlign = rtl ? "right" : "left";
   const topoTitleX = rtl ? W - padX - 14 : padX + 14;
-  ctx.fillText(opts.sideViewLabel, topoTitleX, y + 12, W - padX * 2 - 28);
+  ctx.fillText(opts.topViewLabel, topoTitleX, y + 12, W - padX * 2 - 28);
   ctx.strokeStyle = "#222222";
   ctx.beginPath();
   ctx.moveTo(padX + 12, y + 44);
@@ -1042,7 +1164,7 @@ async function composeBlueprintA4Jpeg(opts: {
   ctx.lineWidth = 1;
   ctx.strokeRect(tFrameX, tFrameY, tFrameW, tFrameH);
   try {
-    const topoImg = await loadImage(opts.contourPng);
+    const topoImg = await loadImage(opts.contextPng);
     drawContainedImage(ctx, topoImg, tFrameX + 4, tFrameY + 4, tFrameW - 8, tFrameH - 8);
   } catch {
     /* skip */
@@ -1081,6 +1203,9 @@ async function composeBlueprintA4Jpeg(opts: {
     ctx.font = '800 20px "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif';
     ctx.fillText(c.phone, cx, footY + 24);
   });
+
+  // Keep watermark on top in mobile-rendered sheet, but very subtle.
+  drawPaperWatermark(ctx, W, H, 0.05);
 
   return canvas.toDataURL("image/jpeg", 0.92);
 }
@@ -1226,6 +1351,8 @@ async function openMobilePdfPopup(opts: {
     #${prevId} {
       position: fixed; inset: 0; z-index: 2147483646;
       display: flex; align-items: stretch; justify-content: center;
+      padding-top: max(12px, calc(env(safe-area-inset-top, 0px) + 14px));
+      padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
       font-family: "IBM Plex Sans Arabic", "Segoe UI", system-ui, sans-serif;
     }
     #${prevId} .abp-backdrop {
@@ -1235,6 +1362,8 @@ async function openMobilePdfPopup(opts: {
       position: relative; z-index: 1; margin: 0; width: 100%; max-width: 560px;
       background: #f7f4ee; display: flex; flex-direction: column;
       max-height: 100%; box-shadow: 0 24px 64px rgba(0,0,0,.35);
+      border-radius: 14px;
+      overflow: hidden;
     }
     @media (min-width: 600px) {
       #${prevId} { padding: 16px; align-items: center; }
@@ -1242,7 +1371,7 @@ async function openMobilePdfPopup(opts: {
     }
     #${prevId} .abp-head {
       display: flex; align-items: flex-start; justify-content: space-between;
-      gap: 12px; padding: 14px 16px; background: #0f342f; color: #fff;
+      gap: 12px; padding: 18px 16px 14px; background: #0f342f; color: #fff;
     }
     #${prevId} .abp-title { font-weight: 800; font-size: 16px; color: #e8c98a; }
     #${prevId} .abp-note { font-size: 12px; color: rgba(255,255,255,.8); margin-top: 2px; }
@@ -1357,6 +1486,9 @@ export async function printParcelBlueprint(opts: {
   const push = (label: string, value?: string | null) => {
     if (value && String(value).trim()) rows.push([label, String(value).trim()]);
   };
+  for (const row of meta.extraRows ?? []) {
+    push(row.label, row.value);
+  }
   push(meta.labels.governorate, meta.governorate);
   push(meta.labels.directorate, meta.directorate);
   push(meta.labels.village, meta.village);
@@ -1397,6 +1529,16 @@ export async function printParcelBlueprint(opts: {
     )
     .join("");
 
+  const watermarkSvg = encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="240" viewBox="0 0 360 240">
+      <g transform="translate(34 30) rotate(-18 146 90)" fill="none" stroke="rgba(15,52,47,0.09)" stroke-width="2">
+        <path d="M78 118V84l13-10v44M103 118V76l13-12v54M128 118V84l13-10v44" />
+        <path d="M70 124h86" />
+      </g>
+      <text x="178" y="182" text-anchor="middle" fill="rgba(15,52,47,0.09)" font-family="Segoe UI, Arial, sans-serif" font-size="31" font-weight="700" letter-spacing="2">ALSHANTAF</text>
+    </svg>`
+  );
+
   const html = `<!DOCTYPE html>
 <html lang="${meta.lang}" dir="${rtl ? "rtl" : "ltr"}">
 <head>
@@ -1434,6 +1576,21 @@ export async function printParcelBlueprint(opts: {
     border: 2.2mm solid var(--green);
     position: relative;
   }
+  .sheet::after {
+    content: "";
+    position: absolute;
+    inset: 8mm;
+    background-image: url("data:image/svg+xml,${watermarkSvg}");
+    background-repeat: repeat;
+    background-size: 74mm 54mm;
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0.35;
+  }
+  .sheet > * {
+    position: relative;
+    z-index: 1;
+  }
   .header {
     direction: ltr;
     display: grid;
@@ -1465,6 +1622,12 @@ export async function printParcelBlueprint(opts: {
     max-width: 58mm;
     justify-self: start;
     align-self: center;
+  }
+  .header .motto--ar {
+    /* Keep Arabic motto on one visual line and avoid trailing-word wrap. */
+    white-space: nowrap;
+    max-width: 66mm;
+    font-size: 6.7pt;
   }
   .header .logo-wrap {
     display: flex;
@@ -1555,6 +1718,13 @@ export async function printParcelBlueprint(opts: {
     height: auto;
     object-fit: contain;
     display: block;
+  }
+  .view-panel.map-view .frame img {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: contain;
   }
   .topo {
     min-height: 0;
@@ -1695,7 +1865,7 @@ export async function printParcelBlueprint(opts: {
 <body>
   <div class="sheet">
     <header class="header">
-      <div class="motto">${escapeHtml(motto)}</div>
+      <div class="motto${meta.lang === "ar" ? " motto--ar" : ""}">${escapeHtml(motto)}</div>
       <div class="logo-wrap">
         ${logo ? `<img src="${logo}" alt="" />` : ""}
       </div>
@@ -1710,13 +1880,13 @@ export async function printParcelBlueprint(opts: {
         <p class="note">${escapeHtml(meta.approxNote)}</p>
       </section>
       <section class="panel view-panel">
-        <h2>${escapeHtml(meta.topViewLabel)}</h2>
-        <div class="frame"><img src="${opts.contextPng}" alt="" /></div>
+        <h2>${escapeHtml(meta.sideViewLabel)}</h2>
+        <div class="frame"><img src="${opts.contourPng}" alt="" /></div>
       </section>
     </div>
-    <section class="panel view-panel topo">
-      <h2>${escapeHtml(meta.sideViewLabel)}</h2>
-      <div class="frame"><img src="${opts.contourPng}" alt="" /></div>
+    <section class="panel view-panel topo map-view">
+      <h2>${escapeHtml(meta.topViewLabel)}</h2>
+      <div class="frame"><img src="${opts.contextPng}" alt="" /></div>
     </section>
     <footer class="footer">
       <div class="footer-left">

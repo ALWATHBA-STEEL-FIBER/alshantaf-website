@@ -5,6 +5,8 @@ import { LanguageProvider } from "@/lib/LanguageProvider";
 import { getServerLang } from "@/lib/serverLang";
 import { SITE_URL } from "@/lib/site";
 import { JsonLd } from "@/components/JsonLd";
+import { DevSignature } from "@/components/DevSignature";
+import { DEV_SIGNATURE } from "@/lib/devSignature";
 
 const plexArabic = IBM_Plex_Sans_Arabic({
   variable: "--font-plex-arabic",
@@ -96,6 +98,9 @@ export const metadata: Metadata = {
   },
   category: "real estate",
   applicationName: SITE_NAME,
+  other: {
+    "x-built-by": DEV_SIGNATURE,
+  },
   appleWebApp: {
     capable: true,
     title: "ALSHANTAF",
@@ -116,8 +121,15 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const dir = lang === "ar" ? "rtl" : "ltr";
 
   return (
-    <html lang={lang} dir={dir} className={`${plexArabic.variable} ${cairo.variable} antialiased`}>
-      <body className="min-h-screen flex flex-col">
+    <html
+      lang={lang}
+      dir={dir}
+      className={`${plexArabic.variable} ${cairo.variable} antialiased`}
+      data-built-by={DEV_SIGNATURE}
+      data-dev={DEV_SIGNATURE}
+    >
+      <body className="min-h-screen flex flex-col" data-built-by={DEV_SIGNATURE}>
+        <DevSignature />
         <JsonLd
           data={{
             "@context": "https://schema.org",

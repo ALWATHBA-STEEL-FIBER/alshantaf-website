@@ -35,6 +35,9 @@ export function Footer() {
           <Link href="/services" className="hover:text-gold transition-colors w-fit">
             {t.nav.services}
           </Link>
+          <Link href="/jordan-lending-market" className="hover:text-gold transition-colors w-fit">
+            {t.nav.lendingMarket}
+          </Link>
           <Link href="/request-publish" className="hover:text-gold transition-colors w-fit">
             {t.nav.cta}
           </Link>

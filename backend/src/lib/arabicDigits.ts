@@ -13,6 +13,22 @@ export function toWesternDigits(value: string): string {
     .replace(/\u066C/g, ",");
 }
 
+/**
+ * Normalize decimal-like user input into a backend-safe numeric string.
+ * Accepts Arabic comma/Latin comma and strips spacing/thousand separators.
+ */
+export function normalizeDecimalInput(value: string): string {
+  const base = toWesternDigits(value).replace(/\s+/g, "").replace(/\u060C/g, ",").trim();
+  if (!base) return "";
+  if (base.includes(".") && base.includes(",")) return base.replace(/,/g, "");
+  if (!base.includes(",") || base.includes(".")) return base;
+  const parts = base.split(",");
+  if (parts.length === 2 && parts[0] && parts[1] && parts[1].length <= 3) {
+    return `${parts[0]}.${parts[1]}`;
+  }
+  return base.replace(/,/g, "");
+}
+
 /** Zod string field that normalizes Eastern/Arabic-Indic digits before validation. */
 export function westernDigitsString<T extends z.ZodTypeAny>(schema: T) {
   return z.preprocess((value) => (typeof value === "string" ? toWesternDigits(value) : value), schema);

@@ -15,7 +15,7 @@ import {
 import { MeasureToolbar } from "@/components/MeasureToolbar";
 import { MeasureThreadsOverlay } from "@/components/MeasureThreadsOverlay";
 import { downloadParcelCadDxf } from "@/lib/parcelCadExport";
-import type { ParcelRing } from "@/components/LocationInput";
+import type { AdjacentRoad, ContextParcel, ParcelRing } from "@/components/LocationInput";
 import "leaflet/dist/leaflet.css";
 
 type Basemap = "map" | "satellite";
@@ -31,6 +31,14 @@ type Labels = {
   dimensionsArea: string;
   dimensionsPerimeter: string;
   dimensionsExtent: string;
+  streetInfoTitle: string;
+  streetWidthLabel: string;
+  streetWidthUnknown: string;
+  streetUnnamed: string;
+  streetSideNorth: string;
+  streetSideSouth: string;
+  streetSideEast: string;
+  streetSideWest: string;
   exitFullscreen: string;
   measureEnter: string;
   measureExit: string;
@@ -53,6 +61,9 @@ type Labels = {
   measureHintArea: string;
   measureExportCad: string;
   measureExportCadHint: string;
+  useLocation: string;
+  locating: string;
+  locationUnavailable: string;
 };
 
 type Props = {
@@ -80,9 +91,16 @@ type Props = {
   areaSqm: number | null;
   extents: Extents;
   parcelNumber?: string | null;
+  parcelNumbers?: string[] | null;
+  adjacentRoads?: AdjacentRoad[] | null;
+  contextParcels?: ContextParcel[] | null;
+  showContextGrid?: boolean;
+  onToggleContextGrid?: () => void;
   parcelLabel?: string;
   lang: "ar" | "en";
   labels: Labels;
+  locked?: boolean;
+  onPickLocation?: (coords: Coords) => void | Promise<void>;
 };
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
@@ -118,9 +136,16 @@ export function MapFullscreenPortal({
   areaSqm,
   extents,
   parcelNumber = null,
+  parcelNumbers = null,
+  adjacentRoads = null,
+  contextParcels = null,
+  showContextGrid = true,
+  onToggleContextGrid,
   parcelLabel = "",
   lang,
   labels: lp,
+  locked = false,
+  onPickLocation,
 }: Props) {
   const paneRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
@@ -129,12 +154,17 @@ export function MapFullscreenPortal({
   const polyRef = useRef<import("leaflet").Polygon | null>(null);
   const dimsRef = useRef<import("leaflet").LayerGroup | null>(null);
   const markerRef = useRef<import("leaflet").Marker | null>(null);
+  const roadsLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const measureToolRef = useRef<MeasureTool | null>(null);
   const [measureSnap, setMeasureSnap] = useState<MeasureSnapshot | null>(null);
   const basemapRef = useRef(basemap);
   basemapRef.current = basemap;
   const measureModeRef = useRef(measureMode);
   measureModeRef.current = measureMode;
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
+  const [geoStatus, setGeoStatus] = useState<"idle" | "locating" | "error">("idle");
+  const [geoMessage, setGeoMessage] = useState("");
 
   const snapTargets = useMemo(
     () => parcelSnapTargets(polygon as [number, number][][] | null | undefined),
@@ -142,6 +172,39 @@ export function MapFullscreenPortal({
   );
   const measuring = measureMode !== "off";
   const dimsOnCanvas = Boolean(drawDimensions && showDimensions && !measuring);
+  const roads = useMemo(
+    () => {
+      const valid = (adjacentRoads ?? []).filter(
+        (road) =>
+          Array.isArray(road.path) &&
+          road.path.length >= 2 &&
+          road.path.every(
+            (point) =>
+              Array.isArray(point) &&
+              point.length === 2 &&
+              Number.isFinite(point[0]) &&
+              Number.isFinite(point[1])
+          )
+      );
+      const bestBySide = new Map<AdjacentRoad["side"], AdjacentRoad>();
+      for (const road of valid) {
+        const prev = bestBySide.get(road.side);
+        const score = road.widthM ?? 0;
+        const prevScore = prev?.widthM ?? 0;
+        if (!prev || score > prevScore) bestBySide.set(road.side, road);
+      }
+      return Array.from(bestBySide.values());
+    },
+    [adjacentRoads]
+  );
+  const sideLabel = (side: AdjacentRoad["side"]) =>
+    side === "north"
+      ? lp.streetSideNorth
+      : side === "south"
+        ? lp.streetSideSouth
+        : side === "east"
+          ? lp.streetSideEast
+          : lp.streetSideWest;
 
   const measureLabels = {
     measureEnter: lp.measureEnter,
@@ -169,19 +232,83 @@ export function MapFullscreenPortal({
   };
 
   function exportArchitectureCad() {
-    // Pass a copy of rings for DXF only — does not change map polygon state.
-    const rings = (polygon ?? []).filter((r) => r?.length >= 2).map((r) => r.slice() as [number, number][]);
+    const rings = polygon?.filter((r) => r.length >= 2) ?? [];
     if (!rings.length) return;
     try {
       downloadParcelCadDxf({
         rings,
+        ring: rings[0],
         parcelNumber,
+        parcelNumbers: parcelNumbers ?? null,
         areaSqm,
         perimeterM,
         measure: measureSnap,
       });
     } catch {
       // ignore
+    }
+  }
+
+  function upsertMarker(
+    L: typeof import("leaflet"),
+    map: import("leaflet").Map,
+    coords: Coords
+  ) {
+    const draggable = !lockedRef.current && measureModeRef.current === "off";
+    const icon = L.divIcon({
+      className: "",
+      html: '<span style="display:block;width:22px;height:22px;border-radius:50% 50% 50% 0;background:#113a34;border:2px solid #caa064;transform:rotate(-45deg);box-shadow:0 3px 8px rgba(0,0,0,.25)"></span>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 22],
+    });
+    if (!markerRef.current) {
+      markerRef.current = L.marker([coords.lat, coords.lng], { icon, draggable }).addTo(map);
+      if (markerRef.current.dragging && !draggable) markerRef.current.dragging.disable();
+      markerRef.current.on("dragend", () => {
+        const p = markerRef.current?.getLatLng();
+        if (!p) return;
+        void onPickLocation?.({ lat: p.lat, lng: p.lng });
+      });
+    } else {
+      markerRef.current.setLatLng([coords.lat, coords.lng]);
+      if (markerRef.current.dragging) {
+        if (draggable) markerRef.current.dragging.enable();
+        else markerRef.current.dragging.disable();
+      }
+    }
+  }
+
+  async function useCurrentLocationInFullscreen() {
+    setGeoMessage("");
+    if (!navigator.geolocation) {
+      setGeoStatus("error");
+      setGeoMessage(lp.locationUnavailable);
+      return;
+    }
+    setGeoStatus("locating");
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 30000,
+        });
+      });
+      const coords = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      };
+      const map = mapRef.current;
+      if (map) {
+        const L = await import("leaflet");
+        upsertMarker(L, map, coords);
+        map.setView([coords.lat, coords.lng], Math.max(map.getZoom(), 16), { animate: true });
+      }
+      await onPickLocation?.(coords);
+      setGeoStatus("idle");
+    } catch {
+      setGeoStatus("error");
+      setGeoMessage(lp.locationUnavailable);
     }
   }
 
@@ -225,6 +352,7 @@ export function MapFullscreenPortal({
     if (!open) return;
     let cancelled = false;
     let map: import("leaflet").Map | null = null;
+    let clickHandler: ((event: import("leaflet").LeafletMouseEvent) => void) | null = null;
 
     const boot = async () => {
       const L = await import("leaflet");
@@ -240,6 +368,7 @@ export function MapFullscreenPortal({
         : DEFAULT_CENTER;
       map = L.map(paneRef.current, {
         zoomControl: true,
+        attributionControl: false,
         dragging: true,
         scrollWheelZoom: true,
         doubleClickZoom: false,
@@ -267,15 +396,26 @@ export function MapFullscreenPortal({
       (basemapRef.current === "satellite" ? sat : osm).addTo(map);
       mapRef.current = map;
 
+      clickHandler = (event) => {
+        if (lockedRef.current || measureModeRef.current !== "off") return;
+        const coords = { lat: event.latlng.lat, lng: event.latlng.lng };
+        upsertMarker(L, map!, coords);
+        void onPickLocation?.(coords);
+      };
+      map.on("click", clickHandler);
+
       if (polygon && polygon.length > 0) {
         const opts: ParcelCanvasOpts = {
           rings: polygon as [number, number][][],
+          contextParcels,
+          showContextGrid,
           showDimensions: Boolean(
             drawDimensions && showDimensions && measureModeRef.current === "off"
           ),
           perimeterM,
           lang,
           parcelNumber,
+          parcelNumbers,
           parcelLabel,
         };
         const layer = createParcelCanvasLayer(L, opts);
@@ -287,16 +427,7 @@ export function MapFullscreenPortal({
           /* ignore */
         }
       } else if (selected) {
-        const icon = L.divIcon({
-          className: "",
-          html: '<span style="display:block;width:22px;height:22px;border-radius:50% 50% 50% 0;background:#113a34;border:2px solid #caa064;transform:rotate(-45deg);box-shadow:0 3px 8px rgba(0,0,0,.25)"></span>',
-          iconSize: [22, 22],
-          iconAnchor: [11, 22],
-        });
-        markerRef.current = L.marker([selected.lat, selected.lng], {
-          icon,
-          interactive: false,
-        }).addTo(map);
+        upsertMarker(L, map, selected);
       }
 
       measureToolRef.current = attachMeasureTool(L, map, {
@@ -325,6 +456,7 @@ export function MapFullscreenPortal({
 
     return () => {
       cancelled = true;
+      if (map && clickHandler) map.off("click", clickHandler);
       measureToolRef.current?.destroy();
       measureToolRef.current = null;
       map?.remove();
@@ -332,6 +464,7 @@ export function MapFullscreenPortal({
       osmRef.current = null;
       satRef.current = null;
       polyRef.current = null;
+      roadsLayerRef.current = null;
       dimsRef.current = null;
       markerRef.current = null;
       setMeasureSnap(null);
@@ -365,6 +498,14 @@ export function MapFullscreenPortal({
       }
     }
   }, [open, measureMode]);
+
+  useEffect(() => {
+    if (!open) return;
+    const marker = markerRef.current;
+    if (!marker?.dragging) return;
+    if (!locked && measureMode === "off") marker.dragging.enable();
+    else marker.dragging.disable();
+  }, [open, locked, measureMode]);
 
   useEffect(() => {
     if (!open) return;
@@ -410,13 +551,29 @@ export function MapFullscreenPortal({
     if (!layer?.setParcelOptions || !polygon?.[0]?.length) return;
     layer.setParcelOptions({
       rings: polygon as [number, number][][],
+      contextParcels,
+      showContextGrid,
       showDimensions: dimsOnCanvas,
       perimeterM,
       lang,
       parcelNumber,
+      parcelNumbers,
       parcelLabel,
     });
-  }, [open, dimsOnCanvas, polygon, perimeterM, lang, parcelNumber, parcelLabel]);
+  }, [open, dimsOnCanvas, polygon, perimeterM, lang, parcelNumber, parcelNumbers, parcelLabel, contextParcels, showContextGrid]);
+
+  useEffect(() => {
+    if (!open) return;
+    void import("leaflet").then(() => {
+      const map = mapRef.current;
+      if (!map) return;
+      if (roadsLayerRef.current) {
+        map.removeLayer(roadsLayerRef.current);
+        roadsLayerRef.current = null;
+      }
+      // Info-only mode: keep adjacent street data in cards, do not draw road overlays.
+    });
+  }, [open]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -470,6 +627,20 @@ export function MapFullscreenPortal({
             {lp.dimensionsOnMap}
           </button>
         )}
+        {Boolean(polygon?.[0]?.length) && (
+          <button
+            type="button"
+            onClick={onToggleContextGrid}
+            className={`min-h-11 h-8 px-3 rounded-full text-[11px] font-bold border transition-colors ${
+              showContextGrid
+                ? "bg-gold/15 border-gold text-gold"
+                : "border-gold/35 text-gold/80 hover:text-gold bg-[#0a1f1c]"
+            }`}
+            aria-pressed={showContextGrid}
+          >
+            {lang === "ar" ? (showContextGrid ? "إخفاء شبكة القطع" : "إظهار شبكة القطع") : showContextGrid ? "Hide Parcel Grid" : "Show Parcel Grid"}
+          </button>
+        )}
         {!measuring && (
           <MeasureToolbar
             mode={measureMode}
@@ -485,6 +656,7 @@ export function MapFullscreenPortal({
             onLineColorChange={onLineColorChange}
             lang={lang}
             variant="dark"
+            compact
             labels={measureLabels}
             onEnter={() => onMeasureModeChange("distance")}
             onModeChange={(m) => onMeasureModeChange(m)}
@@ -495,6 +667,17 @@ export function MapFullscreenPortal({
             onExportCad={exportArchitectureCad}
             canExportCad={Boolean(polygon?.[0]?.length)}
           />
+        )}
+        {!locked && (
+          <button
+            type="button"
+            onClick={useCurrentLocationInFullscreen}
+            disabled={geoStatus === "locating"}
+            className="min-h-11 h-8 px-3 rounded-full border border-gold/35 bg-[#0a1f1c] text-gold text-[11px] font-bold disabled:opacity-60"
+            title={lp.useLocation}
+          >
+            {geoStatus === "locating" ? lp.locating : lp.useLocation}
+          </button>
         )}
         {measuring && (
           <button
@@ -537,6 +720,7 @@ export function MapFullscreenPortal({
             onLineColorChange={onLineColorChange}
             lang={lang}
             variant="dark"
+            compact
             labels={measureLabels}
             onEnter={() => onMeasureModeChange("distance")}
             onModeChange={(m) => onMeasureModeChange(m)}
@@ -549,12 +733,20 @@ export function MapFullscreenPortal({
           />
         </div>
       )}
+      {!measuring && geoMessage ? (
+        <div className="shrink-0 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-1.5 text-[11px] text-red-200">
+          {geoMessage}
+        </div>
+      ) : null}
 
       <div className="relative min-h-0 flex-1 w-full overflow-hidden rounded-xl border border-line bg-surface-2">
         <div
           ref={paneRef}
           className="map-fs-portal-pane absolute inset-0 touch-none"
         />
+        <p className="absolute bottom-1.5 right-2 z-20 rounded bg-black/55 px-2 py-0.5 text-[10px] text-white/95">
+          © OpenStreetMap · © Esri
+        </p>
         {measuring && (
           <MeasureThreadsOverlay
             snap={measureSnap}
@@ -603,6 +795,25 @@ export function MapFullscreenPortal({
                 </b>
               </li>
             )}
+          </ul>
+        </div>
+      )}
+      {roads.length > 0 && !measuring && (
+        <div className="shrink-0 rounded-xl border border-gold/35 bg-[#0f342f] px-3 py-2 text-gold-2">
+          <p className="text-[10px] font-bold tracking-wide mb-1 text-gold">{lp.streetInfoTitle}</p>
+          <ul className="grid gap-1 text-[11px]">
+            {roads.map((road) => (
+              <li key={road.id} className="flex flex-wrap items-center gap-1.5">
+                <b>{road.name || lp.streetUnnamed}</b>
+                {!(road.source === "dls-neighbor" && road.id.startsWith("dls-line-nearest-")) && (
+                  <span className="text-gold/70">({sideLabel(road.side)})</span>
+                )}
+                <span className="text-gold/70">
+                  {lp.streetWidthLabel}:{" "}
+                  <b>{road.widthM != null ? `${Math.round(road.widthM * 10) / 10} ${lang === "ar" ? "م" : "m"}` : lp.streetWidthUnknown}</b>
+                </span>
+              </li>
+            ))}
           </ul>
         </div>
       )}

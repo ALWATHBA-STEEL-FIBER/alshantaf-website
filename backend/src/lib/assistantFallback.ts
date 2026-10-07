@@ -1,25 +1,10 @@
-import { listServices, searchOffers, type AssistantLang, type OfferCardPayload, type ServiceCardPayload } from "./assistantCatalog";
+import { listServices, searchOffersForUserText, type AssistantLang, type OfferCardPayload, type ServiceCardPayload } from "./assistantCatalog";
+import { detectArea } from "./assistantIntent";
+import { developerCreditReply, isDeveloperCreditQuestion } from "./devSignature";
 
 export type FallbackCard =
   | { type: "offer"; offer: OfferCardPayload }
   | { type: "service"; service: ServiceCardPayload };
-
-const AREA_ALIASES: Array<{ area: string; patterns: RegExp[] }> = [
-  { area: "سحاب", patterns: [/سحاب/i, /\bsahab\b/i] },
-  { area: "القسطل", patterns: [/قسطل/i, /\bqastal\b/i, /\bal-?qastal\b/i] },
-  { area: "المشتى", patterns: [/مشتى/i, /مشتا/i, /\bmushta\b/i, /\bal-?mushta\b/i] },
-  { area: "الزرقاء", patterns: [/زرقاء/i, /\bzarqa\b/i] },
-  { area: "الموقر", patterns: [/موقر/i, /\bmuwaqqar\b/i, /\bmuwaqar\b/i] },
-  { area: "الجيزة", patterns: [/جيزة/i, /\bjiza\b/i, /\bjizah\b/i] },
-  { area: "خلدا", patterns: [/خلدا/i, /\bkhalda\b/i] },
-];
-
-function detectArea(text: string) {
-  for (const row of AREA_ALIASES) {
-    if (row.patterns.some((p) => p.test(text))) return row.area;
-  }
-  return null;
-}
 
 function detectServiceId(text: string): string | null {
   if (/تتبع|tracking|track\b/i.test(text)) return "track";
@@ -40,27 +25,37 @@ export async function buildFallbackReply(
   userText: string,
   lang: AssistantLang
 ): Promise<{ reply: string; cards: FallbackCard[]; degraded: true }> {
-  const area = detectArea(userText);
-  const wantsLand = /أرض|ارض|فرص|عروض|land|offer|opportunit|industrial/i.test(userText);
+  if (isDeveloperCreditQuestion(userText)) {
+    return { reply: developerCreditReply(lang), cards: [], degraded: true };
+  }
+
+  const { offers, intent } = await searchOffersForUserText(userText, { limit: 3 });
   const cards: FallbackCard[] = [];
+  const area = intent.area || detectArea(userText);
 
-  if (area || wantsLand) {
-    const offers = await searchOffers({
-      area: area ?? undefined,
-      q: area ? undefined : userText.slice(0, 80),
-      limit: 2,
-    });
-
+  if (intent.wantsOffers) {
     if (offers.length) {
       for (const offer of offers) cards.push({ type: "offer", offer });
+      const sizeNote =
+        intent.size?.mode === "min"
+          ? lang === "ar"
+            ? " هذه العروض بمساحة طلبك فأكثر."
+            : " These offers are your size and larger."
+          : intent.size
+            ? lang === "ar"
+              ? " المساحة تقريبية من العروض المنشورة حاليًا."
+              : " Size is approximate from currently published offers."
+            : "";
       const reply =
         lang === "ar"
           ? area
-            ? `وجدت عروضًا قد تناسب بحثك في ${area}. يمكنك فتح التفاصيل أو التواصل عبر واتساب.`
-            : "إليك أقرب العروض المتاحة حاليًا. يمكنك فتح التفاصيل أو التواصل عبر واتساب."
+            ? `وجدت عروضًا قد تناسب بحثك في ${area}.${sizeNote} يمكنك فتح التفاصيل أو التواصل عبر واتساب.`
+            : `إليك أقرب العروض المتاحة حاليًا.${sizeNote} يمكنك فتح التفاصيل أو التواصل عبر واتساب.`
           : area
-            ? `Here are offers that may match your search in ${area}. Open details or reach us on WhatsApp.`
-            : "Here are the closest available offers. Open details or reach us on WhatsApp.";
+            ? `Here are offers that may match your search in ${area}.${sizeNote} Open details or reach us on WhatsApp.`
+            : `Here are the closest available offers.${sizeNote} Open details or reach us on WhatsApp.`;
+      const [service] = listServices(lang, ["opportunities"]);
+      if (service) cards.push({ type: "service", service });
       return { reply, cards, degraded: true };
     }
 
@@ -69,10 +64,10 @@ export async function buildFallbackReply(
     const reply =
       lang === "ar"
         ? area
-          ? `عذرًا، لا توجد عروض منشورة حاليًا في ${area}. يمكنك استعراض الفرص الأخرى من البطاقة أدناه، أو أخبرني إن رغبت بنشر طلبك.`
+          ? `عذرًا، لا توجد عروض منشورة حاليًا في ${area} ضمن المساحة المطلوبة. يمكنك استعراض الفرص الأخرى من البطاقة أدناه.`
           : "عذرًا، لم أجد عرضًا مطابقًا الآن. يمكنك استعراض الفرص المتاحة من البطاقة أدناه."
         : area
-          ? `Sorry — no published offers in ${area} right now. Browse other opportunities below, or ask to publish a request.`
+          ? `Sorry — no published offers in ${area} at that size right now. Browse other opportunities below.`
           : "Sorry — no matching offer right now. Browse available opportunities below.";
     return { reply, cards, degraded: true };
   }

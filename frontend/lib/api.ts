@@ -120,6 +120,14 @@ export const api = {
       latitude: number;
       longitude: number;
       rings: [number, number][][];
+      adjacentRoads: Array<{
+        id: string;
+        name: string;
+        side: "north" | "south" | "east" | "west";
+        widthM: number | null;
+        source: "osm-overpass" | "google-maps" | "dls-neighbor";
+        path: [number, number][];
+      }>;
       dlsKey: string;
       villageCode: string;
       basinCode: string;
@@ -131,6 +139,69 @@ export const api = {
       source: string;
       sourceUrl: string;
     }>("/submissions/dls-location", { method: "POST", body: JSON.stringify(data) }),
+
+  dlsParcelByPointPublic: (data: { latitude: number; longitude: number }) =>
+    clientFetch<{
+      latitude: number;
+      longitude: number;
+      rings: [number, number][][];
+      adjacentRoads: Array<{
+        id: string;
+        name: string;
+        side: "north" | "south" | "east" | "west";
+        widthM: number | null;
+        source: "osm-overpass" | "google-maps" | "dls-neighbor";
+        path: [number, number][];
+      }>;
+      dlsKey: string;
+      villageCode: string;
+      basinCode: string;
+      sectorCode: string;
+      parcelId: string;
+      sheetNo: string | null;
+      areaSqm: number | null;
+      perimeterM: number | null;
+      source: string;
+      sourceUrl: string;
+    }>("/submissions/dls-location-by-point", { method: "POST", body: JSON.stringify(data) }),
+
+  ammanZoningPublic: (data: {
+    latitude?: number;
+    longitude?: number;
+    villageCode?: string;
+    basinCode?: string;
+    sectorCode?: string;
+    parcelNumber?: string;
+  }) =>
+    clientFetch<{
+      industryType: string | null;
+      zoningNo: string | null;
+      zoningName: string | null;
+      districtName: string | null;
+      sourceUrl: string;
+      latitude: number | null;
+      longitude: number | null;
+    }>("/submissions/amman-zoning", { method: "POST", body: JSON.stringify(data) }),
+  industryTypesCatalogPublic: () =>
+    clientFetch<
+      Array<{
+        industryType: string;
+        category: string;
+        ammanAutoEligible: boolean;
+        rules: {
+          setbacks: {
+            frontal: string;
+            side: string;
+            rear: string;
+            buildPercentage: string;
+            floors: string;
+            height: string;
+          };
+        };
+        createdAt: string;
+        updatedAt: string;
+      }>
+    >("/submissions/industry-types-catalog"),
 
   async submitLead(
     data: Record<string, string | undefined>,
@@ -197,6 +268,14 @@ export const api = {
       latitude: number;
       longitude: number;
       rings: [number, number][][];
+      adjacentRoads: Array<{
+        id: string;
+        name: string;
+        side: "north" | "south" | "east" | "west";
+        widthM: number | null;
+        source: "osm-overpass" | "google-maps" | "dls-neighbor";
+        path: [number, number][];
+      }>;
       dlsKey: string;
       villageCode: string;
       basinCode: string;
@@ -209,10 +288,34 @@ export const api = {
       sourceUrl: string;
     }>("/admin/dls/parcel-location", { method: "POST", body: JSON.stringify(data) }),
 
+  dlsParcelByPoint: (data: { latitude: number; longitude: number }) =>
+    clientFetch<{
+      latitude: number;
+      longitude: number;
+      rings: [number, number][][];
+      adjacentRoads: Array<{
+        id: string;
+        name: string;
+        side: "north" | "south" | "east" | "west";
+        widthM: number | null;
+        source: "osm-overpass" | "google-maps" | "dls-neighbor";
+        path: [number, number][];
+      }>;
+      dlsKey: string;
+      villageCode: string;
+      basinCode: string;
+      sectorCode: string;
+      parcelId: string;
+      sheetNo: string | null;
+      areaSqm: number | null;
+      perimeterM: number | null;
+      source: string;
+      sourceUrl: string;
+    }>("/admin/dls/parcel-by-point", { method: "POST", body: JSON.stringify(data) }),
+
   adminSubmissions: (query?: string) => clientFetch<Submission[]>(`/admin/submissions${query ? `?${query}` : ""}`),
   updateSubmission: (id: string, data: Record<string, unknown>) =>
     clientFetch<Submission>(`/admin/submissions/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  deleteSubmission: (id: string) => clientFetch<void>(`/admin/submissions/${id}`, { method: "DELETE" }),
   approveSubmission: (
     id: string,
     data: {
@@ -228,7 +331,6 @@ export const api = {
         price?: string;
         description?: string;
         phone?: string;
-        size?: string;
         village?: string;
         basin?: string;
         neighborhood?: string;
@@ -291,6 +393,17 @@ export const api = {
   adminSettings: () => clientFetch<AdminSettings>("/admin/settings"),
   updateSettings: (data: Partial<AdminSettings>) =>
     clientFetch<AdminSettings>("/admin/settings", { method: "PATCH", body: JSON.stringify(data) }),
+  assistantKnowledge: () =>
+    clientFetch<{ content: string; defaultLength: number; maxChars: number }>("/admin/assistant-knowledge"),
+  updateAssistantKnowledge: (content: string) =>
+    clientFetch<{ content: string; defaultLength: number; maxChars: number }>("/admin/assistant-knowledge", {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    }),
+  resetAssistantKnowledge: () =>
+    clientFetch<{ content: string; defaultLength: number; maxChars: number }>("/admin/assistant-knowledge/reset", {
+      method: "POST",
+    }),
 
   auditLog: (action?: string) => clientFetch<AuditLogEntry[]>(`/admin/audit${action ? `?action=${action}` : ""}`),
 
@@ -330,6 +443,24 @@ export const api = {
   adminPresence: () => clientFetch<PresenceInfo>("/admin/presence"),
 
   assistantStatus: () => clientFetch<{ enabled: boolean }>("/assistant/status"),
-  assistantChat: (data: { lang: "ar" | "en"; messages: Array<{ role: "user" | "assistant"; content: string }> }) =>
+  publicListing: (id: string) => clientFetch<Listing>(`/listings/${encodeURIComponent(id)}`),
+  assistantChat: (data: {
+    lang: "ar" | "en";
+    messages: Array<{ role: "user" | "assistant"; content: string }>;
+    context?: {
+      offer?: {
+        id: string;
+        listingNo: string;
+        title: string;
+        area: string;
+        industryType: string;
+        dealType: string;
+        status: string;
+        size?: string | null;
+        price?: string | null;
+        description?: string;
+      };
+    };
+  }) =>
     clientFetch<AssistantChatResponse>("/assistant/chat", { method: "POST", body: JSON.stringify(data) }),
 };

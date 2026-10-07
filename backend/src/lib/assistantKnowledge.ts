@@ -1,217 +1,128 @@
-import fs from "fs";
-import path from "path";
-import type { GroqMessage } from "./groq";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { prisma } from "../prisma";
 
-const PACK_VERSION = "2026-09-30";
+export const ASSISTANT_KNOWLEDGE_KEY = "assistantMasterKnowledge";
+export const ASSISTANT_KNOWLEDGE_MAX_CHARS = 160_000;
+const PROMPT_BUDGET_CHARS = 10_000;
+const ALWAYS_INCLUDE_CHARS = 3_200;
 
-type KnowledgeChunk = {
-  id: string;
-  title: string;
-  body: string;
-  haystack: string;
-};
+let fileDefaultCache: string | null = null;
+let dbCache: { value: string; at: number } | null = null;
 
-type TrainingExample = {
-  user: string;
-  assistant: string;
-  haystack: string;
-};
-
-type PackCache = {
-  systemPrompt: string;
-  chunks: KnowledgeChunk[];
-  examples: TrainingExample[];
-  loadedAt: number;
-};
-
-let cache: PackCache | null = null;
-
-function knowledgeRoot(): string {
-  // Runtime: dist/lib → ../../knowledge ; Dev (tsx): src/lib → ../../knowledge
+function loadBundledDefault(): string {
+  if (fileDefaultCache) return fileDefaultCache;
   const candidates = [
-    path.join(__dirname, "..", "..", "knowledge"),
-    path.join(process.cwd(), "knowledge"),
-    path.join(process.cwd(), "backend", "knowledge"),
+    join(process.cwd(), "src/knowledge/alshantaf-industrial-master-ar.txt"),
+    join(__dirname, "../knowledge/alshantaf-industrial-master-ar.txt"),
+    join(__dirname, "../../src/knowledge/alshantaf-industrial-master-ar.txt"),
   ];
-  for (const dir of candidates) {
-    if (fs.existsSync(path.join(dir, "01-SYSTEM-PROMPT-AR.txt"))) return dir;
+  for (const path of candidates) {
+    try {
+      fileDefaultCache = readFileSync(path, "utf8").replace(/^\uFEFF/, "").trim();
+      if (fileDefaultCache) return fileDefaultCache;
+    } catch {
+      /* try next */
+    }
   }
-  return candidates[0];
+  fileDefaultCache = "";
+  return fileDefaultCache;
 }
 
-function readUtf8(file: string): string {
-  try {
-    return fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "").trim();
-  } catch {
-    return "";
+export function defaultAssistantKnowledge(): string {
+  return loadBundledDefault();
+}
+
+export function invalidateAssistantKnowledgeCache() {
+  dbCache = null;
+}
+
+export async function getAssistantKnowledge(): Promise<string> {
+  if (dbCache && Date.now() - dbCache.at < 30_000) return dbCache.value;
+  const row = await prisma.setting.findUnique({ where: { key: ASSISTANT_KNOWLEDGE_KEY } });
+  const value = (row?.value?.trim() ? row.value : loadBundledDefault()).trim();
+  dbCache = { value, at: Date.now() };
+  return value;
+}
+
+export async function setAssistantKnowledge(raw: string): Promise<string> {
+  const value = raw.replace(/\r\n/g, "\n").trim();
+  if (value.length > ASSISTANT_KNOWLEDGE_MAX_CHARS) {
+    throw new Error(`Knowledge text exceeds ${ASSISTANT_KNOWLEDGE_MAX_CHARS} characters`);
   }
+  await prisma.setting.upsert({
+    where: { key: ASSISTANT_KNOWLEDGE_KEY },
+    create: { key: ASSISTANT_KNOWLEDGE_KEY, value },
+    update: { value },
+  });
+  dbCache = { value, at: Date.now() };
+  return value;
 }
 
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}+]+/u)
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 2);
+export async function resetAssistantKnowledge(): Promise<string> {
+  const value = loadBundledDefault();
+  await prisma.setting.upsert({
+    where: { key: ASSISTANT_KNOWLEDGE_KEY },
+    create: { key: ASSISTANT_KNOWLEDGE_KEY, value },
+    update: { value },
+  });
+  dbCache = { value, at: Date.now() };
+  return value;
 }
 
-function scoreOverlap(queryTokens: string[], haystack: string): number {
-  if (!queryTokens.length || !haystack) return 0;
+function splitSections(text: string): string[] {
+  const parts = text.split(/\n(?=(?:\d{2}\s*\|)|(?:القسم\s))/);
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+
+function scoreSection(section: string, query: string): number {
+  const q = query.toLowerCase();
+  if (!q) return 0;
+  const hay = section.toLowerCase();
   let score = 0;
-  for (const token of queryTokens) {
-    if (haystack.includes(token)) score += token.length >= 4 ? 2 : 1;
+  for (const token of q.split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 3)) {
+    if (hay.includes(token)) score += 2 + Math.min(token.length, 8);
   }
   return score;
 }
 
-function splitKnowledgeSections(md: string): KnowledgeChunk[] {
-  const chunks: KnowledgeChunk[] = [];
-  const parts = md.split(/\n(?=##\s+)/);
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!trimmed.startsWith("##")) continue;
-    const nl = trimmed.indexOf("\n");
-    const title = (nl >= 0 ? trimmed.slice(0, nl) : trimmed).replace(/^##\s+/, "").trim();
-    const body = (nl >= 0 ? trimmed.slice(nl + 1) : "").trim();
-    if (!body) continue;
-    const idMatch = title.match(/^(K\d+)/i);
-    chunks.push({
-      id: idMatch?.[1] ?? title.slice(0, 24),
-      title,
-      body,
-      haystack: `${title}\n${body}`.toLowerCase(),
-    });
-  }
-  return chunks;
-}
+/** Inject identity + query-matched slices so Groq stays within context. */
+export async function knowledgeForPrompt(userText: string): Promise<string> {
+  const full = await getAssistantKnowledge();
+  if (!full) return "";
+  const sections = splitSections(full);
+  if (!sections.length) return full.slice(0, PROMPT_BUDGET_CHARS);
 
-function parseTrainingExamples(jsonl: string): TrainingExample[] {
-  const out: TrainingExample[] = [];
-  for (const line of jsonl.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const row = JSON.parse(trimmed) as {
-        messages?: Array<{ role?: string; content?: string }>;
-      };
-      const messages = row.messages ?? [];
-      // Prefer the first user/assistant turn (single-turn examples dominate the pack).
-      const user = messages.find((m) => m.role === "user")?.content?.trim();
-      const assistant = messages.find((m) => m.role === "assistant")?.content?.trim();
-      if (!user || !assistant) continue;
-      out.push({
-        user,
-        assistant,
-        haystack: `${user}\n${assistant}`.toLowerCase(),
-      });
-    } catch {
-      // skip bad lines
-    }
-  }
-  return out;
-}
-
-function loadPack(): PackCache {
-  if (cache) return cache;
-  const root = knowledgeRoot();
-  const systemPrompt = readUtf8(path.join(root, "01-SYSTEM-PROMPT-AR.txt"));
-  const kb = readUtf8(path.join(root, "02-KNOWLEDGE-BASE-AR.md"));
-  const sources = readUtf8(path.join(root, "07-SOURCES-AND-VERIFICATION.md"));
-  const jsonl = readUtf8(path.join(root, "04-TRAINING-EXAMPLES.jsonl"));
-
-  const chunks = [
-    ...splitKnowledgeSections(kb),
-    ...splitKnowledgeSections(sources).map((c) => ({
-      ...c,
-      id: `SRC-${c.id}`,
-      title: `مصدر — ${c.title}`,
-    })),
-  ];
-
-  cache = {
-    systemPrompt:
-      systemPrompt ||
-      "أنت مساعد الشنتف للعقار والاستثمار. أجب بمهنية من السياق الموثق فقط.",
-    chunks,
-    examples: parseTrainingExamples(jsonl),
-    loadedAt: Date.now(),
-  };
-  return cache;
-}
-
-/** Exposed for status / ops checks. */
-export function knowledgePackStatus() {
-  const pack = loadPack();
-  return {
-    version: PACK_VERSION,
-    systemPromptChars: pack.systemPrompt.length,
-    chunks: pack.chunks.length,
-    examples: pack.examples.length,
-    root: knowledgeRoot(),
-  };
-}
-
-export function retrieveKnowledgeContext(query: string, maxChars = 5500): string {
-  const pack = loadPack();
-  if (!pack.chunks.length) return "";
-
-  const tokens = tokenize(query);
-  const ranked = pack.chunks
-    .map((chunk) => ({ chunk, score: scoreOverlap(tokens, chunk.haystack) }))
+  const head = sections[0].slice(0, ALWAYS_INCLUDE_CHARS);
+  const scored = sections
+    .slice(1)
+    .map((section) => ({ section, score: scoreSection(section, userText) }))
     .filter((row) => row.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  const picked: KnowledgeChunk[] =
-    ranked.length > 0
-      ? ranked.slice(0, 5).map((r) => r.chunk)
-      : pack.chunks.filter((c) => /^K0[1-4]\b/i.test(c.id)).slice(0, 3);
-
-  let out = "";
-  for (const chunk of picked) {
-    const block = `### ${chunk.title}\n${chunk.body}\n\n`;
-    if (out.length + block.length > maxChars) {
-      const room = maxChars - out.length - 40;
-      if (room > 200) out += block.slice(0, room) + "…\n";
+  const picked: string[] = [head];
+  let used = head.length;
+  for (const row of scored) {
+    if (picked.length >= 8) break;
+    if (used + row.section.length + 8 > PROMPT_BUDGET_CHARS) {
+      const room = PROMPT_BUDGET_CHARS - used - 8;
+      if (room > 400) {
+        picked.push(row.section.slice(0, room));
+        used += room;
+      }
       break;
     }
-    out += block;
+    picked.push(row.section);
+    used += row.section.length + 8;
   }
-  return out.trim();
-}
 
-export function selectFewShotMessages(query: string, limit = 4): GroqMessage[] {
-  const pack = loadPack();
-  if (!pack.examples.length) return [];
-
-  const tokens = tokenize(query);
-  const ranked = pack.examples
-    .map((ex, index) => ({
-      ex,
-      index,
-      score: scoreOverlap(tokens, ex.haystack),
-    }))
-    .sort((a, b) => b.score - a.score || a.index - b.index);
-
-  const chosen =
-    ranked[0]?.score > 0
-      ? ranked.slice(0, limit).map((r) => r.ex)
-      : pack.examples.slice(0, Math.min(limit, 3));
-
-  const messages: GroqMessage[] = [];
-  for (const ex of chosen) {
-    messages.push({ role: "user", content: ex.user });
-    messages.push({
-      role: "assistant",
-      content: JSON.stringify({
-        reply: ex.assistant,
-        service_id: null,
-        offer_query: null,
-      }),
-    });
+  if (picked.length === 1 && sections.length > 1) {
+    for (const extra of sections.slice(1, 4)) {
+      if (used + extra.length > PROMPT_BUDGET_CHARS) break;
+      picked.push(extra);
+      used += extra.length;
+    }
   }
-  return messages;
-}
 
-export function getPackSystemPrompt(): string {
-  return loadPack().systemPrompt;
+  return picked.join("\n\n---\n\n");
 }

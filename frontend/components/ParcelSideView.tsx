@@ -5,15 +5,14 @@ import { createPortal } from "react-dom";
 import {
   contourBandsForRelief,
   contourSegments,
-  elevRangeInsideAnyPoly,
+  elevRangeInsidePoly,
   elevTintRgb,
   evenSpreadContourLevels,
-  pointInAnyPoly,
+  pointInPoly,
   smoothElevGrid,
 } from "@/lib/elevationContours";
 import {
   formatMeters,
-  ringOrientedExtents,
   toLocalEnu,
 } from "@/lib/mapCoords";
 import {
@@ -23,7 +22,7 @@ import {
   type BlueprintMeta,
   type ElevGridSnapshot,
 } from "@/lib/parcelBlueprint";
-import type { ParcelRing } from "@/components/LocationInput";
+import type { AdjacentRoad, ParcelRing } from "@/components/LocationInput";
 
 export type ParcelSideViewHandle = {
   printBlueprint: (opts?: { mapSnapshot?: string | null }) => Promise<void>;
@@ -50,6 +49,7 @@ type Props = {
   onSettledChange?: () => void;
   /** When true, omit outer card chrome (parent section already provides it). */
   embedded?: boolean;
+  adjacentRoads?: AdjacentRoad[] | null;
 };
 
 type ElevGrid = ElevGridSnapshot & {
@@ -162,9 +162,23 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     onReadyChange,
     onSettledChange,
     embedded = false,
+    adjacentRoads = null,
   },
   ref
 ) {
+  const rings = useMemo(
+    () =>
+      (polygon ?? [])
+        .map((ring) => {
+          const pts = ring.slice();
+          const first = pts[0];
+          const last = pts[pts.length - 1];
+          if (first && last && first[0] === last[0] && first[1] === last[1]) pts.pop();
+          return pts;
+        })
+        .filter((pts) => pts.length >= 3),
+    [polygon]
+  );
   const mountRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<SceneBundle | null>(null);
@@ -179,33 +193,19 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
   fullscreenRef.current = fullscreen;
 
   const model = useMemo(() => {
-    if (!polygon?.length) return null;
-    const rings: [number, number][][] = [];
-    for (const raw of polygon) {
-      if (!raw?.length) continue;
-      const pts = raw.slice();
-      const first = pts[0]!;
-      const last = pts[pts.length - 1]!;
-      if (first[0] === last[0] && first[1] === last[1]) pts.pop();
-      if (pts.length >= 3) rings.push(pts);
-    }
     if (!rings.length) return null;
-
     const allPts = rings.flat();
     const origin = ringCentroidLatLng(allPts);
-    const enuRings = rings.map((ring) =>
-      ring.map(([lat, lng]) => toLocalEnu(lat, lng, origin.lat, origin.lng))
+    const enuRings = rings.map((pts) =>
+      pts.map(([lat, lng]) => toLocalEnu(lat, lng, origin.lat, origin.lng))
     );
-    const primary = rings[0]!;
-    // Oriented extents of the combined footprint (better for adjacent multi-parcel).
-    const extents = ringOrientedExtents(allPts.length >= 3 ? allPts : primary);
     const bbox = ringBBox(allPts);
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
     let maxY = -Infinity;
-    for (const ring of enuRings) {
-      for (const p of ring) {
+    for (const ringEnu of enuRings) {
+      for (const p of ringEnu) {
         if (p.x < minX) minX = p.x;
         if (p.x > maxX) maxX = p.x;
         if (p.y < minY) minY = p.y;
@@ -213,9 +213,9 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       }
     }
     const span = Math.max(maxX - minX, maxY - minY, 1);
-    return { pts: primary, rings, enuRings, origin, extents, span, bbox, centroid: origin };
-  }, [polygon]);
-
+    const extents = { lengthM: maxY - minY, widthM: maxX - minX };
+    return { rings, allPts, enuRings, origin, extents, span, bbox, centroid: origin };
+  }, [rings]);
   const modelRef = useRef(model);
   modelRef.current = model;
 
@@ -230,17 +230,18 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       }
 
       const topCanvas = await drawParcelContextMap({
-        ring: modelNow.pts,
+        rings: modelNow.rings,
         lang,
         perimeterM: meta.perimeterM,
-        width: 1400,
-        height: 1400,
+        // Generate a landscape map panel so the PDF map view reads wider.
+        width: 2080,
+        height: 1240,
         parcelNumber: meta.parcel,
         mapSnapshot: opts?.mapSnapshot ?? null,
       });
       const contourCanvas = drawParcelContourMap({
         grid,
-        ring: modelNow.pts,
+        rings: modelNow.rings,
         lang,
         width: 2080,
         height: 1560,
@@ -251,17 +252,25 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       if (contourPng.length < 4000) throw new Error("contour-failed");
       if (contextPng.length < 2000) throw new Error("context-failed");
       const elev = smoothElevGrid(Float32Array.from(grid.elevations), grid.cols, grid.rows, 3);
-      const { min: elevMinM, max: elevMaxM } = elevRangeInsideAnyPoly(
-        elev,
-        grid.cols,
-        grid.rows,
-        (c, r) => {
+      const printPolys = modelNow.enuRings.map((ringEnu) => ringEnu.map((p) => ({ x: p.x, y: p.y })));
+      let elevMinM = Number.POSITIVE_INFINITY;
+      let elevMaxM = Number.NEGATIVE_INFINITY;
+      for (let r = 0; r < grid.rows; r++) {
+        for (let c = 0; c < grid.cols; c++) {
           const lat = grid.maxLat - ((r + 0.5) / grid.rows) * (grid.maxLat - grid.minLat);
           const lng = grid.minLng + ((c + 0.5) / grid.cols) * (grid.maxLng - grid.minLng);
-          return toLocalEnu(lat, lng, modelNow.origin.lat, modelNow.origin.lng);
-        },
-        modelNow.enuRings.map((ring) => ring.map((p) => ({ x: p.x, y: p.y })))
-      );
+          const enu = toLocalEnu(lat, lng, modelNow.origin.lat, modelNow.origin.lng);
+          const inside = printPolys.some((poly) => pointInPoly(enu.x, enu.y, poly));
+          if (!inside) continue;
+          const z = elev[r * grid.cols + c]!;
+          if (z < elevMinM) elevMinM = z;
+          if (z > elevMaxM) elevMaxM = z;
+        }
+      }
+      if (!Number.isFinite(elevMinM) || !Number.isFinite(elevMaxM)) {
+        elevMinM = grid.minElev;
+        elevMaxM = grid.maxElev;
+      }
 
       await printParcelBlueprint({
         meta: {
@@ -357,17 +366,34 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       const rawElev = Float32Array.from(grid.elevations);
       const elev = smoothElevGrid(rawElev, grid.cols, grid.rows, 3);
       const origin = model.origin;
-      const polyRings = model.enuRings.map((ring) => ring.map((p) => ({ x: p.x, y: p.y })));
+      const polyEnuRings = model.enuRings.map((ringEnu) => ringEnu.map((p) => ({ x: p.x, y: p.y })));
+      const pointInsideSelected = (x: number, y: number) =>
+        polyEnuRings.some((poly) => pointInPoly(x, y, poly));
       const latAt = (row: number) => grid.maxLat - ((row + 0.5) / grid.rows) * (grid.maxLat - grid.minLat);
       const lngAt = (col: number) => grid.minLng + ((col + 0.5) / grid.cols) * (grid.maxLng - grid.minLng);
       // Elevation range from the land itself (not the padded DEM around it)
-      const { min: zMin, max: zMax } = elevRangeInsideAnyPoly(
-        elev,
-        grid.cols,
-        grid.rows,
-        (c, r) => toLocalEnu(latAt(r), lngAt(c), origin.lat, origin.lng),
-        polyRings
-      );
+      let zMin = Number.POSITIVE_INFINITY;
+      let zMax = Number.NEGATIVE_INFINITY;
+      for (let r = 0; r < grid.rows; r++) {
+        for (let c = 0; c < grid.cols; c++) {
+          const enu = toLocalEnu(latAt(r), lngAt(c), origin.lat, origin.lng);
+          if (!pointInsideSelected(enu.x, enu.y)) continue;
+          const z = elev[r * grid.cols + c]!;
+          if (z < zMin) zMin = z;
+          if (z > zMax) zMax = z;
+        }
+      }
+      if (!Number.isFinite(zMin) || !Number.isFinite(zMax)) {
+        const fallback = elevRangeInsidePoly(
+          elev,
+          grid.cols,
+          grid.rows,
+          (c, r) => toLocalEnu(latAt(r), lngAt(c), origin.lat, origin.lng),
+          polyEnuRings[0]!
+        );
+        zMin = fallback.min;
+        zMax = fallback.max;
+      }
       const relief = Math.max(0.05, zMax - zMin);
       // Near true vertical scale (1 m ≈ 1 m). Mild boost only on nearly flat parcels.
       const exag = relief < 1.25 ? 1.2 : relief < 2.5 ? 1.1 : 1;
@@ -442,7 +468,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
           const midEnu = toLocalEnu(midLat, midLng, origin.lat, origin.lng);
           const a = toWorldFrac(x0, y0, level);
           const b = toWorldFrac(x1, y1, level);
-          const inside = pointInAnyPoly(midEnu.x, midEnu.y, polyRings);
+          const inside = pointInsideSelected(midEnu.x, midEnu.y);
           if (inside) {
             positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
             const len = a.distanceTo(b);
@@ -497,7 +523,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const enu = toLocalEnu(latAt(r), lngAt(c), origin.lat, origin.lng);
-            inside[r * cols + c] = pointInAnyPoly(enu.x, enu.y, polyRings) ? 1 : 0;
+            inside[r * cols + c] = pointInsideSelected(enu.x, enu.y) ? 1 : 0;
             const e = elev[r * cols + c]!;
             const v = toWorld(c, r, e);
             positions.push(v.x, v.y, v.z);
@@ -554,15 +580,13 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       }
 
       {
-        const mat = new THREE.LineBasicMaterial({ color: 0xe8c98a, linewidth: 2 });
-        disposables.push(mat);
-        for (let ri = 0; ri < model.enuRings.length; ri++) {
-          const enuRing = model.enuRings[ri]!;
-          const latLngRing = model.rings[ri]!;
-          const outline: number[] = [];
-          for (let i = 0; i <= enuRing.length; i++) {
-            const p = enuRing[i % enuRing.length]!;
-            const [lat, lng] = latLngRing[i % latLngRing.length]!;
+        const outline: number[] = [];
+        for (let rIdx = 0; rIdx < model.enuRings.length; rIdx++) {
+          const ringEnu = model.enuRings[rIdx]!;
+          const ringLatLng = model.rings[rIdx]!;
+          for (let i = 0; i <= ringEnu.length; i++) {
+            const p = ringEnu[i % ringEnu.length]!;
+            const [lat, lng] = ringLatLng[i % ringLatLng.length]!;
             const col = Math.max(
               0,
               Math.min(grid.cols - 1, Math.round(((lng - grid.minLng) / (grid.maxLng - grid.minLng)) * (grid.cols - 1)))
@@ -574,14 +598,18 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
             const e = elev[row * grid.cols + col]!;
             outline.push(p.x, (e - zMin) * exag + 0.45, -p.y);
           }
-          const geo = new THREE.BufferGeometry();
-          geo.setAttribute("position", new THREE.Float32BufferAttribute(outline, 3));
-          disposables.push(geo);
-          const line = new THREE.Line(geo, mat);
-          line.renderOrder = 3;
-          scene.add(line);
         }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(outline, 3));
+        disposables.push(geo);
+        const mat = new THREE.LineBasicMaterial({ color: 0xe8c98a, linewidth: 2 });
+        disposables.push(mat);
+        const line = new THREE.Line(geo, mat);
+        line.renderOrder = 3;
+        scene.add(line);
       }
+
+      // Info-only mode: adjacent street details are shown in the textual cards.
 
       const orbit = new OrbitControls(camera, renderer.domElement);
       orbit.enableDamping = true;
@@ -721,6 +749,14 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
         fs
           ? "parcel-fs-portal fixed inset-0 z-[10000] flex flex-col gap-2 bg-[#0a1f1c] p-3 overflow-hidden"
           : "parcel-side-shell mt-2 rounded-lg overflow-hidden border border-gold/30 bg-[#071816] flex flex-col gap-0 p-0"
+      }
+      style={
+        fs
+          ? {
+              paddingTop: "max(0.75rem, calc(env(safe-area-inset-top, 0px) + 0.4rem))",
+              paddingBottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))",
+            }
+          : undefined
       }
       role={fs ? "dialog" : undefined}
       aria-modal={fs ? true : undefined}

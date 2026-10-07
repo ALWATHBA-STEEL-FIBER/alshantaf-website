@@ -11,17 +11,17 @@ export function FeaturedOffersSection({ listings }: { listings: Listing[] }) {
   const featured = listings.filter((l) => l.featured);
 
   return (
-    <section id="opportunities" className="py-16 md:py-20">
-      <div className="mx-auto max-w-[1240px] px-4">
-        <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+    <section id="opportunities" className="py-10 sm:py-16 md:py-20">
+      <div className="mx-auto max-w-[1240px] px-3 sm:px-4">
+        <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4 mb-6 sm:mb-10">
           <div className="max-w-2xl">
-            <span className="text-gold text-xs font-bold tracking-wide">{t.offers.eyebrow}</span>
-            <h2 className="text-3xl md:text-4xl font-bold mt-2 text-balance">{t.offers.title}</h2>
-            <p className="text-ink-soft mt-3 max-w-xl leading-relaxed">{t.offers.subtitle}</p>
+            <span className="text-gold text-[10px] sm:text-xs font-bold tracking-wide">{t.offers.eyebrow}</span>
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mt-1.5 sm:mt-2 text-balance">{t.offers.title}</h2>
+            <p className="text-ink-soft mt-2 sm:mt-3 max-w-xl text-sm sm:text-base leading-relaxed">{t.offers.subtitle}</p>
           </div>
           <Link
             href="/offers"
-            className="h-11 px-5 rounded-full border border-line bg-white/80 font-bold text-sm flex items-center hover:border-gold/50 hover:bg-white transition-colors"
+            className="h-9 sm:h-11 px-4 sm:px-5 rounded-full border border-line bg-white/80 font-bold text-xs sm:text-sm flex items-center hover:border-gold/50 hover:bg-white transition-colors"
           >
             {t.offers.viewAllCta}
           </Link>

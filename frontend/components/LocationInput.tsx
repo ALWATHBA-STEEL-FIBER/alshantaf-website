@@ -9,6 +9,7 @@ import {
   mapsLinkFromCoords,
   parseCoords,
   ringEdgeDimensions,
+  ringInteriorCentroid,
   ringOrientedExtents,
   type Coords,
 } from "@/lib/mapCoords";
@@ -38,10 +39,26 @@ const MEASURE_MAX_ZOOM = 22;
 type SearchResult = { latitude: number; longitude: number; address: string };
 /** Leaflet-ready ring: [lat, lng][]. */
 export type ParcelRing = [number, number][];
+export type AdjacentRoad = {
+  id: string;
+  name: string;
+  side: "north" | "south" | "east" | "west";
+  widthM: number | null;
+  source: "osm-overpass" | "google-maps" | "dls-neighbor";
+  path: [number, number][];
+};
+export type ContextParcel = {
+  dlsKey: string | null;
+  parcelNo: string | null;
+  rings: [number, number][][];
+  isSubject: boolean;
+};
 type Basemap = "map" | "satellite";
 
 export type LocationInputHandle = {
   printBlueprint: () => Promise<void>;
+  printBlueprintWithSnapshot: (mapSnapshot: string | null) => Promise<void>;
+  captureMapSnapshot: () => Promise<string | null>;
   canPrintBlueprint: () => boolean;
 };
 
@@ -51,6 +68,7 @@ interface Props {
   onChange: (value: string) => void;
   address?: string;
   onAddressChange?: (address: string) => void;
+  onPinDrop?: (coords: Coords) => void | Promise<void>;
   readOnly?: boolean;
   /** Official DLS cadastral outline — when set with lockEditing, drawn and not editable. */
   polygon?: ParcelRing[] | null;
@@ -78,6 +96,9 @@ interface Props {
     industryValue?: string;
     industryUserChoseNote?: string;
   } | null;
+  /** Optional per-ring parcel numbers (for multi-parcel offers). */
+  parcelNumbers?: string[] | null;
+  adjacentRoads?: AdjacentRoad[] | null;
   onBlueprintReadyChange?: (ready: boolean) => void;
   /** Fires when 3D topo load finishes (success or failure). */
   onTopoSettledChange?: () => void;
@@ -106,6 +127,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   onChange,
   address = "",
   onAddressChange,
+  onPinDrop,
   readOnly = false,
   polygon = null,
   lockEditing = false,
@@ -118,6 +140,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   perimeterM = null,
   showDimensions = true,
   blueprint = null,
+  parcelNumbers = null,
+  adjacentRoads = null,
   onBlueprintReadyChange,
   onTopoSettledChange,
   onMapReadyChange,
@@ -137,38 +161,21 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       const mapSnapshot = await captureMapForBlueprint();
       await sideViewRef.current?.printBlueprint({ mapSnapshot });
     },
+    printBlueprintWithSnapshot: async (mapSnapshot: string | null) => {
+      await sideViewRef.current?.printBlueprint({ mapSnapshot });
+    },
+    captureMapSnapshot: async () => captureMapForBlueprint(),
   }));
 
-  /** Snapshot the live Leaflet map (prefer satellite basemap) for print fallback. */
+  /** Snapshot the live Leaflet map exactly as currently shown to the user. */
   async function captureMapForBlueprint(): Promise<string | null> {
     const map = mapRef.current;
-    const sat = satLayerRef.current;
-    const osm = osmLayerRef.current;
-    if (!map || !sat) return null;
-
-    const prevBasemap = basemap;
+    if (!map) return null;
     const ring = polygon?.[0];
 
     try {
-      // Show satellite tiles that are already cacheable in the map view
-      if (osm && map.hasLayer(osm)) map.removeLayer(osm);
-      if (!map.hasLayer(sat)) sat.addTo(map);
-      setBasemap("satellite");
-
-      if (ring && ring.length >= 3) {
-        const L = await import("leaflet");
-        const latlngs = ring.map(([lat, lng]) => L.latLng(lat, lng));
-        const bounds = L.latLngBounds(latlngs);
-        map.fitBounds(bounds.pad(0.18), { animate: false, maxZoom: 18 });
-      }
       map.invalidateSize();
-
-      await new Promise<void>((resolve) => {
-        const done = () => resolve();
-        sat.once("load", done);
-        window.setTimeout(done, 1800);
-      });
-      await new Promise((r) => window.setTimeout(r, 250));
+      await new Promise((r) => window.setTimeout(r, 180));
 
       const size = map.getSize();
       const scale = Math.min(2.5, (window.devicePixelRatio || 1) * 1.5);
@@ -198,6 +205,25 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       // Redraw parcel + edge dims in map screen space (reliable, no SVG CORS)
       if (ring && ring.length >= 3) {
+        if (showContextGrid) {
+          for (const parcel of contextParcels) {
+            if (parcel.isSubject) continue;
+            for (const ctxRing of parcel.rings ?? []) {
+              if (!ctxRing?.length) continue;
+              ctx.beginPath();
+              ctxRing.forEach(([lat, lng], i) => {
+                const p = map.latLngToContainerPoint([lat, lng]);
+                if (i === 0) ctx.moveTo(p.x, p.y);
+                else ctx.lineTo(p.x, p.y);
+              });
+              ctx.closePath();
+              ctx.strokeStyle = "#5f6f70";
+              ctx.lineWidth = 2.1;
+              ctx.stroke();
+            }
+          }
+        }
+
         ctx.beginPath();
         ring.forEach(([lat, lng], i) => {
           const p = map.latLngToContainerPoint([lat, lng]);
@@ -210,6 +236,61 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         ctx.strokeStyle = "#e8c98a";
         ctx.lineWidth = 3;
         ctx.stroke();
+
+        if (parcelNumbers?.length) {
+          const parcelRings = (polygon ?? [ring]).filter((r): r is ParcelRing => Boolean(r?.length));
+          for (let i = 0; i < parcelRings.length; i++) {
+            const parcelNo = parcelNumbers[i] || parcelNumbers[0];
+            const currRing = parcelRings[i];
+            if (!parcelNo || !currRing?.length) continue;
+            const center = ringInteriorCentroid(currRing);
+            if (!center) continue;
+            const c = map.latLngToContainerPoint([center.lat, center.lng]);
+            ctx.font = '800 14px system-ui, "IBM Plex Sans Arabic", sans-serif';
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.lineWidth = 3.5;
+            ctx.strokeStyle = "rgba(255,255,255,0.95)";
+            ctx.strokeText(parcelNo, c.x, c.y);
+            ctx.fillStyle = "#0f342f";
+            ctx.fillText(parcelNo, c.x, c.y);
+          }
+        } else {
+          const parcelNo = blueprint?.parcel?.trim();
+          if (parcelNo) {
+            const center = ringInteriorCentroid(ring);
+            if (center) {
+              const c = map.latLngToContainerPoint([center.lat, center.lng]);
+              ctx.font = '800 14px system-ui, "IBM Plex Sans Arabic", sans-serif';
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.lineWidth = 3.5;
+              ctx.strokeStyle = "rgba(255,255,255,0.95)";
+              ctx.strokeText(parcelNo, c.x, c.y);
+              ctx.fillStyle = "#0f342f";
+              ctx.fillText(parcelNo, c.x, c.y);
+            }
+          }
+        }
+
+        if (showContextGrid) {
+          for (const parcel of contextParcels) {
+            if (parcel.isSubject || !parcel.parcelNo) continue;
+            const ctxRing = parcel.rings?.[0];
+            if (!ctxRing?.length) continue;
+            const center = ringInteriorCentroid(ctxRing);
+            if (!center) continue;
+            const c = map.latLngToContainerPoint([center.lat, center.lng]);
+            ctx.font = '900 13px system-ui, "IBM Plex Sans Arabic", sans-serif';
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.lineWidth = 3.5;
+            ctx.strokeStyle = "rgba(255,255,255,0.96)";
+            ctx.strokeText(parcel.parcelNo, c.x, c.y);
+            ctx.fillStyle = "#3f4f50";
+            ctx.fillText(parcel.parcelNo, c.x, c.y);
+          }
+        }
 
         if (drawDimensions || showDimensions) {
           const edges = ringEdgeDimensions(ring);
@@ -266,19 +347,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       }
     } catch {
       return null;
-    } finally {
-      // Restore previous basemap selection
-      setBasemap(prevBasemap);
-      const layers = { map: osm, satellite: sat } as const;
-      const active = layers[prevBasemap];
-      for (const layer of Object.values(layers)) {
-        if (!layer) continue;
-        if (layer === active) {
-          if (!map.hasLayer(layer)) layer.addTo(map);
-        } else if (map.hasLayer(layer)) {
-          map.removeLayer(layer);
-        }
-      }
     }
   }
 
@@ -306,6 +374,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [lineSnap, setLineSnap] = useState(true);
   const [fixedSnapM, setFixedSnapM] = useState<FixedSnapMeters>(0);
   const [lineColor, setLineColor] = useState(DEFAULT_MEASURE_LINE_COLOR);
+  const [contextParcels, setContextParcels] = useState<ContextParcel[]>([]);
+  const [showContextGrid, setShowContextGrid] = useState(true);
   const measureToolRef = useRef<MeasureTool | null>(null);
   const measureModeRef = useRef<MeasureMode>("off");
   measureModeRef.current = measureMode;
@@ -314,6 +384,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const mapRef = useRef<import("leaflet").Map | null>(null);
   const markerRef = useRef<import("leaflet").Marker | null>(null);
   const polygonRef = useRef<import("leaflet").Layer | null>(null);
+  const roadsLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const dimensionLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const osmLayerRef = useRef<import("leaflet").TileLayer | null>(null);
   const satLayerRef = useRef<import("leaflet").TileLayer | null>(null);
@@ -321,11 +392,49 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   basemapRef.current = basemap;
   const onMapReadyChangeRef = useRef(onMapReadyChange);
   onMapReadyChangeRef.current = onMapReadyChange;
+  const onPinDropRef = useRef(onPinDrop);
+  onPinDropRef.current = onPinDrop;
 
   const extents = useMemo(() => {
     if (!polygon?.[0]?.length) return null;
     return ringOrientedExtents(polygon[0]);
   }, [polygon]);
+
+  const roads = useMemo(
+    () => {
+      const valid = (adjacentRoads ?? []).filter(
+        (road) =>
+          Array.isArray(road.path) &&
+          road.path.length >= 2 &&
+          road.path.every(
+            (point) =>
+              Array.isArray(point) &&
+              point.length === 2 &&
+              Number.isFinite(point[0]) &&
+              Number.isFinite(point[1])
+          )
+      );
+      // Keep one strongest street per side to avoid conflicting duplicates.
+      const bestBySide = new Map<AdjacentRoad["side"], AdjacentRoad>();
+      for (const road of valid) {
+        const prev = bestBySide.get(road.side);
+        const score = road.widthM ?? 0;
+        const prevScore = prev?.widthM ?? 0;
+        if (!prev || score > prevScore) bestBySide.set(road.side, road);
+      }
+      return Array.from(bestBySide.values());
+    },
+    [adjacentRoads]
+  );
+
+  const sideLabel = (side: AdjacentRoad["side"]) =>
+    side === "north"
+      ? lp.streetSideNorth
+      : side === "south"
+        ? lp.streetSideSouth
+        : side === "east"
+          ? lp.streetSideEast
+          : lp.streetSideWest;
 
   useEffect(() => {
     const parsed = parseCoords(value);
@@ -368,6 +477,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       const start = selected ? ([selected.lat, selected.lng] as [number, number]) : DEFAULT_CENTER;
       const map = L.map(mapDivRef.current, {
         zoomControl: true,
+        attributionControl: false,
         dragging: true,
         scrollWheelZoom: true,
         doubleClickZoom: !locked,
@@ -397,8 +507,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       clickHandler = (event) => {
         if (lockedRef.current || measureModeRef.current !== "off") return;
-        placeMarker(L, map, event.latlng.lat, event.latlng.lng, true);
-        commit({ lat: event.latlng.lat, lng: event.latlng.lng });
+        const coords = { lat: event.latlng.lat, lng: event.latlng.lng };
+        placeMarker(L, map, coords.lat, coords.lng, true);
+        commit(coords);
+        void onPinDropRef.current?.(coords);
       };
       map.on("click", clickHandler);
 
@@ -429,6 +541,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       mapRef.current = null;
       markerRef.current = null;
       polygonRef.current = null;
+      roadsLayerRef.current = null;
       dimensionLayerRef.current = null;
       osmLayerRef.current = null;
       satLayerRef.current = null;
@@ -471,13 +584,14 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   };
 
   function exportArchitectureCad() {
-    // Pass a copy of rings for DXF only — does not change map polygon state.
-    const rings = (polygon ?? []).filter((r) => r?.length >= 2).map((r) => r.slice() as [number, number][]);
+    const rings = polygon?.filter((r) => r.length >= 2) ?? [];
     if (!rings.length) return;
     try {
       downloadParcelCadDxf({
         rings,
+        ring: rings[0],
         parcelNumber: blueprint?.parcel,
+        parcelNumbers: parcelNumbers ?? null,
         areaSqm,
         perimeterM,
         measure: measureSnap,
@@ -536,6 +650,14 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   useEffect(() => {
     measureToolRef.current?.setLineColor(lineColor);
   }, [lineColor]);
+
+  // Whenever a parcel outline is available, default dimensions back on.
+  // This avoids stale hidden-state regressions after hot reloads/navigation.
+  useEffect(() => {
+    if (polygon?.[0]?.length && showDimensions) {
+      setDrawDimensions(true);
+    }
+  }, [polygon, showDimensions]);
 
   // Keep React chrome in sync when the tool auto-advances color / restores a thread.
   useEffect(() => {
@@ -619,7 +741,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       if (draggable) {
         markerRef.current.on("dragend", () => {
           const point = markerRef.current!.getLatLng();
-          commit({ lat: point.lat, lng: point.lng });
+          const coords = { lat: point.lat, lng: point.lng };
+          commit(coords);
+          void onPinDropRef.current?.(coords);
         });
       }
     } else {
@@ -641,6 +765,44 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   }, [polygon]);
 
   useEffect(() => {
+    if (!showMap) {
+      setContextParcels([]);
+      return;
+    }
+    let cancelled = false;
+    async function loadContextGrid() {
+      const fallbackFromRing = polygon?.[0]?.length
+        ? (() => {
+            const ring = polygon[0]!;
+            const sum = ring.reduce((acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }), { lat: 0, lng: 0 });
+            return { lat: sum.lat / ring.length, lng: sum.lng / ring.length };
+          })()
+        : null;
+      const coords = selected ?? parseCoords(value) ?? fallbackFromRing;
+      if (!coords) {
+        setContextParcels([]);
+        return;
+      }
+      try {
+        const res = await fetch("/api/submissions/dls-context-by-point", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ latitude: coords.lat, longitude: coords.lng }),
+        });
+        if (!res.ok) throw new Error("grid-failed");
+        const body = (await res.json()) as { parcels?: ContextParcel[] };
+        if (!cancelled) setContextParcels(Array.isArray(body.parcels) ? body.parcels : []);
+      } catch {
+        if (!cancelled) setContextParcels([]);
+      }
+    }
+    void loadContextGrid();
+    return () => {
+      cancelled = true;
+    };
+  }, [polygonKey, selected, value, showMap]);
+
+  useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     void import("leaflet").then((L) => {
       const map = mapRef.current;
@@ -654,12 +816,15 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       if (polygon && polygon.length > 0 && polygonKey) {
         const opts: ParcelCanvasOpts = {
           rings: polygon as [number, number][][],
+          contextParcels,
+          showContextGrid,
           showDimensions: Boolean(
             drawDimensions && showDimensions && measureModeRef.current === "off"
           ),
           perimeterM,
           lang,
           parcelNumber: blueprint?.parcel?.trim() || null,
+          parcelNumbers: parcelNumbers && parcelNumbers.length ? parcelNumbers : null,
           parcelLabel: lp.blueprintParcel,
         };
         const layer = createParcelCanvasLayer(L, opts);
@@ -687,7 +852,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, polygonKey, locked, mapReady]);
+  }, [selected, polygonKey, locked, mapReady, contextParcels, showContextGrid]);
 
   // Keep annotations in sync when only labels/toggle change (do not remount / fitBounds).
   useEffect(() => {
@@ -697,13 +862,29 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     if (!layer?.setParcelOptions || !polygon?.[0]?.length) return;
     layer.setParcelOptions({
       rings: polygon as [number, number][][],
+      contextParcels,
+      showContextGrid,
       showDimensions: dimsOnCanvas,
       perimeterM,
       lang,
       parcelNumber: blueprint?.parcel?.trim() || null,
+      parcelNumbers: parcelNumbers && parcelNumbers.length ? parcelNumbers : null,
       parcelLabel: lp.blueprintParcel,
     });
-  }, [dimsOnCanvas, perimeterM, lang, blueprint?.parcel, polygon, lp.blueprintParcel]);
+  }, [dimsOnCanvas, perimeterM, lang, blueprint?.parcel, parcelNumbers, polygon, lp.blueprintParcel, contextParcels, showContextGrid]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    void import("leaflet").then(() => {
+      const map = mapRef.current;
+      if (!map) return;
+      if (roadsLayerRef.current) {
+        map.removeLayer(roadsLayerRef.current);
+        roadsLayerRef.current = null;
+      }
+      // Info-only mode: keep adjacent street data in cards, do not draw road overlays.
+    });
+  }, [mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -955,6 +1136,20 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               {lp.dimensionsOnMap}
             </button>
           )}
+          {Boolean(polygon?.[0]?.length) && (
+            <button
+              type="button"
+              onClick={() => setShowContextGrid((v) => !v)}
+              className={`h-8 px-3 rounded-full text-[11px] font-bold border transition-colors ${
+                showContextGrid
+                  ? "bg-green/10 border-green text-green"
+                  : "border-line text-ink-soft hover:text-ink bg-surface-2"
+              }`}
+              aria-pressed={showContextGrid}
+            >
+              {lang === "ar" ? (showContextGrid ? "إخفاء شبكة القطع" : "إظهار شبكة القطع") : showContextGrid ? "Hide Parcel Grid" : "Show Parcel Grid"}
+            </button>
+          )}
           {!measuring && (
             <MeasureToolbar
               mode={measureMode}
@@ -1101,6 +1296,12 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       <MapFullscreenPortal
         open={mapFullscreen}
         onClose={() => setMapFullscreen(false)}
+        locked={locked}
+        onPickLocation={async (coords) => {
+          if (locked) return;
+          commit(coords);
+          await onPinDropRef.current?.(coords);
+        }}
         basemap={basemap}
         onBasemapChange={setBasemap}
         drawDimensions={drawDimensions}
@@ -1123,6 +1324,11 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         areaSqm={areaSqm}
         extents={extents}
         parcelNumber={blueprint?.parcel?.trim() || null}
+        parcelNumbers={parcelNumbers}
+        adjacentRoads={roads}
+        contextParcels={contextParcels}
+        showContextGrid={showContextGrid}
+        onToggleContextGrid={() => setShowContextGrid((v) => !v)}
         parcelLabel={lp.blueprintParcel}
         lang={lang}
         labels={{
@@ -1134,6 +1340,14 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           dimensionsArea: lp.dimensionsArea,
           dimensionsPerimeter: lp.dimensionsPerimeter,
           dimensionsExtent: lp.dimensionsExtent,
+          streetInfoTitle: lp.streetInfoTitle,
+          streetWidthLabel: lp.streetWidthLabel,
+          streetWidthUnknown: lp.streetWidthUnknown,
+          streetUnnamed: lp.streetUnnamed,
+          streetSideNorth: lp.streetSideNorth,
+          streetSideSouth: lp.streetSideSouth,
+          streetSideEast: lp.streetSideEast,
+          streetSideWest: lp.streetSideWest,
           exitFullscreen: lp.exitFullscreen,
           measureEnter: lp.measureEnter,
           measureExit: lp.measureExit,
@@ -1156,11 +1370,18 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           measureHintArea: lp.measureHintArea,
           measureExportCad: lp.measureExportCad,
           measureExportCadHint: lp.measureExportCadHint,
+          useLocation: lp.use,
+          locating: lp.locating,
+          locationUnavailable: lp.unavailable,
         }}
       />
 
       <p className="mt-2 text-[10px] text-ink-soft">
         {basemap === "map" ? "© OpenStreetMap" : "© Esri"} · {lp.osmNote}
+        {basemap === "satellite" &&
+          (lang === "ar"
+            ? " · قد تظهر صورة القمر الصناعي بانزياح بصري بسيط عن حدود الكادستر الرسمية."
+            : " · Satellite imagery can have slight visual offset from official cadastral boundaries.")}
       </p>
       </section>
       )}
@@ -1189,6 +1410,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             onReadyChange={handleReadyChange}
             onSettledChange={onTopoSettledChange}
             embedded
+            adjacentRoads={roads}
             blueprintMeta={{
               lang,
               brandName: lp.blueprintBrand,
@@ -1256,11 +1478,39 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               href={mapsLinkFromCoords(selected)}
               target="_blank"
               rel="noopener"
-              className="font-bold text-green hover:text-gold transition-colors"
+              className="inline-flex items-center gap-1 font-bold text-green underline underline-offset-4 decoration-green/60 hover:text-gold hover:decoration-gold transition-colors"
             >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M8 16 16 8M10 8h6v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M9 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
               {lp.external}
             </a>
           )}
+        </div>
+      )}
+      {roads.length > 0 && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-3 py-2">
+          <p className="text-[10px] font-bold tracking-wide text-blue-900">{lp.streetInfoTitle}</p>
+          <p className="mb-1 text-[10px] text-blue-900/80">
+            {lang === "ar"
+              ? `تم رصد ${roads.length} شارع/شوارع محيطة وعرضها التقريبي.`
+              : `Detected ${roads.length} adjacent street(s) with approximate width.`}
+          </p>
+          <ul className="grid gap-1 text-[11px] text-ink">
+            {roads.map((road) => (
+              <li key={road.id} className="flex flex-wrap items-center gap-1.5">
+                <b>{road.name || lp.streetUnnamed}</b>
+                {!(road.source === "dls-neighbor" && road.id.startsWith("dls-line-nearest-")) && (
+                  <span className="text-ink-soft">({sideLabel(road.side)})</span>
+                )}
+                <span className="text-ink-soft">
+                  {lp.streetWidthLabel}:{" "}
+                  <b>{road.widthM != null ? `${Math.round(road.widthM * 10) / 10} ${lang === "ar" ? "م" : "m"}` : lp.streetWidthUnknown}</b>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

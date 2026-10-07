@@ -1,6 +1,6 @@
 FROM node:20-alpine AS base
 WORKDIR /app
-RUN apk add --no-cache openssl ffmpeg chromium nss freetype harfbuzz ca-certificates ttf-freefont
+RUN apk add --no-cache openssl ffmpeg poppler-utils chromium nss freetype harfbuzz ca-certificates ttf-freefont
 
 COPY package.json package-lock.json* ./
 RUN npm install
@@ -10,8 +10,8 @@ RUN npx prisma generate
 
 COPY tsconfig.json ./
 COPY src ./src
-COPY knowledge ./knowledge
 RUN npm run build
+RUN mkdir -p dist/knowledge && cp src/knowledge/*.txt dist/knowledge/
 
 RUN mkdir -p uploads
 

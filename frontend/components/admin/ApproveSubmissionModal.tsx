@@ -6,7 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { useToast } from "./Toast";
 import { Spinner } from "./EmptyState";
 import { CheckIcon } from "@/components/icons";
-import { toWesternDigits } from "@/lib/arabicDigits";
+import { normalizeDecimalInput, toWesternDigits } from "@/lib/arabicDigits";
 import type { StandbyImage, Submission } from "@/lib/types";
 
 export function ApproveSubmissionModal({
@@ -36,7 +36,6 @@ export function ApproveSubmissionModal({
     price: submission.price ?? "",
     description: submission.details ?? "",
     phone: submission.phone ?? "",
-    size: submission.area ?? "",
     village: submission.village ?? "",
     basin: submission.basin ?? "",
     neighborhood: submission.neighborhood ?? "",
@@ -69,7 +68,7 @@ export function ApproveSubmissionModal({
     return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       const raw = e.target.value;
       const value =
-        key === "price" || key === "phone" || key === "parcel" || key === "size"
+        key === "price" || key === "phone" || key === "parcel"
           ? toWesternDigits(raw)
           : raw;
       setEdits((f) => ({ ...f, [key]: value }));
@@ -77,6 +76,11 @@ export function ApproveSubmissionModal({
   }
 
   async function handleConfirm() {
+    const normalizedPrice = normalizeDecimalInput(edits.price);
+    if (includePrice && normalizedPrice && !/^\d+(\.\d+)?$/.test(normalizedPrice)) {
+      showError(m.pricePerSqmNumberError);
+      return;
+    }
     setSubmitting(true);
     try {
       const listing = await api.approveSubmission(submission.id, {
@@ -89,10 +93,9 @@ export function ApproveSubmissionModal({
         imageUrls: selectedImages,
         edits: {
           title: edits.title.trim() || undefined,
-          price: edits.price.trim() || undefined,
+          price: normalizedPrice || undefined,
           description: edits.description.trim() || undefined,
           phone: edits.phone.trim() || undefined,
-          size: edits.size.trim() || undefined,
           village: edits.village.trim() || undefined,
           basin: edits.basin.trim() || undefined,
           neighborhood: edits.neighborhood.trim() || undefined,
@@ -151,12 +154,12 @@ export function ApproveSubmissionModal({
               dir="ltr"
               value={edits.price}
               onChange={updateEdit("price")}
+              inputMode="decimal"
+              pattern="^\\d+(\\.\\d+)?$"
+              placeholder="60"
               disabled={!includePrice}
             />
-          </label>
-          <label className="text-[11px] font-bold text-ink-soft">
-            {m.editSize}
-            <input className={`${inputClass} mt-1`} dir="ltr" value={edits.size} onChange={updateEdit("size")} />
+            <p className="mt-1 text-[10px] font-normal text-ink-soft">{m.pricePerSqmNote}</p>
           </label>
           <label className="text-[11px] font-bold text-ink-soft">
             {m.editPhone}

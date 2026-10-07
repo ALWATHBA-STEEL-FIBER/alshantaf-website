@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { useSettings } from "@/lib/SettingsProvider";
@@ -12,14 +12,20 @@ import { CheckIcon, ImageIcon, VideoIcon, DocumentIcon } from "@/components/icon
 import { LocationCascade } from "@/components/LocationCascade";
 import { DlsPricingHint } from "@/components/DlsPricingHint";
 import { localizePlaceName, localizeSizeLabel } from "@/lib/localizePlace";
-import { toWesternDigits } from "@/lib/arabicDigits";
-import { LocationInput } from "@/components/LocationInput";
+import { normalizeDecimalInput, toWesternDigits } from "@/lib/arabicDigits";
+import { LocationInput, type AdjacentRoad } from "@/components/LocationInput";
 import { FilePickerButton } from "@/components/FilePickerButton";
 import { parseCoords, coordsToString, formatDlsArea } from "@/lib/mapCoords";
-import { loadDlsLocations, codesForSelection } from "@/lib/dlsLocations";
-import { fetchMergedParcelLocation } from "@/lib/fetchParcelLocations";
-import { parseParcelNumbers } from "@/lib/parcelNumbers";
+import { loadDlsLocations, codesForSelection, selectionForCodes } from "@/lib/dlsLocations";
 import type { IndustryType } from "@/lib/types";
+import { isAmmanGovernorate } from "@/lib/ammanZoning";
+import {
+  areParcelNumbersConsecutive,
+  MAX_MULTI_PARCELS,
+  parseParcelNumbers,
+  sanitizeParcelNumberInput,
+} from "@/lib/multiParcel";
+import { fetchAndMergeParcelLocations } from "@/lib/multiParcelFetch";
 
 const ACTIVITY_KEYS = ["food", "pharma", "packaging", "logistics", "plastic", "wood", "metal", "stone", "blocks", "other"] as const;
 
@@ -66,9 +72,12 @@ export function OwnerForm() {
   const [dlsHintStatus, setDlsHintStatus] = useState<"idle" | "loading" | "missing" | "failed">("idle");
   const [dlsMapStatus, setDlsMapStatus] = useState<"idle" | "loading" | "ready" | "missing" | "failed">("idle");
   const [parcelPolygon, setParcelPolygon] = useState<[number, number][][] | null>(null);
+  const [adjacentRoads, setAdjacentRoads] = useState<AdjacentRoad[]>([]);
   const [dlsKey, setDlsKey] = useState<string | null>(null);
-  const [areaFromDls, setAreaFromDls] = useState(false);
   const [areaSqm, setAreaSqm] = useState<number | null>(null);
+  const [isMultiParcelOffer, setIsMultiParcelOffer] = useState(false);
+  const [parcelEntries, setParcelEntries] = useState<string[]>([""]);
+  const [parcelOrderError, setParcelOrderError] = useState("");
   const [result, setResult] = useState<{
     serialNo: string;
     trackingCode: string;
@@ -76,13 +85,56 @@ export function OwnerForm() {
     emailProvided: boolean;
     whatsappMessage: string;
   } | null>(null);
+  const regulationSectionRef = useRef<HTMLDivElement>(null);
+  const [awaitingRegulationAfterPin, setAwaitingRegulationAfterPin] = useState(false);
+  const [ammanAutoIndustryType, setAmmanAutoIndustryType] = useState<IndustryType | null>(null);
+  const [ammanLookupStatus, setAmmanLookupStatus] = useState<"idle" | "loading" | "success" | "failed">("idle");
+  const [ammanLookupNote, setAmmanLookupNote] = useState("");
+
+  function normalizeParcelId(parcelId: string): string {
+    const numeric = Number(parcelId);
+    return Number.isFinite(numeric) && numeric > 0 ? String(numeric) : parcelId;
+  }
 
   const update = (key: keyof typeof fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setFields((f) => ({ ...f, [key]: e.target.value }));
 
-  const updateDigits = (key: "phone" | "whatsapp" | "parcel" | "price" | "area") => (
+  const updateDigits = (key: "phone" | "whatsapp" | "price" | "area") => (
     e: React.ChangeEvent<HTMLInputElement>
   ) => setFields((f) => ({ ...f, [key]: toWesternDigits(e.target.value) }));
+
+  useEffect(() => {
+    const cleaned = parcelEntries
+      .map((value) => sanitizeParcelNumberInput(value))
+      .filter((value) => value.length > 0);
+    const canonical = cleaned.join(", ");
+    setFields((f) => (f.parcel === canonical ? f : { ...f, parcel: canonical }));
+    if (!isMultiParcelOffer) {
+      setParcelOrderError("");
+      return;
+    }
+    if (cleaned.length < 2) {
+      setParcelOrderError(lang === "ar" ? "أدخل رقمَي قطعتين على الأقل." : "Enter at least two parcel numbers.");
+      return;
+    }
+    if (cleaned.length > MAX_MULTI_PARCELS) {
+      setParcelOrderError(
+        lang === "ar"
+          ? `الحد الأقصى ${MAX_MULTI_PARCELS} قطع ضمن العرض الواحد.`
+          : `Maximum ${MAX_MULTI_PARCELS} parcels per offer.`
+      );
+      return;
+    }
+    if (!areParcelNumbersConsecutive(cleaned)) {
+      setParcelOrderError(
+        lang === "ar"
+          ? "يجب أن تكون أرقام القطع متتالية بنفس الترتيب (فرق 1 بين كل رقم والذي يليه)."
+          : "Parcel numbers must be consecutive in the same order (difference of 1)."
+      );
+      return;
+    }
+    setParcelOrderError("");
+  }, [parcelEntries, isMultiParcelOffer, lang]);
 
   // Fetch DLS admin value + parcel outline once zoning + full land identity are set.
   useEffect(() => {
@@ -97,12 +149,20 @@ export function OwnerForm() {
     const timer = setTimeout(async () => {
       if (cancelled) return;
       if (!industryType) {
+        if (awaitingRegulationAfterPin) {
+          setDlsHint(null);
+          setDlsHintStatus("idle");
+          setDlsMapStatus("ready");
+          return;
+        }
         setDlsHint(null);
         setDlsHintStatus("idle");
         setDlsMapStatus("idle");
         setParcelPolygon(null);
+        setAdjacentRoads([]);
         setDlsKey(null);
         setAreaSqm(null);
+        setFields((f) => ({ ...f, area: "" }));
         return;
       }
       if (!governorate || !directorate || !village || !basin || !neighborhood || !parcel) {
@@ -110,44 +170,56 @@ export function OwnerForm() {
         setDlsHintStatus("idle");
         setDlsMapStatus("idle");
         setParcelPolygon(null);
+        setAdjacentRoads([]);
         setDlsKey(null);
         setAreaSqm(null);
+        setFields((f) => ({ ...f, area: "" }));
         return;
       }
       setDlsHint(null);
       setDlsHintStatus("loading");
       setDlsMapStatus("loading");
       setParcelPolygon(null);
+      setAdjacentRoads([]);
       setDlsKey(null);
       setAreaSqm(null);
+      setFields((f) => ({ ...f, area: "" }));
 
-      const primaryParcel = parseParcelNumbers(parcel)[0] || parcel;
-      const valuePromise = api
-        .dlsAdministrativeValuePublic({
-          governorate,
-          directorate,
-          village,
-          basin,
-          neighborhood,
-          parcelNumber: primaryParcel,
-        })
-        .then((result) => {
-          if (!cancelled) {
-            setDlsHint({
-              value: result.value,
-              currency: result.currency,
-              source: result.source,
-              retrievedAt: result.retrievedAt,
-            });
-            setDlsHintStatus("idle");
-          }
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            setDlsHint(null);
-            setDlsHintStatus(err instanceof ApiError && err.status === 404 ? "missing" : "failed");
-          }
-        });
+      const valuePromise = (async () => {
+        const parcelNos = parseParcelNumbers(parcel);
+        const lookupNos = parcelNos.length ? parcelNos : [parcel];
+        const valueResults = await Promise.allSettled(
+          lookupNos.map((parcelNo) =>
+            api.dlsAdministrativeValuePublic({
+              governorate,
+              directorate,
+              village,
+              basin,
+              neighborhood,
+              parcelNumber: parcelNo,
+            })
+          )
+        );
+        const firstValue = valueResults.find(
+          (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof api.dlsAdministrativeValuePublic>>> =>
+            r.status === "fulfilled"
+        )?.value;
+        if (firstValue && !cancelled) {
+          setDlsHint({
+            value: firstValue.value,
+            currency: firstValue.currency,
+            source: firstValue.source,
+            retrievedAt: firstValue.retrievedAt,
+          });
+          setDlsHintStatus("idle");
+          return;
+        }
+        if (!cancelled) {
+          const firstError = valueResults.find((r): r is PromiseRejectedResult => r.status === "rejected")?.reason;
+          setDlsHint(null);
+          setDlsHintStatus(firstError instanceof ApiError && firstError.status === 404 ? "missing" : "failed");
+        }
+      })();
 
       const mapPromise = (async () => {
         try {
@@ -156,33 +228,61 @@ export function OwnerForm() {
           if (!codes) {
             if (!cancelled) {
               setParcelPolygon(null);
+              setAdjacentRoads([]);
               setDlsMapStatus("missing");
             }
             return;
           }
-          const location = await fetchMergedParcelLocation(codes, parcel, (q) =>
-            api.dlsParcelLocationPublic(q)
+          const parcelNos = parseParcelNumbers(parcel);
+          const lookupNos = parcelNos.length ? parcelNos : [parcel];
+          const merged = await fetchAndMergeParcelLocations(
+            lookupNos,
+            codes,
+            (payload) => api.dlsParcelLocationPublic(payload)
           );
+          const locations = merged.items;
+          const first = locations.find((loc) => loc.rings?.[0]?.length) ?? locations[0];
+          if (!first) {
+            setParcelPolygon(null);
+            setAdjacentRoads([]);
+            setDlsMapStatus("missing");
+            return;
+          }
+          const mergedRings = locations.flatMap((loc) => loc.rings ?? []);
+          const mergedRoads = locations
+            .flatMap((loc) => loc.adjacentRoads ?? [])
+            .filter((road, idx, arr) => arr.findIndex((x) => x.id === road.id && x.side === road.side) === idx);
+          const totalSqm = locations.reduce((sum, loc) => sum + (loc.areaSqm ?? 0), 0);
+          const centroid = {
+            lat: locations.reduce((sum, loc) => sum + loc.latitude, 0) / locations.length,
+            lng: locations.reduce((sum, loc) => sum + loc.longitude, 0) / locations.length,
+          };
           if (cancelled) return;
-          setParcelPolygon(location.rings);
-          setDlsKey(location.dlsKey);
+          setParcelPolygon(mergedRings.length ? mergedRings : first.rings);
+          setAdjacentRoads(mergedRoads);
+          setDlsKey(first.dlsKey);
           setFields((f) => ({
             ...f,
-            coordinates: coordsToString({ lat: location.latitude, lng: location.longitude }),
-            ...(location.areaSqm != null
-              ? { area: formatDlsArea(location.areaSqm, lang) }
+            coordinates: coordsToString(centroid),
+            ...(totalSqm > 0
+              ? { area: formatDlsArea(totalSqm, lang) }
+              : first.areaSqm != null
+                ? { area: formatDlsArea(first.areaSqm, lang) }
               : {}),
           }));
-          if (location.areaSqm != null) {
-            setAreaSqm(location.areaSqm);
-            setAreaFromDls(true);
+          if (totalSqm > 0) {
+            setAreaSqm(totalSqm);
+          } else if (first.areaSqm != null) {
+            setAreaSqm(first.areaSqm);
           } else {
             setAreaSqm(null);
+            setFields((f) => ({ ...f, area: "" }));
           }
           setDlsMapStatus("ready");
         } catch (err) {
           if (!cancelled) {
             setParcelPolygon(null);
+            setAdjacentRoads([]);
             setDlsKey(null);
             setDlsMapStatus(err instanceof ApiError && err.status === 404 ? "missing" : "failed");
           }
@@ -195,7 +295,36 @@ export function OwnerForm() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [fields.governorate, fields.directorate, fields.village, fields.basin, fields.neighborhood, fields.parcel, fields.industryType, lang]);
+  }, [
+    fields.governorate,
+    fields.directorate,
+    fields.village,
+    fields.basin,
+    fields.neighborhood,
+    fields.parcel,
+    fields.industryType,
+    lang,
+    awaitingRegulationAfterPin,
+  ]);
+
+  useEffect(() => {
+    if (fields.industryType) setAwaitingRegulationAfterPin(false);
+  }, [fields.industryType]);
+
+  useEffect(() => {
+    setAmmanAutoIndustryType(null);
+    if (!isAmmanGovernorate(fields.governorate)) {
+      setAmmanLookupStatus("idle");
+      setAmmanLookupNote("");
+      return;
+    }
+    setAmmanLookupStatus("idle");
+    setAmmanLookupNote(
+      lang === "ar"
+        ? "تصنيف التنظيم يُختار يدويًا. مستكشف عمان للمعاينة فقط، والشهادة الرسمية عبر خدمات أمانة عمان (ومنها خدمات GIS المدفوعة)."
+        : "Select zoning manually. Amman Explorer is a viewer only; official certificates come from Greater Amman Municipality services (including paid GIS)."
+    );
+  }, [fields.governorate, lang]);
 
   const MAX_IMAGES = 10;
   const MAX_IMAGE_MB = 8;
@@ -214,6 +343,61 @@ export function OwnerForm() {
     }
     setFileError("");
     setImages(files.slice(0, MAX_IMAGES));
+  }
+
+  async function handlePinDrop(coords: { lat: number; lng: number }) {
+    setError("");
+    try {
+      const [pointParcel, dlsData] = await Promise.all([
+        api.dlsParcelByPointPublic({ latitude: coords.lat, longitude: coords.lng }),
+        loadDlsLocations(),
+      ]);
+      const selection = selectionForCodes(dlsData, {
+        villageCode: pointParcel.villageCode,
+        basinCode: pointParcel.basinCode,
+        sectorCode: pointParcel.sectorCode,
+      });
+      if (!selection) {
+        setError(lang === "ar" ? "تعذر مطابقة موقع الدبوس مع بيانات المناطق." : "Could not map the pin point to DLS location labels.");
+        return;
+      }
+
+      const parcel = normalizeParcelId(pointParcel.parcelId);
+      setIsMultiParcelOffer(false);
+      setParcelEntries([parcel]);
+      setFields((f) => ({
+        ...f,
+        coordinates: coordsToString({ lat: pointParcel.latitude, lng: pointParcel.longitude }),
+        governorate: selection.governorate,
+        directorate: selection.directorate,
+        village: selection.village,
+        basin: selection.basin,
+        neighborhood: selection.neighborhood,
+        parcel,
+        ...(pointParcel.areaSqm != null ? { area: formatDlsArea(pointParcel.areaSqm, lang) } : {}),
+      }));
+      setParcelPolygon(pointParcel.rings?.length ? pointParcel.rings : null);
+      setAdjacentRoads(pointParcel.adjacentRoads ?? []);
+      setDlsKey(pointParcel.dlsKey || null);
+      setAreaSqm(pointParcel.areaSqm ?? null);
+      setDlsMapStatus("ready");
+      if (!fields.industryType) {
+        setAwaitingRegulationAfterPin(true);
+        window.setTimeout(() => {
+          regulationSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 80);
+      } else {
+        setAwaitingRegulationAfterPin(false);
+      }
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : lang === "ar"
+            ? "تعذر جلب بيانات الأرض من دائرة الأراضي من موقع الدبوس."
+            : "Could not fetch DLS parcel data from the selected map point."
+      );
+    }
   }
 
   function handleVideoChange(files: File[]) {
@@ -242,6 +426,38 @@ export function OwnerForm() {
 
     if (!fields.name || !fields.phone || !fields.governorate || !fields.directorate || !fields.village || !fields.basin || !fields.neighborhood || !fields.parcel || !fields.industryType || !fields.details) {
       setError(t.owners.requiredError);
+      return;
+    }
+    const parcelNos = parseParcelNumbers(fields.parcel);
+    if (isMultiParcelOffer) {
+      if (parcelNos.length < 2) {
+        setError(lang === "ar" ? "حدد قطعتين على الأقل ضمن العرض متعدد القطع." : "Select at least two parcels for a multi-land offer.");
+        return;
+      }
+      if (parcelNos.length > MAX_MULTI_PARCELS) {
+        setError(
+          lang === "ar"
+            ? `لا يمكن إضافة أكثر من ${MAX_MULTI_PARCELS} قطع في العرض الواحد.`
+            : `You cannot add more than ${MAX_MULTI_PARCELS} parcels in one offer.`
+        );
+        return;
+      }
+      if (!areParcelNumbersConsecutive(parcelNos)) {
+        setError(
+          lang === "ar"
+            ? "يجب إدخال أرقام القطع بترتيب متتالٍ (فرق 1). مثال: 706، 707، 708."
+            : "Parcel numbers must be entered in consecutive order (difference 1). Example: 706, 707, 708."
+        );
+        return;
+      }
+    }
+    if (!areaSqm || areaSqm <= 0 || !fields.area) {
+      setError(t.owners.areaRequiredError);
+      return;
+    }
+    const normalizedPrice = normalizeDecimalInput(fields.price);
+    if (!normalizedPrice || !/^\d+(\.\d+)?$/.test(normalizedPrice)) {
+      setError(t.owners.pricePerSqmNumberError);
       return;
     }
     if (source === "broker" && (!fields.office || !fields.whatsapp || !fields.authExpiry || !authorized)) {
@@ -276,7 +492,7 @@ export function OwnerForm() {
           longitude: location ? String(location.lng) : undefined,
           address: fields.address || undefined,
           area: fields.area,
-          price: fields.price,
+          price: normalizedPrice,
           administrativeValue: dlsHint ? String(dlsHint.value) : undefined,
           administrativeValueSource: dlsHint?.source,
           administrativeValueAt: dlsHint?.retrievedAt,
@@ -307,7 +523,7 @@ export function OwnerForm() {
         `${t.owners.basin}: ${localizePlaceName(fields.basin, lang)}`,
         `${t.owners.parcel}: ${fields.parcel}`,
         `${t.owners.area}: ${fields.area ? localizeSizeLabel(fields.area, lang) : t.owners.notProvided}`,
-        `${t.owners.price}: ${fields.price || t.owners.notProvided}`,
+        `${t.owners.price}: ${normalizedPrice || t.owners.notProvided}`,
         `${t.owners.landDetails}: ${fields.details}`,
         `${t.owners.whatsappFiles}: ${submission.images.length}${submission.video ? ` + ${t.admin.approveModal.video}` : ""}${submission.document ? ` + ${t.admin.approveModal.pdf}` : ""}`,
         "",
@@ -564,17 +780,109 @@ export function OwnerForm() {
           />
           <div>
             <label className={labelClass} htmlFor="owner-parcel">{t.owners.parcel}</label>
-            <input
-              id="owner-parcel" className={inputClass} value={fields.parcel} onChange={updateDigits("parcel")} required />
+            <label className="mb-2 flex items-start gap-2 text-xs text-ink-soft">
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-green w-4 h-4"
+                checked={isMultiParcelOffer}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setIsMultiParcelOffer(checked);
+                  setParcelEntries((prev) => {
+                    const cleaned = prev.map((value) => sanitizeParcelNumberInput(value)).filter(Boolean);
+                    if (!checked) return [cleaned[0] ?? ""];
+                    if (cleaned.length >= 2) return cleaned.slice(0, MAX_MULTI_PARCELS);
+                    return [cleaned[0] ?? "", ""];
+                  });
+                }}
+              />
+              <span>
+                {lang === "ar"
+                  ? "هذا عرض متعدد القطع (الأرقام متتالية بفارق 1)."
+                  : "This is a multi-land offer (parcel numbers must be consecutive by 1)."}
+              </span>
+            </label>
+            <div className="grid gap-2">
+              {parcelEntries.map((value, idx) => (
+                <div key={`parcel-entry-${idx}`} className="flex items-center gap-2">
+                  <input
+                    className={inputClass}
+                    value={value}
+                    onChange={(e) =>
+                      setParcelEntries((prev) =>
+                        prev.map((item, i) => (i === idx ? sanitizeParcelNumberInput(e.target.value) : item))
+                      )
+                    }
+                    inputMode="numeric"
+                    placeholder={lang === "ar" ? `رقم القطعة ${idx + 1}` : `Parcel #${idx + 1}`}
+                    required={idx === 0}
+                  />
+                  {isMultiParcelOffer && parcelEntries.length > 2 && (
+                    <button
+                      type="button"
+                      className="h-11 px-3 rounded-xl border border-line bg-surface-2 text-xs font-bold"
+                      onClick={() => setParcelEntries((prev) => prev.filter((_, i) => i !== idx))}
+                    >
+                      {lang === "ar" ? "حذف" : "Remove"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {isMultiParcelOffer && (
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  className="h-9 px-3 rounded-full border border-line bg-surface-2 text-xs font-bold disabled:opacity-60"
+                  disabled={parcelEntries.length >= MAX_MULTI_PARCELS}
+                  onClick={() =>
+                    setParcelEntries((prev) =>
+                      prev.length >= MAX_MULTI_PARCELS ? prev : [...prev, ""]
+                    )
+                  }
+                >
+                  {lang === "ar" ? "+ إضافة قطعة أخرى" : "+ Add another parcel"}
+                </button>
+                <p className="text-[11px] text-ink-soft">
+                  {lang === "ar"
+                    ? `يبدأ بقطعتين — حتى ${MAX_MULTI_PARCELS} قطع.`
+                    : `Starts with 2 parcels — up to ${MAX_MULTI_PARCELS}.`}
+                </p>
+              </div>
+            )}
+            {parcelOrderError && (
+              <p className="mt-2 text-xs text-red-600 bg-red-50 rounded-lg p-2.5">{parcelOrderError}</p>
+            )}
           </div>
 
-          <p className="text-xs font-bold text-green">{t.owners.regulationSection}</p>
-          <RegulationGuide
-            scope="all"
-            value={fields.industryType}
-            onChange={(value) => setFields((f) => ({ ...f, industryType: value }))}
-            required
-          />
+          <div ref={regulationSectionRef}>
+            <p className="text-xs font-bold text-green">{t.owners.regulationSection}</p>
+            <RegulationGuide
+              scope="all"
+              value={fields.industryType}
+              onChange={(value) => {
+                setFields((f) => ({ ...f, industryType: value }));
+                if (value) setAwaitingRegulationAfterPin(false);
+              }}
+              required
+              selectDisabled={Boolean(ammanAutoIndustryType)}
+            />
+            {isAmmanGovernorate(fields.governorate) && (
+              <p
+                className={`mt-2 text-[11px] leading-relaxed ${
+                  ammanLookupStatus === "failed"
+                    ? "text-red-700"
+                    : ammanLookupStatus === "success"
+                      ? "text-green"
+                      : "text-ink-soft"
+                }`}
+              >
+                {ammanLookupStatus === "loading"
+                  ? (lang === "ar" ? "جارٍ التحميل..." : "Loading...")
+                  : ammanLookupNote}
+              </p>
+            )}
+          </div>
 
           <div className="rounded-2xl border border-line bg-white/60 p-3 sm:p-4 flex flex-col gap-3">
             <div className="flex items-start justify-between gap-3">
@@ -601,15 +909,19 @@ export function OwnerForm() {
             <LocationInput
               value={fields.coordinates}
               onChange={(v) => setFields((f) => ({ ...f, coordinates: v }))}
+              onPinDrop={handlePinDrop}
               address={fields.address}
               onAddressChange={(address) => setFields((f) => ({ ...f, address }))}
               polygon={parcelPolygon}
-              lockEditing={dlsMapStatus === "ready"}
+              adjacentRoads={adjacentRoads}
+              lockEditing={dlsMapStatus === "ready" || awaitingRegulationAfterPin}
               loading={dlsMapStatus === "loading"}
               loadingLabel={t.owners.dlsMapLoading}
               statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReady : undefined}
               idleNote={!fields.industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
               showDimensions
+              showTopo={Boolean(fields.industryType)}
+              parcelNumbers={parseParcelNumbers(fields.parcel)}
             />
           </div>
 
@@ -621,14 +933,10 @@ export function OwnerForm() {
                 id="owner-area"
                 className={inputClass}
                 value={fields.area}
-                onChange={(e) => {
-                  setAreaFromDls(false);
-                  setAreaSqm(null);
-                  updateDigits("area")(e);
-                }}
-                placeholder={lang === "ar" ? "مثال: 2 دونم" : "e.g. 2 dunums"}
+                readOnly
+                placeholder={lang === "ar" ? "تُعبأ تلقائيًا من دائرة الأراضي" : "Auto-filled from DLS"}
               />
-              {areaFromDls && dlsMapStatus === "ready" && (
+              {dlsMapStatus === "ready" && fields.area && (
                 <p className="text-[11px] text-ink-soft mt-1.5">{t.owners.areaDlsNote}</p>
               )}
               {dlsMapStatus === "loading" && !fields.area && (
@@ -645,9 +953,13 @@ export function OwnerForm() {
                 className={inputClass}
                 value={fields.price}
                 onChange={updateDigits("price")}
+                inputMode="decimal"
+                pattern="^\\d+(\\.\\d+)?$"
+                placeholder={lang === "ar" ? "مثال: 60" : "e.g. 60"}
                 disabled={dlsHintStatus === "loading"}
                 aria-busy={dlsHintStatus === "loading"}
               />
+              <p className="text-[11px] text-ink-soft mt-1.5">{t.owners.pricePerSqmNote}</p>
               {dlsHintStatus === "loading" && (
                 <div className="mt-2 flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[11px] text-ink-soft">
                   <span className="inline-block w-4 h-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin" aria-hidden />

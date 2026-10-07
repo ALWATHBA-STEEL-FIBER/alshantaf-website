@@ -1,4 +1,4 @@
-import { toWesternDigits } from "@/lib/arabicDigits";
+import { normalizeDecimalInput, toWesternDigits } from "@/lib/arabicDigits";
 
 /** Parse a size/area label into square metres (supports m²/م² and dunums/دونم). */
 export function parseAreaSqm(label: string | null | undefined): number | null {
@@ -24,26 +24,31 @@ export function adminMedianEstimate(ratePerSqm: number, areaSqm: number): number
 
 /**
  * Parse an asking rate per m² from listing price text
- * (e.g. "60 دينار / م²", "60 JOD/m2", or bare "60"). Returns null for lump-sum prices.
+ * (e.g. "60 دينار / م²", "60 JOD/m2"). Returns null for lump-sum prices.
  */
 export function parsePricePerSqm(price: string | null | undefined): number | null {
   if (!price) return null;
-  const text = toWesternDigits(price).replace(/,/g, "").trim();
+  const normalized = normalizeDecimalInput(price);
+  const text = normalized || toWesternDigits(price).replace(/,/g, "").trim();
+  // New canonical input is a plain number (rate per m²).
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const n = Number(text);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
   const per = text.match(
     /([\d.]+)\s*(?:دينار|JOD|JD|jd)?\s*(?:\/|لكل|per)?\s*(?:م²|m²|م2|m2|sq\.?\s*m)/i
   );
-  if (per) {
-    const n = Number(per[1]);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  }
-  // Most published listings store the rate as a bare number ("60").
-  const bare = text.match(/^([\d.]+)\s*(?:دينار|JOD|JD|jd)?\s*$/i);
-  if (bare) {
-    const n = Number(bare[1]);
-    // Guard: values this high are almost certainly totals, not per-m² rates.
-    if (Number.isFinite(n) && n > 0 && n < 5000) return n;
-  }
-  return null;
+  if (!per) return null;
+  const n = Number(per[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function formatPricePerSqmLabel(price: string | null | undefined, lang: "ar" | "en"): string {
+  if (!price) return "";
+  const perSqm = parsePricePerSqm(price);
+  if (perSqm == null) return price;
+  const amount = formatMoney(perSqm, lang);
+  return lang === "ar" ? `${amount} دينار / م²` : `${amount} JOD / m²`;
 }
 
 export function formatMoney(value: number, lang: "ar" | "en"): string {

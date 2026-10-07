@@ -109,3 +109,41 @@ export function codesForSelection(
     sectorCode: neighborhood.value,
   };
 }
+
+export function selectionForCodes(
+  data: DlsData,
+  codes: { villageCode: string; basinCode: string; sectorCode: string }
+):
+  | {
+      governorate: string;
+      directorate: string;
+      village: string;
+      basin: string;
+      neighborhood: string;
+    }
+  | null {
+  const normalizeCode = (value: string) => value.replace(/\D/g, "").replace(/^0+/, "") || "0";
+  const villageCode = normalizeCode(codes.villageCode);
+  const basinCode = normalizeCode(codes.basinCode);
+  const sectorCode = normalizeCode(codes.sectorCode);
+  for (const governorate of data.governorates) {
+    for (const directorate of governorate.directorates) {
+      for (const village of directorate.villages) {
+        if (normalizeCode(village.value) !== villageCode) continue;
+        for (const basin of village.basins) {
+          if (normalizeCode(basin.value) !== basinCode) continue;
+          const neighborhood = basin.neighborhoods.find((n) => normalizeCode(n.value) === sectorCode);
+          if (!neighborhood) continue;
+          return {
+            governorate: governorate.label,
+            directorate: directorate.label,
+            village: village.label,
+            basin: basin.label,
+            neighborhood: neighborhood.label,
+          };
+        }
+      }
+    }
+  }
+  return null;
+}

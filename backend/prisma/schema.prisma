@@ -26,6 +26,30 @@ model Setting {
   updatedAt DateTime @updatedAt
 }
 
+model IndustryTypeCatalog {
+  industryType      IndustryType @id
+  category          String
+  ammanAutoEligible Boolean      @default(false)
+  rules             Json
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+}
+
+model AmmanZoningObservation {
+  id           String       @id @default(uuid())
+  sourceKey    String       @unique
+  zoningNo     String?
+  zoningName   String?
+  districtName String?
+  industryType IndustryType?
+  seenCount    Int          @default(1)
+  firstSeenAt  DateTime     @default(now())
+  lastSeenAt   DateTime     @updatedAt
+
+  @@index([industryType])
+  @@index([lastSeenAt])
+}
+
 model AuditLog {
   id         String   @id @default(uuid())
   actorEmail String
@@ -45,18 +69,28 @@ enum IndustryType {
   light
   mediumSpecial
   medium
+  industrialCraft
+  industrialHeavy
+  industrialTransformative
+  industrialGeneral
   agriToIndustrial
   technical
   residentialA
   residentialB
   residentialC
   residentialD
+  residentialPopular
+  residentialHighDensity
   residentialGreen
   residentialAgri
   agriFacilities
   commercialCentral
   commercialShowrooms
   commercialLinear
+  commercialOffice
+  commercialIndustrial
+  commercialNeighborhoodService
+  commercialCenter
   commercialLocal
   greenWithinA
   greenWithinB
@@ -64,12 +98,16 @@ enum IndustryType {
   greenWithinD
   residentialPrivateA
   residentialPrivateB
+  residentialPrivateC
   residentialRural
   commercialOrdinaryA
   commercialOrdinaryB
   commercialOrdinaryC
   commercialWithinD
   commercialComplex
+  mixedUse
+  mixedUseUrban
+  mixedUseEntertainment
   commercialOutsideCentral
   commercialOutsideShowrooms
   commercialOutsideLinear
@@ -336,4 +374,83 @@ model Submission {
   convertedListing   Listing? @relation(fields: [convertedListingId], references: [id], onDelete: SetNull)
 
   @@index([status])
+}
+
+/// Official / institutional data provider for market intelligence.
+model MarketSource {
+  id               String   @id @default(uuid())
+  key              String   @unique
+  name             String
+  tier             Int
+  url              String
+  country          String   @default("JO")
+  sourceType       String
+  updateFrequency  String
+  reliability      String   @default("official")
+  lastChecked      DateTime?
+  lastSuccessAt    DateTime?
+  nextExpectedAt   DateTime?
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  metrics          MarketMetric[]
+}
+
+/// Normalized observation for a single market KPI at a given period.
+model MarketMetric {
+  id                 String       @id @default(uuid())
+  metricKey          String
+  metricName         String
+  category           String
+  value              Float
+  unit               String
+  currency           String?
+  periodStart        DateTime
+  periodEnd          DateTime
+  frequency          String
+  sourceId           String
+  source             MarketSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  sourceUrl          String
+  sourcePublishedAt  DateTime?
+  retrievedAt        DateTime     @default(now())
+  status             String       @default("latest_available")
+  isEstimate         Boolean      @default(false)
+  isCalculated       Boolean      @default(false)
+  confidence         String       @default("high")
+  previousValue      Float?
+  changePercent      Float?
+  notes              String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  revisions          MarketMetricRevision[]
+
+  @@unique([metricKey, periodEnd, sourceId])
+  @@index([metricKey, periodEnd])
+  @@index([category])
+  @@index([retrievedAt])
+}
+
+/// Preserve original retrieved values when a figure is revised.
+model MarketMetricRevision {
+  id            String       @id @default(uuid())
+  metricId      String
+  metric        MarketMetric @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  previousValue Float
+  newValue      Float
+  revisedAt     DateTime     @default(now())
+  note          String?
+}
+
+/// Aggregated daily site page views (analytics-consent path only).
+model SitePageViewDaily {
+  id             String   @id @default(uuid())
+  day            DateTime @db.Date
+  path           String   @default("/")
+  views          Int      @default(0)
+  uniqueVisitors Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([day, path])
+  @@index([day])
 }

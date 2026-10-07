@@ -12,11 +12,13 @@ import { audit } from "../lib/audit";
 import { industryTypeEnum } from "../lib/industryTypes";
 import { asyncHandler } from "../lib/asyncHandler";
 import { locationFieldsSchema, legacyCoordinates } from "../lib/location";
-import { toWesternDigits, westernDigitsString } from "../lib/arabicDigits";
+import { normalizeDecimalInput, toWesternDigits, westernDigitsString } from "../lib/arabicDigits";
+import { assertValidMultiParcel, canonicalParcelList } from "../lib/multiParcel";
 
 export const adminListingsRouter = Router();
 adminListingsRouter.use(requireAdmin);
 adminListingsRouter.use(requirePermission("listings"));
+const PRICE_PER_SQM_RE = /^\d+(\.\d+)?$/;
 
 const UPLOAD_DIR = path.resolve(__dirname, "../../uploads");
 
@@ -33,7 +35,13 @@ const listingBaseSchema = z.object({
   industryType: z.enum(industryTypeEnum),
   dealType: z.enum(["sale", "rent", "sale_or_rent", "partnership"]).default("sale"),
   size: westernDigitsString(z.string().optional()),
-  price: westernDigitsString(z.string().optional()),
+  price: z.preprocess(
+    (value) => (typeof value === "string" ? normalizeDecimalInput(value) : value),
+    z.string().optional()
+  ).refine(
+    (value) => value === undefined || value.trim() === "" || PRICE_PER_SQM_RE.test(value.trim()),
+    "Price must be a number per square meter (m²)."
+  ),
   governorate: z.string().optional(),
   directorate: z.string().optional(),
   village: z.string().optional(),
@@ -126,12 +134,19 @@ adminListingsRouter.post(
   "/",
   asyncHandler(async (req, res) => {
     const input = listingInputSchema.parse(req.body);
+    const parcelValidation = assertValidMultiParcel(input.parcel);
+    if (!parcelValidation.ok) {
+      res.status(400).json({ error: parcelValidation.error });
+      return;
+    }
+    const normalizedParcel = canonicalParcelList(input.parcel) ?? input.parcel;
     const listingNo = await nextListingNo(prisma, input.area);
     const ownerAccessCode = await nextOwnerAccessCode(prisma);
     const { media, ...rest } = input;
     const listing = await prisma.listing.create({
       data: {
         ...rest,
+        parcel: normalizedParcel,
         locationUrl: legacyCoordinates(input.latitude, input.longitude) ?? input.locationUrl,
         listingNo,
         ownerAccessCode,
@@ -163,18 +178,25 @@ adminListingsRouter.patch(
   "/:id",
   asyncHandler(async (req, res) => {
     const input = listingUpdateSchema.parse(req.body);
+    const parcelValidation = assertValidMultiParcel(input.parcel);
+    if (!parcelValidation.ok) {
+      res.status(400).json({ error: parcelValidation.error });
+      return;
+    }
     const existing = await prisma.listing.findUnique({ where: { id: req.params.id }, include: { media: true } });
     if (!existing) {
       res.status(404).json({ error: "Listing not found" });
       return;
     }
     const { media, ...rest } = input;
+    const normalizedParcel = canonicalParcelList(input.parcel) ?? input.parcel;
     const ownerAccessCode = existing.ownerAccessCode ?? (await nextOwnerAccessCode(prisma));
     const nextStatus = input.status ?? existing.status;
     const listing = await prisma.listing.update({
       where: { id: req.params.id },
       data: {
         ...rest,
+        ...(input.parcel !== undefined ? { parcel: normalizedParcel } : {}),
         ownerAccessCode,
         ...(input.latitude !== undefined && input.longitude !== undefined ? { locationUrl: legacyCoordinates(input.latitude, input.longitude) } : {}),
         ...((nextStatus === "sold" || nextStatus === "canceled") && existing.publishStatus === "published"

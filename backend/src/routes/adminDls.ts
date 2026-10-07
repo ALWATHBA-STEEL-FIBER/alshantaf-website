@@ -4,7 +4,7 @@ import rateLimit from "express-rate-limit";
 import { requireAdmin, requirePermission } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 import { lookupDlsAdministrativeValue, DlsLookupError } from "../lib/dlsAdministrativeValue";
-import { lookupDlsParcelLocation, DlsParcelLocationError } from "../lib/dlsParcelLocation";
+import { lookupDlsParcelByPoint, lookupDlsParcelLocation, DlsParcelLocationError } from "../lib/dlsParcelLocation";
 import { westernDigitsString } from "../lib/arabicDigits";
 
 export const adminDlsRouter = Router();
@@ -46,6 +46,11 @@ const locationSchema = z.object({
   parcelNumber: westernDigitsString(z.string().min(1)),
 });
 
+const pointSchema = z.object({
+  latitude: z.coerce.number().finite().gte(-90).lte(90),
+  longitude: z.coerce.number().finite().gte(-180).lte(180),
+});
+
 adminDlsRouter.post(
   "/administrative-value",
   dlsLookupLimiter,
@@ -80,6 +85,30 @@ adminDlsRouter.post(
       if (!result) {
         res.status(404).json({
           error: "No map geometry found for this parcel — please check the land identity values",
+        });
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      if (err instanceof DlsParcelLocationError) {
+        res.status(502).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+  })
+);
+
+adminDlsRouter.post(
+  "/parcel-by-point",
+  dlsLocationLimiter,
+  asyncHandler(async (req, res) => {
+    const input = pointSchema.parse(req.body);
+    try {
+      const result = await lookupDlsParcelByPoint(input);
+      if (!result) {
+        res.status(404).json({
+          error: "No parcel found at this map point — move the pin inside a parcel boundary",
         });
         return;
       }

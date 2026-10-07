@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { useSettings } from "@/lib/SettingsProvider";
@@ -9,7 +9,6 @@ import { api } from "@/lib/api";
 import { buildSrcSet } from "@/lib/imageSrcSet";
 import { coordsToString, formatDlsArea, parseCoords } from "@/lib/mapCoords";
 import { codesForSelection, loadDlsLocations } from "@/lib/dlsLocations";
-import { fetchMergedParcelLocation } from "@/lib/fetchParcelLocations";
 import {
   adminMedianEstimate,
   formatAreaSqm,
@@ -17,30 +16,49 @@ import {
   parseAreaSqm,
   parsePricePerSqm,
 } from "@/lib/adminPricing";
+import { parseParcelNumbers } from "@/lib/multiParcel";
+import { fetchAndMergeParcelLocations } from "@/lib/multiParcelFetch";
 import {
   localizeListingTitle,
   localizePlaceName,
-  localizePriceLabel,
   localizePropertyType,
   localizeSizeLabel,
 } from "@/lib/localizePlace";
 import type { Listing } from "@/lib/types";
-import { LocationInput } from "@/components/LocationInput";
+import { LocationInput, type LocationInputHandle } from "@/components/LocationInput";
 import { DlsPricingHint } from "@/components/DlsPricingHint";
 import { RegulationGuide } from "@/components/RegulationGuide";
 import { useAnalyticsAllowed } from "@/components/CookieConsent";
-import { ShareIcon } from "@/components/icons";
 
 export function OfferDetail({ listing }: { listing: Listing }) {
   const { t, lang } = useLanguage();
   const settings = useSettings();
   const analyticsAllowed = useAnalyticsAllowed();
-  const [parcelPolygon, setParcelPolygon] = useState<[number, number][][] | null>(null);
-  const [perimeterM, setPerimeterM] = useState<number | null>(null);
+  const [parcelPolygons, setParcelPolygons] = useState<
+    Array<{
+      parcelNo: string;
+      rings: [number, number][][];
+      areaSqm: number | null;
+      perimeterM: number | null;
+      adjacentRoads: Array<{
+        id: string;
+        name: string;
+        side: "north" | "south" | "east" | "west";
+        widthM: number | null;
+        source: "osm-overpass" | "google-maps" | "dls-neighbor";
+        path: [number, number][];
+      }>;
+    }>
+  >([]);
+  const [selectedParcelNos, setSelectedParcelNos] = useState<string[]>([]);
   const [areaSqm, setAreaSqm] = useState<number | null>(() => parseAreaSqm(listing.size));
   const [activePhoto, setActivePhoto] = useState(0);
   const [photoFsOpen, setPhotoFsOpen] = useState(false);
+  const [pdfViewerOpen, setPdfViewerOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [blueprintReady, setBlueprintReady] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState("");
   const expectsParcel = Boolean(
     listing.governorate &&
       listing.directorate &&
@@ -49,6 +67,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
       listing.neighborhood &&
       listing.parcel?.trim()
   );
+  const parcelCandidates = useMemo(() => parseParcelNumbers(listing.parcel), [listing.parcel]);
   const expectsMap = Boolean(
     (listing.latitude !== null && listing.longitude !== null) ||
       parseCoords(listing.locationUrl) ||
@@ -59,6 +78,8 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   const [topoReady, setTopoReady] = useState(!expectsParcel);
   const thumbRailRef = useRef<HTMLDivElement>(null);
   const stageRailRef = useRef<HTMLDivElement>(null);
+  const printLocationRef = useRef<LocationInputHandle>(null);
+  const mapLocationRef = useRef<LocationInputHandle>(null);
 
   useEffect(() => {
     if (!analyticsAllowed) return;
@@ -67,9 +88,37 @@ export function OfferDetail({ listing }: { listing: Listing }) {
 
   useEffect(() => {
     let cancelled = false;
+    const normalizeParcelId = (parcelId: string | null | undefined) => {
+      const cleaned = (parcelId ?? "").replace(/\D/g, "");
+      if (!cleaned) return "";
+      return String(Number(cleaned));
+    };
+    const fallbackByPoint = async () => {
+      if (!mapCoords) return false;
+      try {
+        const point = await api.dlsParcelByPointPublic({ latitude: mapCoords.lat, longitude: mapCoords.lng });
+        if (cancelled || !point.rings?.[0]?.length) return false;
+        const parcelNo = normalizeParcelId(point.parcelId) || (listing.parcel?.trim() ?? "");
+        const fallbackItem = {
+          parcelNo,
+          rings: point.rings,
+          areaSqm: point.areaSqm ?? null,
+          perimeterM: point.perimeterM ?? null,
+          adjacentRoads: point.adjacentRoads ?? [],
+        };
+        setParcelPolygons([fallbackItem]);
+        setSelectedParcelNos(parcelNo ? [parcelNo] : []);
+        if ((point.areaSqm ?? 0) > 0) setAreaSqm(point.areaSqm ?? null);
+        setTopoReady(false);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     if (!expectsParcel) {
-      setParcelPolygon(null);
-      setPerimeterM(null);
+      setParcelPolygons([]);
+      setSelectedParcelNos([]);
       setGeoLoading(false);
       setTopoReady(true);
       return;
@@ -88,21 +137,50 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           listing.neighborhood!
         );
         if (!codes || cancelled) {
-          if (!cancelled) setTopoReady(true);
+          const usedPointFallback = await fallbackByPoint();
+          if (!usedPointFallback && !cancelled) {
+            setParcelPolygons([]);
+            setSelectedParcelNos([]);
+            setTopoReady(true);
+          }
           return;
         }
-        const location = await fetchMergedParcelLocation(codes, listing.parcel!.trim(), (q) =>
-          api.dlsParcelLocationPublic(q)
+        const parcelNos = parcelCandidates.length
+          ? parcelCandidates
+          : [listing.parcel!.trim()];
+        const merged = await fetchAndMergeParcelLocations(
+          parcelNos,
+          codes,
+          (payload) => api.dlsParcelLocationPublic(payload)
         );
         if (cancelled) return;
-        setParcelPolygon(location.rings);
-        setPerimeterM(location.perimeterM);
-        if (location.areaSqm != null) setAreaSqm(location.areaSqm);
-        setTopoReady(!(location.rings?.[0]?.length));
+        const normalized = merged.items
+          .map(({ parcelNo, rings, areaSqm, perimeterM, adjacentRoads }) => ({
+            parcelNo,
+            rings,
+            areaSqm,
+            perimeterM,
+            adjacentRoads: adjacentRoads ?? [],
+          }))
+          .filter((p: { parcelNo: string; rings: [number, number][][] }) => p.rings?.[0]?.length);
+        if (!normalized.length) {
+          const usedPointFallback = await fallbackByPoint();
+          if (!usedPointFallback && !cancelled) {
+            setParcelPolygons([]);
+            setSelectedParcelNos([]);
+            setTopoReady(true);
+          }
+          return;
+        }
+        setParcelPolygons(normalized);
+        setSelectedParcelNos(normalized.map((p) => p.parcelNo));
+        const totalSqm = normalized.reduce((sum, p) => sum + (p.areaSqm ?? 0), 0);
+        if (totalSqm > 0) setAreaSqm(totalSqm);
+        setTopoReady(!normalized.length);
       } catch {
         if (!cancelled) {
-          setParcelPolygon(null);
-          setPerimeterM(null);
+          setParcelPolygons([]);
+          setSelectedParcelNos([]);
           setTopoReady(true);
         }
       } finally {
@@ -121,6 +199,10 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     listing.basin,
     listing.neighborhood,
     listing.parcel,
+    parcelCandidates,
+    listing.latitude,
+    listing.longitude,
+    listing.locationUrl,
   ]);
 
   useEffect(() => {
@@ -128,13 +210,16 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   }, [expectsMap]);
 
   useEffect(() => {
-    if (!photoFsOpen) return;
+    if (!photoFsOpen && !pdfViewerOpen) return;
     const prevOverflow = document.body.style.overflow;
     const prevHtmlOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
     document.documentElement.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPhotoFsOpen(false);
+      if (e.key === "Escape") {
+        setPhotoFsOpen(false);
+        setPdfViewerOpen(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => {
@@ -142,7 +227,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
       document.documentElement.style.overflow = prevHtmlOverflow;
       window.removeEventListener("keydown", onKey);
     };
-  }, [photoFsOpen]);
+  }, [photoFsOpen, pdfViewerOpen]);
 
   const images = listing.images.length
     ? listing.images
@@ -155,11 +240,12 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   const title = localizeListingTitle(listing.title, lang);
   const areaLabel = listing.area ? localizePlaceName(listing.area, lang) : "";
   const propertyType = localizePropertyType(listing.propertyType, lang, t.offers.propertyTypeFallback);
-  const sizeLabel = localizeSizeLabel(
-    areaSqm != null && areaSqm > 0 ? formatDlsArea(areaSqm, lang) : listing.size,
-    lang
-  );
-  const priceLabel = localizePriceLabel(listing.price, lang);
+  const sizeLabel = localizeSizeLabel(listing.size, lang);
+  const pricePerSqmLabelValue = parsePricePerSqm(listing.price);
+  const priceLabel =
+    pricePerSqmLabelValue != null
+      ? `${formatMoney(pricePerSqmLabelValue, lang)} ${lang === "ar" ? "د.أ / م²" : "JOD / m²"}`
+      : "";
   const basinLabel = listing.basin ? localizePlaceName(listing.basin, lang) : "";
   const presenter =
     listing.showPresenter && (listing.presenterRole || listing.presenterName)
@@ -170,14 +256,110 @@ export function OfferDetail({ listing }: { listing: Listing }) {
   const whatsappHref = offerWhatsappLink(listing.phone, listing.listingNo, title, settings.whatsappNumber);
   const showOfficialEst = listing.showEstimatedValue !== false;
   const hasFiles = Boolean(listing.video || listing.document);
-  const hasParcelOutline = Boolean(parcelPolygon?.[0]?.length);
+  const documentPdfUrl = useMemo(() => {
+    if (!listing.document) return null;
+    const [base, query = ""] = listing.document.split("?");
+    const cacheBust = "pdfv=2";
+    const mergedQuery = query ? `${query}&${cacheBust}` : cacheBust;
+    return `${base}?${mergedQuery}`;
+  }, [listing.document]);
+  const documentPdfEmbedUrl = useMemo(() => {
+    if (!documentPdfUrl) return null;
+    return `${documentPdfUrl}#toolbar=1&navpanes=0&scrollbar=1&view=FitH`;
+  }, [documentPdfUrl]);
+  const selectedParcels = useMemo(() => {
+    if (!parcelPolygons.length) return [];
+    if (!selectedParcelNos.length) return parcelPolygons;
+    const selectedSet = new Set(selectedParcelNos);
+    const matched = parcelPolygons.filter((p) => selectedSet.has(p.parcelNo));
+    // If selection state drifts (e.g. stale parcelNos), never collapse to a partial/empty map.
+    return matched.length ? matched : parcelPolygons;
+  }, [parcelPolygons, selectedParcelNos]);
+  const displayParcelRings = useMemo(
+    () =>
+      selectedParcels.flatMap((parcel) =>
+        (parcel.rings ?? [])
+          .filter((ring) => ring.length >= 3)
+          .map((ring) => ({ ring, parcelNo: parcel.parcelNo }))
+      ),
+    [selectedParcels]
+  );
+  const displayRings = useMemo(() => displayParcelRings.map((item) => item.ring), [displayParcelRings]);
+  const displayParcelNumbers = useMemo(
+    () => displayParcelRings.map((item) => item.parcelNo),
+    [displayParcelRings]
+  );
+  const hasParcelOutline = Boolean(displayRings[0]?.length);
+  const perimeterM = useMemo(() => {
+    const total = selectedParcels.reduce((sum, p) => sum + (p.perimeterM ?? 0), 0);
+    return total > 0 ? total : null;
+  }, [selectedParcels]);
+  const selectedAreaSqm = useMemo(() => {
+    const total = selectedParcels.reduce((sum, p) => sum + (p.areaSqm ?? 0), 0);
+    return total > 0 ? total : null;
+  }, [selectedParcels]);
+  const selectedRoads = useMemo(
+    () =>
+      selectedParcels
+        .flatMap((parcel) => parcel.adjacentRoads ?? [])
+        .filter((road, idx, arr) => arr.findIndex((x) => x.id === road.id && x.side === road.side) === idx),
+    [selectedParcels]
+  );
+  const effectiveArea =
+    (selectedAreaSqm && selectedAreaSqm > 0 ? selectedAreaSqm : null) ??
+    (areaSqm && areaSqm > 0 ? areaSqm : parseAreaSqm(listing.size));
+  const computedSizeLabel = effectiveArea ? formatDlsArea(effectiveArea, lang) : sizeLabel;
   const pricePerSqm = parsePricePerSqm(listing.price);
-  const effectiveArea = areaSqm && areaSqm > 0 ? areaSqm : parseAreaSqm(listing.size);
   const requestedTotal =
-    !showOfficialEst && pricePerSqm != null && effectiveArea != null
-      ? adminMedianEstimate(pricePerSqm, effectiveArea)
-      : null;
+    pricePerSqm != null && effectiveArea != null ? adminMedianEstimate(pricePerSqm, effectiveArea) : null;
   const currency = t.owners.dlsHintCurrency;
+  const offerPrintRows = useMemo(
+    () => {
+      const rows = [
+        { label: lang === "ar" ? "رقم العرض" : "Offer no.", value: listing.listingNo },
+        { label: lang === "ar" ? "عنوان العرض" : "Offer title", value: title },
+        { label: t.offers.type, value: propertyType },
+        { label: t.offers.size, value: computedSizeLabel || listing.size || "" },
+        { label: lang === "ar" ? "السعر لكل متر" : "Price per m²", value: priceLabel || t.offers.onRequest },
+        { label: t.offers.statusLabel, value: t.offers.status[listing.status] },
+      ];
+      if (listing.administrativeValue != null) {
+        rows.push({
+          label: lang === "ar" ? "القيمة الاسترشادية (تجارية)" : "Commercial valuation (guide)",
+          value: `${formatMoney(listing.administrativeValue, lang)} ${lang === "ar" ? "د.أ / م²" : "JOD / m²"}`,
+        });
+      }
+      if (requestedTotal != null) {
+        rows.push({
+          label: t.offers.requestedTotalLabel,
+          value: `${formatMoney(requestedTotal, lang)} ${currency}`,
+        });
+      }
+      rows.push({ label: lang === "ar" ? "هاتف التواصل" : "Contact phone", value: listing.phone || "" });
+      return rows;
+    },
+    [
+      lang,
+      listing.listingNo,
+      title,
+      t.offers.type,
+      propertyType,
+      t.offers.size,
+      computedSizeLabel,
+      listing.size,
+      t.offers.price,
+      priceLabel,
+      t.offers.onRequest,
+      t.offers.statusLabel,
+      t.offers.status,
+      listing.status,
+      listing.administrativeValue,
+      t.offers.requestedTotalLabel,
+      requestedTotal,
+      currency,
+      listing.phone,
+    ]
+  );
   const spatialLoading =
     geoLoading || (expectsMap && !mapReady) || (hasParcelOutline && !topoReady);
   const spatialLoadingLabel =
@@ -204,11 +386,13 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     onChange: () => undefined,
     address: listing.address ?? "",
     readOnly: true as const,
-    polygon: parcelPolygon,
+    polygon: displayRings,
     lockEditing: hasParcelOutline,
     perimeterM,
-    areaSqm,
-    areaLabel: sizeLabel || listing.size,
+    areaSqm: effectiveArea,
+    areaLabel: computedSizeLabel || listing.size,
+    parcelNumbers: displayParcelNumbers,
+    adjacentRoads: selectedRoads,
     showDimensions: true,
     blueprint: {
       governorate: listing.governorate ?? undefined,
@@ -219,6 +403,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
       parcel: listing.parcel ?? undefined,
       industryLabel: t.offers.industryLabel,
       industryValue: t.offers.industry[listing.industryType],
+      extraRows: offerPrintRows,
     },
   };
 
@@ -232,26 +417,6 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     }
     const thumb = thumbRailRef.current?.children[index] as HTMLElement | undefined;
     thumb?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  }
-
-  async function shareOffer() {
-    const url = window.location.href;
-    const shareData = { title, text: title, url };
-    try {
-      if (typeof navigator.share === "function") {
-        await navigator.share(shareData);
-        return;
-      }
-    } catch (err) {
-      if ((err as Error)?.name === "AbortError") return;
-    }
-    try {
-      await navigator.clipboard.writeText(url);
-      setShareCopied(true);
-      window.setTimeout(() => setShareCopied(false), 2000);
-    } catch {
-      /* ignore — no clipboard permission */
-    }
   }
 
   function onStageScroll() {
@@ -272,12 +437,82 @@ export function OfferDetail({ listing }: { listing: Listing }) {
     setActivePhoto(best);
   }
 
+  async function shareOffer() {
+    const url = typeof window !== "undefined" ? window.location.href : listing.document ?? "";
+    if (!url) return;
+    const shareText = `${title} — ${listing.listingNo}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text: shareText, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1800);
+    } catch {
+      try {
+        await navigator.clipboard.writeText(url);
+        setShareCopied(true);
+        window.setTimeout(() => setShareCopied(false), 1800);
+      } catch {
+        // Ignore clipboard/share failures silently.
+      }
+    }
+  }
+
+  function handlePrint() {
+    setPrintError("");
+    setPrinting(true);
+    const run = async () => {
+      const mapSnapshot = await mapLocationRef.current?.captureMapSnapshot?.();
+      if (!mapSnapshot) {
+        throw new Error("live-map-snapshot-unavailable");
+      }
+      if (printLocationRef.current?.printBlueprintWithSnapshot) {
+        await printLocationRef.current.printBlueprintWithSnapshot(mapSnapshot);
+        return;
+      }
+      await printLocationRef.current?.printBlueprint();
+    };
+    if (!printLocationRef.current) {
+      setPrintError(t.locationPicker.sideViewPrintError);
+      setPrinting(false);
+      return;
+    }
+    void run()
+      .catch((err: unknown) => {
+        const code = err instanceof Error ? err.message : "";
+        if (code === "popup-blocked") {
+          setPrintError(
+            lang === "ar"
+              ? "المتصفح منع النافذة. اسمح بالنوافذ المنبثقة لهذه الصفحة وحاول مجددًا."
+              : "The browser blocked the print window. Allow popups for this site and try again."
+          );
+        } else if (code === "satellite-unavailable" || code.startsWith("sat-")) {
+          setPrintError(
+            lang === "ar"
+              ? "تعذر تحميل صورة القمر الصناعي. تحقق من الاتصال وحاول مرة أخرى."
+              : "Could not load satellite imagery. Check your connection and try again."
+          );
+        } else if (code === "live-map-snapshot-unavailable") {
+          setPrintError(
+            lang === "ar"
+              ? "تعذر التقاط لقطة الخريطة الحالية للطباعة. حرّك/كبّر الخريطة قليلًا وانتظر اكتمال تحميلها ثم أعد المحاولة."
+              : "Could not capture the current live map view for print. Pan/zoom slightly, wait for tiles to load, then try again."
+          );
+        } else {
+          setPrintError(t.locationPicker.sideViewPrintError);
+        }
+      })
+      .finally(() => setPrinting(false));
+  }
+
   const pricingBlock =
     showOfficialEst && listing.administrativeValue !== null ? (
       <DlsPricingHint
         ratePerSqm={listing.administrativeValue}
-        sizeLabel={listing.size}
-        areaSqm={areaSqm}
+        sizeLabel={computedSizeLabel || listing.size}
+        areaSqm={effectiveArea}
         source={listing.administrativeValueSource}
         retrievedAt={listing.administrativeValueAt}
         showMedian
@@ -348,10 +583,65 @@ export function OfferDetail({ listing }: { listing: Listing }) {
         )
       : null;
 
+  const pdfViewer =
+    pdfViewerOpen && listing.document && typeof document !== "undefined"
+      ? createPortal(
+          <div className="offer-photo-fs offer-photo-fs--pdf" role="dialog" aria-modal="true" aria-label={t.offers.documentLabel}>
+            <div className="offer-photo-fs-toolbar offer-photo-fs-toolbar--pdf flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setPdfViewerOpen(false)}
+                className="h-9 px-4 rounded-full border border-gold bg-gold text-[#0a1f1c] text-[11px] font-bold"
+              >
+                {lang === "ar" ? "رجوع" : "Back"}
+              </button>
+              <a
+                href={listing.document}
+                target="_blank"
+                rel="noopener"
+                className="h-9 px-4 rounded-full border border-gold/50 text-gold text-[11px] font-bold inline-flex items-center"
+              >
+                {t.offers.openFile}
+              </a>
+            </div>
+            <div className="offer-photo-fs-stage offer-photo-fs-stage--pdf !p-0" onClick={() => setPdfViewerOpen(false)}>
+              <div
+                className="w-[min(96vw,1100px)] h-[min(90vh,980px)] bg-white rounded-xl overflow-hidden border border-line"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {documentPdfEmbedUrl ? (
+                  <object data={documentPdfEmbedUrl} type="application/pdf" className="w-full h-full">
+                    <iframe title={t.offers.documentLabel} src={documentPdfEmbedUrl} className="w-full h-full" />
+                  </object>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
+                    <p className="text-sm text-ink-soft">
+                      {lang === "ar"
+                        ? "تعذّر عرض PDF داخل الصفحة. يمكنك فتح الملف مباشرة."
+                        : "Unable to render this PDF in-page. Open it directly."}
+                    </p>
+                    <a
+                      href={listing.document}
+                      target="_blank"
+                      rel="noopener"
+                      className="h-10 px-4 rounded-full border border-gold bg-gold text-[#0a1f1c] text-xs font-bold inline-flex items-center"
+                    >
+                      {t.offers.openFile}
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
-    <div className="mx-auto max-w-[1100px] px-4 py-12 md:py-16">
+    <div className="mx-auto max-w-[1100px] px-4 py-8 md:py-16">
       {pageLoader}
       {photoLightbox}
+      {pdfViewer}
 
       <section className="mb-8 min-w-0">
         <div className="flex items-baseline justify-between gap-3 mb-3">
@@ -432,11 +722,11 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           </>
         )}
         {hasFiles && (
-          <div className="mt-4">
+          <div className="mt-5">
             <h2 className="text-[11px] font-bold text-gold tracking-wide mb-3">{t.offers.filesLabel}</h2>
-            <div className="offer-media-rail">
+            <div className="flex flex-col gap-3 sm:offer-media-rail">
               {listing.video && (
-                <div className="w-[min(88vw,420px)] rounded-2xl border border-line bg-white overflow-hidden">
+                <div className="w-full sm:w-[min(88vw,420px)] rounded-2xl border border-line bg-white overflow-hidden">
                   <div className="px-3 py-2 border-b border-line text-[11px] font-bold text-green">
                     {t.offers.videoLabel}
                   </div>
@@ -446,11 +736,10 @@ export function OfferDetail({ listing }: { listing: Listing }) {
                 </div>
               )}
               {listing.document && (
-                <a
-                  href={listing.document}
-                  target="_blank"
-                  rel="noopener"
-                  className="w-[min(70vw,260px)] rounded-2xl border border-line bg-white p-4 flex flex-col justify-between gap-5 hover:border-gold/50 transition-colors"
+                <button
+                  type="button"
+                  onClick={() => setPdfViewerOpen(true)}
+                  className="w-full sm:w-[min(70vw,260px)] rounded-2xl border border-line bg-white p-4 flex flex-col justify-between gap-5 hover:border-gold/50 transition-colors text-start"
                 >
                   <div>
                     <p className="text-[11px] font-bold text-gold tracking-wide">{t.offers.documentLabel}</p>
@@ -459,14 +748,14 @@ export function OfferDetail({ listing }: { listing: Listing }) {
                   <span className="inline-flex h-9 items-center justify-center rounded-full bg-green text-white text-xs font-bold px-4">
                     {t.offers.openFile}
                   </span>
-                </a>
+                </button>
               )}
             </div>
           </div>
         )}
       </section>
 
-      <div className="grid lg:grid-cols-[1.4fr_0.8fr] gap-8 items-start">
+      <div className="grid lg:grid-cols-[1.4fr_0.8fr] gap-6 lg:gap-8 items-start">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             {areaLabel && <span className="text-gold text-xs font-bold tracking-wide">{areaLabel}</span>}
@@ -479,12 +768,46 @@ export function OfferDetail({ listing }: { listing: Listing }) {
               </span>
             )}
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold mt-3 text-balance">{title}</h1>
-          <p className="text-ink-soft mt-4 leading-relaxed text-base md:text-lg">{listing.description}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-balance">{title}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={shareOffer}
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-full border border-line bg-white text-xs sm:text-sm font-bold text-green hover:border-gold/60"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M15 8a3 3 0 1 0-2.8-4H12a3 3 0 0 0 .2 1.1L8.9 7A3 3 0 0 0 6 6a3 3 0 1 0 2.9 3.8l3.3 1.9a3 3 0 0 0 .8 4.9 3 3 0 1 0 .9-1.6l-3.5-2a3 3 0 0 0 0-1.6l3.3-1.9A3 3 0 0 0 15 8Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {shareCopied ? (lang === "ar" ? "تم النسخ" : "Copied") : lang === "ar" ? "مشاركة" : "Share"}
+              </button>
+              {hasParcelOutline && (
+                <button
+                  type="button"
+                  disabled={!blueprintReady || printing || geoLoading || !mapReady}
+                  onClick={handlePrint}
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-full bg-gold text-[#0a1f1c] text-xs sm:text-sm font-bold hover:bg-gold-2 transition-colors disabled:opacity-50"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M7 8V4h10v4M6 18h12v2H6v-2Zm-2-8h16v6H4v-6Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  {printing ? t.locationPicker.sideViewPrinting : t.locationPicker.sideViewPrint}
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-ink-soft mt-3 leading-relaxed text-sm sm:text-base md:text-lg">{listing.description}</p>
+          {printError && <p className="mt-2 text-sm text-red-600">{printError}</p>}
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-3 mt-6">
             {listing.propertyType && <Fact k={t.offers.type} v={propertyType} />}
-            {sizeLabel && <Fact k={t.offers.size} v={sizeLabel} />}
+            {computedSizeLabel && <Fact k={t.offers.size} v={computedSizeLabel} />}
             {priceLabel && <Fact k={t.offers.price} v={priceLabel} />}
             {(listing.basin || listing.parcel) && (
               <Fact k={t.offers.basinParcel} v={`${basinLabel || "—"} / ${listing.parcel || "—"}`} />
@@ -503,8 +826,52 @@ export function OfferDetail({ listing }: { listing: Listing }) {
 
           <div className="mt-6">
             <h2 className="text-[11px] font-bold text-gold tracking-wide mb-3">{t.offers.mapTitle}</h2>
+            {parcelPolygons.length > 1 && (
+              <div className="mb-3 rounded-2xl border border-line bg-white/90 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedParcelNos(parcelPolygons.map((p) => p.parcelNo))}
+                    className="h-8 px-3 rounded-full border border-line bg-surface-2 text-[11px] font-bold"
+                  >
+                    {lang === "ar" ? "إظهار الكل" : "Show all"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedParcelNos([])}
+                    className="h-8 px-3 rounded-full border border-line bg-surface-2 text-[11px] font-bold"
+                  >
+                    {lang === "ar" ? "إخفاء الكل" : "Hide all"}
+                  </button>
+                  {parcelPolygons.map((parcel) => {
+                    const active = selectedParcelNos.includes(parcel.parcelNo);
+                    return (
+                      <button
+                        key={parcel.parcelNo}
+                        type="button"
+                        onClick={() =>
+                          setSelectedParcelNos((prev) =>
+                            prev.includes(parcel.parcelNo)
+                              ? prev.filter((p) => p !== parcel.parcelNo)
+                              : [...prev, parcel.parcelNo]
+                          )
+                        }
+                        className={`h-8 px-3 rounded-full text-[11px] font-bold border ${
+                          active
+                            ? "bg-green text-white border-green"
+                            : "bg-white text-ink-soft border-line"
+                        }`}
+                      >
+                        {lang === "ar" ? `قطعة ${parcel.parcelNo}` : `Parcel ${parcel.parcelNo}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {expectsMap ? (
               <LocationInput
+                ref={mapLocationRef}
                 {...locationShared}
                 showMap
                 showTopo={false}
@@ -516,15 +883,15 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           </div>
         </div>
 
-        <aside className="min-w-0 flex flex-col gap-5 lg:sticky lg:top-[calc(var(--header-h)+1rem)]">
+        <aside className="min-w-0 flex flex-col gap-4 sm:gap-5 lg:sticky lg:top-[calc(var(--header-h)+1rem)]">
           <div className="rounded-3xl border border-line bg-white p-6 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]">
             <p className="text-xs font-bold text-ink-soft">{t.offers.price}</p>
             <p className="text-2xl font-bold text-green mt-1 [overflow-wrap:anywhere]">
               {priceLabel || t.offers.onRequest}
             </p>
-            {sizeLabel && (
+            {computedSizeLabel && (
               <p className="text-sm text-ink-soft mt-2 [overflow-wrap:anywhere]">
-                {t.offers.size}: <span className="font-bold text-ink">{sizeLabel}</span>
+                {t.offers.size}: <span className="font-bold text-ink">{computedSizeLabel}</span>
               </p>
             )}
             {requestedTotal != null && (
@@ -543,14 +910,6 @@ export function OfferDetail({ listing }: { listing: Listing }) {
             >
               {t.offers.whatsapp}
             </a>
-            <button
-              type="button"
-              onClick={() => void shareOffer()}
-              className="mt-3 flex h-12 w-full rounded-full border border-line bg-white text-green font-bold items-center justify-center gap-2 hover:bg-surface-2 transition-colors"
-            >
-              <ShareIcon className="w-4 h-4" />
-              {shareCopied ? t.offers.shareCopied : t.offers.share}
-            </button>
           </div>
 
           <RegulationGuide
@@ -575,9 +934,11 @@ export function OfferDetail({ listing }: { listing: Listing }) {
                 </div>
               ) : (
                 <LocationInput
+                  ref={printLocationRef}
                   {...locationShared}
                   showMap={false}
                   showTopo
+                  onBlueprintReadyChange={setBlueprintReady}
                   onTopoSettledChange={() => setTopoReady(true)}
                 />
               )}
@@ -593,7 +954,7 @@ function Fact({ k, v }: { k: string; v: string }) {
   return (
     <div className="rounded-2xl border border-line bg-white/90 p-3.5 min-w-0">
       <small className="block text-[10px] text-ink-soft">{k}</small>
-      <b className="block text-sm [overflow-wrap:anywhere]">{v}</b>
+      <b className="block text-[13px] sm:text-sm [overflow-wrap:anywhere]">{v}</b>
     </div>
   );
 }

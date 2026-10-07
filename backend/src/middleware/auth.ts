@@ -58,3 +58,14 @@ export function requirePermission(...features: AdminFeature[]) {
     res.status(403).json({ error: "You do not have permission for this section" });
   };
 }
+
+/** Full `*` admin only — used for assistant knowledge / model instructions. */
+export function requireFullAdmin(req: Request, res: Response, next: NextFunction) {
+  const perms = req.session?.permissions;
+  const isFull = !perms || perms.length === 0 || perms.includes("*");
+  if (isFull) {
+    next();
+    return;
+  }
+  res.status(403).json({ error: "Full admin privilege is required" });
+}

@@ -8,6 +8,7 @@ import { useSettings } from "@/lib/SettingsProvider";
 import { MaintenanceBanner } from "@/components/MaintenanceBanner";
 import { MenuIcon, CloseIcon, EmailIcon, FacebookIcon } from "@/components/icons";
 import { Logo } from "@/components/Logo";
+import { openSiteAssistant } from "@/lib/assistantUi";
 
 const NAV_ITEMS = ["home", "opportunities", "offers", "services", "contact"] as const;
 const NAV_HREF: Record<(typeof NAV_ITEMS)[number], string> = {
@@ -106,11 +107,11 @@ export function Header() {
             : "bg-white/90 backdrop-blur-xl border-b border-line/80 shadow-[0_10px_40px_-24px_rgba(17,58,52,0.35)]"
         }`}
       >
-        <div className="mx-auto max-w-[1240px] px-4 h-[76px] flex items-center justify-between gap-4">
-          <Link href="/" className="shrink-0 flex items-center gap-2 sm:gap-3 min-w-0">
-            <Logo light={transparent} className="h-10 w-auto sm:h-12" />
+        <div className="mx-auto max-w-[1240px] px-3 sm:px-4 h-14 sm:h-[76px] flex items-center justify-between gap-2 sm:gap-4">
+          <Link href="/" className="shrink-0 flex items-center gap-1.5 sm:gap-3 min-w-0">
+            <Logo light={transparent} className="h-8 w-auto sm:h-12" />
             <span
-              className={`font-brand flex flex-col leading-tight text-[11px] sm:text-sm font-bold tracking-wide transition-colors ${
+              className={`font-brand flex flex-col leading-tight text-[10px] sm:text-sm font-bold tracking-wide transition-colors ${
                 transparent ? "text-white" : "text-green"
               }`}
             >
@@ -193,11 +194,11 @@ export function Header() {
             </Link>
           </div>
 
-          <div className="flex lg:hidden items-center gap-2 shrink-0">
+          <div className="flex lg:hidden items-center gap-1.5 shrink-0">
             <Link
               href="/land-check"
               aria-current={isActivePath(pathname, "/land-check") ? "page" : undefined}
-              className={`h-10 px-3 rounded-full text-xs font-bold flex items-center whitespace-nowrap transition-colors ${
+              className={`h-9 px-2.5 rounded-full text-[11px] font-bold flex items-center whitespace-nowrap transition-colors ${
                 isActivePath(pathname, "/land-check")
                   ? transparent
                     ? "border border-gold bg-white/20 text-white"
@@ -210,7 +211,7 @@ export function Header() {
               {t.landCheck.pageCta}
             </Link>
             <button
-              className={`h-11 w-11 rounded-full border flex items-center justify-center transition-colors ${
+              className={`h-9 w-9 rounded-full border flex items-center justify-center transition-colors ${
                 transparent ? "border-white/40 text-white" : "border-line text-ink"
               }`}
               onClick={() => setDrawerOpen(true)}
@@ -245,13 +246,26 @@ export function Header() {
                 <Link
                   key={key}
                   href={NAV_HREF[key]}
-                  onClick={() => setDrawerOpen(false)}
-                  className={`text-start py-3 border-b border-line ${active ? "text-green font-bold" : "text-ink"}`}
+                  onClick={() => {
+                    setDrawerOpen(false);
+                    window.setTimeout(() => openSiteAssistant(), 180);
+                  }}
+                  className={`text-start py-3 min-h-12 flex items-center border-b border-line ${active ? "text-green font-bold" : "text-ink"}`}
                 >
                   {t.nav[key]}
                 </Link>
               );
             })}
+            <button
+              type="button"
+              onClick={() => {
+                setDrawerOpen(false);
+                openSiteAssistant();
+              }}
+              className="mt-3 h-12 rounded-full bg-green text-sm font-bold text-white flex items-center justify-center"
+            >
+              {t.assistant.open}
+            </button>
             <Link
               href="/land-check"
               onClick={() => setDrawerOpen(false)}

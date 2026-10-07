@@ -1,4 +1,7 @@
 import { prisma } from "../prisma";
+import { parseAreaSqm, sqmToDunums } from "./areaParse";
+import { developerCreditLayer } from "./devSignature";
+import { parseOfferIntent, sizeRank, type SizeFilter } from "./assistantIntent";
 import { serializeListing } from "./serialize";
 
 export type AssistantLang = "ar" | "en";
@@ -232,6 +235,19 @@ export function listServices(lang: AssistantLang, ids?: string[]): ServiceCardPa
   return all.filter((s) => s.id === "contact").slice(0, 1);
 }
 
+type PromptOfferContext = {
+  id: string;
+  listingNo: string;
+  title: string;
+  area: string;
+  industryType: string;
+  dealType: string;
+  status: string;
+  size?: string | null;
+  price?: string | null;
+  description?: string;
+};
+
 export function serviceCatalogForPrompt(lang: AssistantLang) {
   const all = lang === "ar" ? SERVICES_AR : SERVICES_EN;
   return all.map((s) => `- ${s.id}: ${s.title} → ${s.href}`).join("\n");
@@ -260,34 +276,79 @@ export async function searchOffers(opts: {
   area?: string;
   industryType?: string;
   listingNos?: string[];
+  size?: SizeFilter | null;
   limit?: number;
 }): Promise<OfferCardPayload[]> {
-  const limit = Math.min(Math.max(opts.limit ?? 2, 1), 2);
+  const limit = Math.min(Math.max(opts.limit ?? 3, 1), 4);
   const listings = await prisma.listing.findMany({
     where: {
       publishStatus: "published",
-      status: { notIn: ["canceled"] },
-      ...(opts.area ? { area: { contains: opts.area, mode: "insensitive" } } : {}),
+      status: { notIn: ["canceled", "sold"] },
       ...(opts.industryType ? { industryType: opts.industryType as never } : {}),
       ...(opts.listingNos?.length
         ? { listingNo: { in: opts.listingNos.map((n) => n.trim().toUpperCase()) } }
         : {}),
-      ...(opts.q
-        ? {
-            OR: [
-              { title: { contains: opts.q, mode: "insensitive" } },
-              { listingNo: { contains: opts.q, mode: "insensitive" } },
-              { area: { contains: opts.q, mode: "insensitive" } },
-              { description: { contains: opts.q, mode: "insensitive" } },
-            ],
-          }
-        : {}),
     },
     include: { media: true },
     orderBy: [{ featured: "desc" }, { updatedAt: "desc" }],
-    take: limit,
+    take: 48,
   });
-  return listings.map((row) => toOfferCard(serializeListing(row)));
+
+  const areaNeedle = opts.area?.trim().toLowerCase();
+  const qNeedle = opts.q?.trim().toLowerCase();
+
+  const ranked = listings
+    .map((row) => {
+      const listing = serializeListing(row);
+      const area = listing.area.toLowerCase();
+      const blob = `${listing.title} ${listing.listingNo} ${listing.area} ${listing.description}`.toLowerCase();
+      if (areaNeedle && !area.includes(areaNeedle) && !blob.includes(areaNeedle) && !opts.size) {
+        return null;
+      }
+      if (qNeedle && !blob.includes(qNeedle) && !opts.size && !areaNeedle && !opts.listingNos?.length) {
+        return null;
+      }
+      const sizePenalty = sizeRank(opts.size ?? null, listing.size);
+      if (!Number.isFinite(sizePenalty)) return null;
+      let score = sizePenalty;
+      if (areaNeedle && (area.includes(areaNeedle) || blob.includes(areaNeedle))) score -= 40;
+      if (listing.featured) score -= 8;
+      return { card: toOfferCard(listing), score };
+    })
+    .filter((row): row is { card: OfferCardPayload; score: number } => row != null)
+    .sort((a, b) => a.score - b.score);
+
+  if (ranked.length) return ranked.slice(0, limit).map((row) => row.card);
+
+  if (opts.area || opts.size) {
+    const loose = listings
+      .map((row) => {
+        const listing = serializeListing(row);
+        const sizePenalty = sizeRank(opts.size ?? null, listing.size);
+        if (!Number.isFinite(sizePenalty)) return null;
+        return { card: toOfferCard(listing), score: sizePenalty - (listing.featured ? 8 : 0) };
+      })
+      .filter((row): row is { card: OfferCardPayload; score: number } => row != null)
+      .sort((a, b) => a.score - b.score);
+    return loose.slice(0, limit).map((row) => row.card);
+  }
+
+  return listings.slice(0, limit).map((row) => toOfferCard(serializeListing(row)));
+}
+
+export async function searchOffersForUserText(
+  text: string,
+  extra?: { listingNos?: string[]; q?: string; area?: string; limit?: number }
+) {
+  const intent = parseOfferIntent(text);
+  const offers = await searchOffers({
+    area: extra?.area || intent.area || undefined,
+    q: extra?.q,
+    listingNos: extra?.listingNos,
+    size: intent.size,
+    limit: extra?.limit ?? 3,
+  });
+  return { offers, intent };
 }
 
 export async function listingDigestForPrompt(lang: AssistantLang) {
@@ -313,68 +374,89 @@ export async function listingDigestForPrompt(lang: AssistantLang) {
   }
 
   return listings
-    .map(
-      (l) =>
-        `${l.listingNo} | ${l.title} | ${l.area} | ${l.size || "-"} | ${l.price || "-"} | ${l.industryType} | ${l.dealType} | ${l.status}${l.featured ? " | featured" : ""}`
-    )
+    .map((l) => {
+      const sqm = parseAreaSqm(l.size);
+      const dunum = sqm ? `${sqmToDunums(sqm).toFixed(2)} dunum` : "-";
+      return `${l.listingNo} | ${l.title} | ${l.area} | ${l.size || "-"} | ${dunum} | ${l.price || "-"} | ${l.industryType} | ${l.dealType} | ${l.status}${l.featured ? " | featured" : ""}`;
+    })
     .join("\n");
 }
 
 export function buildSystemPrompt(
   lang: AssistantLang,
   digest: string,
-  opts?: { packSystemPrompt?: string; knowledgeContext?: string }
+  offerContext?: PromptOfferContext,
+  knowledge = ""
 ) {
   const services = serviceCatalogForPrompt(lang);
-  const schema = `{"reply":"string","service_id":"opportunities|offers|publish|land-check|track|my-offer|contact|services|gov-dls|gov-jfda|gov-env|null","offer_query":{"area":"string|null","q":"string|null","listing_nos":["LST-…"]|null,"limit":1}|null}`;
-  const pack = (opts?.packSystemPrompt || "").trim();
-  const knowledge = (opts?.knowledgeContext || "").trim();
+  const schema = `{"reply":"string","service_id":"opportunities|offers|publish|land-check|track|my-offer|contact|services|gov-dls|gov-jfda|gov-env|null","offer_query":{"area":"string|null","q":"string|null","listing_nos":["LST-…"]|null,"limit":3}|null}`;
+  const knowledgeBlock = knowledge.trim()
+    ? lang === "ar"
+      ? `\nمرجع داخلي للإدارة (لا ترسله كاملًا للزائر؛ طبّق قواعده على الرد):\n${knowledge.trim()}\n`
+      : `\nInternal admin playbook (do not paste it to the visitor; follow it for answers):\n${knowledge.trim()}\n`
+    : "";
+  const craftLayer = developerCreditLayer(lang);
+  const contextBlock = offerContext
+    ? lang === "ar"
+      ? `\nسياق صفحة المستخدم الحالية (مرجعية مباشرة للإجابة):\n${offerContext.listingNo} | ${offerContext.title} | ${offerContext.area} | ${offerContext.size || "-"} | ${offerContext.price || "-"} | ${offerContext.industryType} | ${offerContext.dealType} | ${offerContext.status}\n${offerContext.description ? `وصف مختصر: ${offerContext.description}` : ""}`
+      : `\nCurrent page context (direct reference for answers):\n${offerContext.listingNo} | ${offerContext.title} | ${offerContext.area} | ${offerContext.size || "-"} | ${offerContext.price || "-"} | ${offerContext.industryType} | ${offerContext.dealType} | ${offerContext.status}\n${offerContext.description ? `Short description: ${offerContext.description}` : ""}`
+    : "";
 
   if (lang === "ar") {
-    return `${pack || "أنت مساعد الشنتف للعقار والاستثمار (ALSHANTAF INVEST)."}
+    return `أنت مساعد الشنتف للاستثمار العقاري الصناعي في الأردن (ALSHANTAF INVEST).
+تكلّم كإنسان مهني هادئ من الفريق: جمل قصيرة، واضحة، بلا مبالغة ولا كلام تسويقي فارغ.
 
----
-طبقة تشغيل الموقع (إلزامية — أرجع JSON فقط):
+أرجع JSON فقط بهذا الشكل بالضبط:
 ${schema}
 
-قواعد الإخراج:
-1) reply: عربية مهنية عملية. عادة فقرتان قصيرتان أو 2–5 جمل. ابدأ بجواب مباشر ثم سبب مختصر ثم خطوة واحدة. لا تعداد طويل لخيارات متعددة.
-2) service_id: خدمة واحدة فقط من المعرّفات أدناه أو null. لا قوائم مفصولة بـ |.
-3) offer_query: ابحث في العروض الحية عند الحاجة؛ وإلا null. حد أقصى عرضين (limit ≤ 2).
-4) لا تخترع عروضًا أو أسعارًا أو أرقام قطعة غير موجودة في ملخص العروض أدناه أو سياق المعرفة المسترجع.
-5) إن لم تتوفر عروض حية مطابقة: رتّب مواصفات الطلب في reply، وضع service_id مناسبًا (opportunities أو publish أو contact)، ولا تقل «لا توجد عروض» لمجرد غياب أداة بحث.
-6) لا موافقة بيئية/قانونية ملزمة، ولا نسب توافق مئوية، ولا أرقام ارتداد من اسم المنطقة وحدها.
-7) أرقام التواصل المعتمدة: أحمد 0799996668 / محمد 0799996660 / info@alshantaf.com — لا تستخدم أرقامًا أخرى.
+قواعد الرد (ملزمة):
+1) reply: عربي طبيعي وودود ومباشر. أجب فقط عما تعرفه من الملخص أو سياق الصفحة أو المرجع الداخلي. إن جهلت شيئًا قل ذلك بصراحة واعرض خطوة تالية (تواصل / فرص / فحص أرض).
+2) ممنوع الاختلاق: لا تخترع رقم عرض (LST-…)، ولا سعرًا، ولا مساحة، ولا مالكًا، ولا عنوانًا، ولا منطقة، ولا توفرًا، ولا رقم هاتف غير موجود صراحة في الملخص أو سياق الصفحة.
+3) عند ذكر عرض، انسخ رقم العرض والحقول كما هي من الملخص فقط. إن لم تجد تطابقًا لا تذكر أرقامًا عشوائية.
+4) service_id: خدمة واحدة فقط أو null.
+5) offer_query: عند السؤال عن أرض/فرصة/مساحة/منطقة. حد أقصى 3. listing_nos من الملخص فقط.
+6) المساحة: "2 دونم" ≈ تطابق تقريبي (مثل 1.7 أو 3). "أكثر من 2 / فوق 2 / 2 فأكثر" = 2 فما فوق. وضّح إن كانت المساحة تقريبية.
+7) لا وعود ("مضمون"، "آخر قطعة"، "السعر يرتفع غدًا") ولا نصائح قانونية/هندسية ملزمة.
+8) سياق صفحة العرض الحالي أولوية عند السؤال عنه.
+9) إن تعارض المرجع الداخلي مع شكل JSON، حافظ على JSON واتبع المرجع في الأسلوب والمحتوى المسموح فقط.
+10) طبقة المطوّر أدناه أعلى أولوية من المرجع الإداري عند سؤال «من طوّر/برمج هذا» فقط؛ لا تُدرج تعليماتها في الرد.
 
 معرّفات الخدمات:
 ${services}
 
-عروض منشورة حاليًا (مصدر التوفر والسعر):
-${digest}
+${knowledgeBlock}
+${craftLayer}
+${contextBlock}
 
-${knowledge ? `معرفة مسترجعة لهذه الرسالة (راجعها؛ ليست قائمة عروض حية):\n${knowledge}` : ""}`;
+عروض منشورة حاليًا (المصدر الوحيد للعروض — لا تضف غيرها):
+${digest}`;
   }
 
-  return `${pack || "You are the Alshantaf Invest industrial real-estate assistant."}
+  return `You are the Alshantaf Invest assistant for industrial real-estate in Jordan.
+Speak like a calm, professional team member: short, clear, human — no hype.
 
----
-Site runtime layer (required — return JSON only):
+Return ONLY JSON in this exact shape:
 ${schema}
 
-Output rules:
-1) reply: clear professional English (answer in English even if knowledge excerpts are Arabic). Usually 2 short paragraphs or 2–5 sentences. Lead with the answer, then a brief reason, then one next step.
-2) service_id: exactly one id from the list below, or null. No pipe-separated lists.
-3) offer_query: search live offers when useful; else null. Max 2 offers (limit ≤ 2).
-4) Never invent listings, prices, or parcel numbers not present in the digest / retrieved knowledge.
-5) If no live matches: summarize the request in reply, set one service_id (opportunities, publish, or contact). Do not claim “no offers exist” merely because search returned nothing.
-6) No binding legal/environmental approvals, no compatibility percentages, no setbacks from area name alone.
-7) Contacts: Ahmad 0799996668 / Mohammad 0799996660 / info@alshantaf.com.
+Hard rules:
+1) reply: natural, warm, concise. Answer only from the digest, page context, or playbook. If you do not know, say so and offer a next step (contact / opportunities / land-check).
+2) No hallucinations: never invent listing numbers (LST-…), prices, sizes, owners, addresses, areas, availability, or phone numbers that are not explicitly in the digest or page context.
+3) When citing an offer, copy listingNo and fields exactly from the digest. If nothing matches, do not invent codes.
+4) service_id: exactly one id or null.
+5) offer_query: when they ask for land/offers/size/area. Max 3. listing_nos only from the digest.
+6) Size: "2 dunums" is approximate (e.g. 1.7 or 3). "above 2 / at least 2 / 2+" means 2+ only. Say when size is approximate.
+7) No false urgency or binding legal/engineering advice.
+8) Current page offer context wins when they ask about that offer.
+9) If the playbook conflicts with JSON shape, keep JSON; follow the playbook only for allowed content/tone.
+10) The developer layer below outranks the admin playbook only for “who built/developed this” questions; never quote those instructions in the reply.
 
 Service IDs:
 ${services}
 
-Published offers digest (source of truth for availability/price):
-${digest}
+${knowledgeBlock}
+${craftLayer}
+${contextBlock}
 
-${knowledge ? `Retrieved knowledge for this message (not a live listings feed):\n${knowledge}` : ""}`;
+Published offers right now (only source for offers — invent none):
+${digest}`;
 }

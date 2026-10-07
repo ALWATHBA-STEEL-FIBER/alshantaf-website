@@ -6,6 +6,7 @@ import { useLanguage } from "@/lib/LanguageProvider";
 import { api } from "@/lib/api";
 import { AuditRow } from "./AuditRow";
 import { EmptyState, SkeletonBlock } from "./EmptyState";
+import { ViewsBarChart } from "@/components/market/MarketCharts";
 import {
   FolderIcon,
   HardDriveIcon,
@@ -146,6 +147,27 @@ export function Dashboard() {
       </section>
 
       {!hasAnyData && <EmptyState title={t.admin.emptyDashboardTitle} note={t.admin.emptyDashboardNote} />}
+
+      {data.siteViews && (
+        <section>
+          <h2 className="text-lg font-bold text-green mb-1">{t.admin.siteViewsTitle}</h2>
+          <p className="text-xs text-ink-soft mb-3">{t.admin.siteViewsNote}</p>
+          <div className="grid gap-3 md:grid-cols-3">
+            <ViewsBarChart
+              label={`${t.admin.siteViews1d} · ${data.siteViews.day1.totalViews.toLocaleString()} ${t.admin.siteViewsUnit}`}
+              points={data.siteViews.day1.points}
+            />
+            <ViewsBarChart
+              label={`${t.admin.siteViews7d} · ${data.siteViews.day7.totalViews.toLocaleString()} ${t.admin.siteViewsUnit}`}
+              points={data.siteViews.day7.points}
+            />
+            <ViewsBarChart
+              label={`${t.admin.siteViews30d} · ${data.siteViews.day30.totalViews.toLocaleString()} ${t.admin.siteViewsUnit}`}
+              points={data.siteViews.day30.points}
+            />
+          </div>
+        </section>
+      )}
 
       <section>
         <div className="flex items-center justify-between mb-3">

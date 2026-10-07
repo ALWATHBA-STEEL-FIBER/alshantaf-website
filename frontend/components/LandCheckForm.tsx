@@ -5,18 +5,17 @@ import Link from "next/link";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { api, ApiError } from "@/lib/api";
 import { LocationCascade } from "@/components/LocationCascade";
-import { LocationInput, type LocationInputHandle } from "@/components/LocationInput";
+import { LocationInput, type AdjacentRoad, type LocationInputHandle } from "@/components/LocationInput";
 import { DlsPricingHint } from "@/components/DlsPricingHint";
 import { RegulationGuide } from "@/components/RegulationGuide";
 import { toWesternDigits } from "@/lib/arabicDigits";
 import { adminMedianEstimate } from "@/lib/adminPricing";
 import { parseCoords, coordsToString, formatDlsArea } from "@/lib/mapCoords";
-import { loadDlsLocations, codesForSelection } from "@/lib/dlsLocations";
-import { fetchMergedParcelLocation } from "@/lib/fetchParcelLocations";
-import { parseParcelNumbers } from "@/lib/parcelNumbers";
+import { loadDlsLocations, codesForSelection, selectionForCodes } from "@/lib/dlsLocations";
 import { CheckIcon } from "@/components/icons";
 import { useJourney } from "@/lib/journey/JourneyProvider";
 import type { IndustryType } from "@/lib/types";
+import { isAmmanGovernorate } from "@/lib/ammanZoning";
 
 const inputClass =
   "w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold";
@@ -46,11 +45,17 @@ function clearClientKey() {
   }
 }
 
+function normalizeParcelId(parcelId: string): string {
+  const numeric = Number(parcelId);
+  return Number.isFinite(numeric) && numeric > 0 ? String(numeric) : parcelId;
+}
+
 export function LandCheckForm() {
   const { t, lang } = useLanguage();
   const { state: journey, patch: patchJourney } = useJourney();
   const clientKeyRef = useRef<string>("");
   const locationRef = useRef<LocationInputHandle>(null);
+  const regulationSectionRef = useRef<HTMLDivElement>(null);
   const [blueprintReady, setBlueprintReady] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
@@ -74,6 +79,7 @@ export function LandCheckForm() {
   const [perimeterM, setPerimeterM] = useState<number | null>(null);
   const [dlsKey, setDlsKey] = useState<string | null>(null);
   const [parcelPolygon, setParcelPolygon] = useState<[number, number][][] | null>(null);
+  const [adjacentRoads, setAdjacentRoads] = useState<AdjacentRoad[]>([]);
   const [dlsHint, setDlsHint] = useState<{
     value: number;
     source: string;
@@ -81,6 +87,10 @@ export function LandCheckForm() {
   } | null>(null);
   const [dlsHintStatus, setDlsHintStatus] = useState<"idle" | "loading" | "missing" | "failed">("idle");
   const [dlsMapStatus, setDlsMapStatus] = useState<"idle" | "loading" | "ready" | "missing" | "failed">("idle");
+  const [awaitingRegulationAfterPin, setAwaitingRegulationAfterPin] = useState(false);
+  const [ammanAutoIndustryType, setAmmanAutoIndustryType] = useState<IndustryType | null>(null);
+  const [ammanLookupStatus, setAmmanLookupStatus] = useState<"idle" | "loading" | "success" | "failed">("idle");
+  const [ammanLookupNote, setAmmanLookupNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState("");
@@ -161,10 +171,17 @@ export function LandCheckForm() {
     const parcelNo = parcel.trim();
     const timer = setTimeout(async () => {
       if (!industryType) {
+        if (awaitingRegulationAfterPin) {
+          setDlsHint(null);
+          setDlsHintStatus("idle");
+          setDlsMapStatus("ready");
+          return;
+        }
         setDlsHint(null);
         setDlsHintStatus("idle");
         setDlsMapStatus("idle");
         setParcelPolygon(null);
+        setAdjacentRoads([]);
         setDlsKey(null);
         setAreaSqm(null);
         setPerimeterM(null);
@@ -175,6 +192,7 @@ export function LandCheckForm() {
         setDlsHintStatus("idle");
         setDlsMapStatus("idle");
         setParcelPolygon(null);
+        setAdjacentRoads([]);
         setDlsKey(null);
         setAreaSqm(null);
         setPerimeterM(null);
@@ -184,11 +202,11 @@ export function LandCheckForm() {
       setDlsHintStatus("loading");
       setDlsMapStatus("loading");
       setParcelPolygon(null);
+      setAdjacentRoads([]);
       setDlsKey(null);
       setAreaSqm(null);
       setPerimeterM(null);
 
-      const primaryParcel = parseParcelNumbers(parcelNo)[0] || parcelNo;
       const valuePromise = api
         .dlsAdministrativeValuePublic({
           governorate,
@@ -196,7 +214,7 @@ export function LandCheckForm() {
           village,
           basin,
           neighborhood,
-          parcelNumber: primaryParcel,
+          parcelNumber: parcelNo,
         })
         .then((result) => {
           if (!cancelled) {
@@ -218,15 +236,15 @@ export function LandCheckForm() {
           if (!codes) {
             if (!cancelled) {
               setParcelPolygon(null);
+              setAdjacentRoads([]);
               setDlsMapStatus("missing");
             }
             return;
           }
-          const location = await fetchMergedParcelLocation(codes, parcelNo, (q) =>
-            api.dlsParcelLocationPublic(q)
-          );
+          const location = await api.dlsParcelLocationPublic({ ...codes, parcelNumber: parcelNo });
           if (cancelled) return;
           setParcelPolygon(location.rings);
+          setAdjacentRoads(location.adjacentRoads ?? []);
           setDlsKey(location.dlsKey);
           setAreaSqm(location.areaSqm);
           setPerimeterM(location.perimeterM);
@@ -239,6 +257,7 @@ export function LandCheckForm() {
         } catch (err) {
           if (!cancelled) {
             setParcelPolygon(null);
+            setAdjacentRoads([]);
             setDlsKey(null);
             setDlsMapStatus(err instanceof ApiError && err.status === 404 ? "missing" : "failed");
           }
@@ -251,7 +270,36 @@ export function LandCheckForm() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [fields.governorate, fields.directorate, fields.village, fields.basin, fields.neighborhood, fields.parcel, industryType, lang]);
+  }, [
+    fields.governorate,
+    fields.directorate,
+    fields.village,
+    fields.basin,
+    fields.neighborhood,
+    fields.parcel,
+    industryType,
+    lang,
+    awaitingRegulationAfterPin,
+  ]);
+
+  useEffect(() => {
+    if (industryType) setAwaitingRegulationAfterPin(false);
+  }, [industryType]);
+
+  useEffect(() => {
+    setAmmanAutoIndustryType(null);
+    if (!isAmmanGovernorate(fields.governorate)) {
+      setAmmanLookupStatus("idle");
+      setAmmanLookupNote("");
+      return;
+    }
+    setAmmanLookupStatus("idle");
+    setAmmanLookupNote(
+      lang === "ar"
+        ? "تصنيف التنظيم يُختار يدويًا. مستكشف عمان للمعاينة فقط، والشهادة الرسمية عبر خدمات أمانة عمان (ومنها خدمات GIS المدفوعة)."
+        : "Select zoning manually. Amman Explorer is a viewer only; official certificates come from Greater Amman Municipality services (including paid GIS)."
+    );
+  }, [fields.governorate, lang]);
 
   function handlePrint() {
     setPrintError("");
@@ -282,6 +330,59 @@ export function LandCheckForm() {
         }
       })
       .finally(() => setPrinting(false));
+  }
+
+  async function handlePinDrop(coords: { lat: number; lng: number }) {
+    setError("");
+    try {
+      const [pointParcel, dlsData] = await Promise.all([
+        api.dlsParcelByPointPublic({ latitude: coords.lat, longitude: coords.lng }),
+        loadDlsLocations(),
+      ]);
+      const selection = selectionForCodes(dlsData, {
+        villageCode: pointParcel.villageCode,
+        basinCode: pointParcel.basinCode,
+        sectorCode: pointParcel.sectorCode,
+      });
+      if (!selection) {
+        setError(lang === "ar" ? "تعذر مطابقة موقع الدبوس مع بيانات المناطق." : "Could not map the pin point to DLS location labels.");
+        return;
+      }
+      const parcel = normalizeParcelId(pointParcel.parcelId);
+      setFields((f) => ({
+        ...f,
+        coordinates: coordsToString({ lat: pointParcel.latitude, lng: pointParcel.longitude }),
+        governorate: selection.governorate,
+        directorate: selection.directorate,
+        village: selection.village,
+        basin: selection.basin,
+        neighborhood: selection.neighborhood,
+        parcel,
+        areaLabel: pointParcel.areaSqm != null ? formatDlsArea(pointParcel.areaSqm, lang) : f.areaLabel,
+      }));
+      setParcelPolygon(pointParcel.rings?.length ? pointParcel.rings : null);
+      setAdjacentRoads(pointParcel.adjacentRoads ?? []);
+      setDlsKey(pointParcel.dlsKey || null);
+      setAreaSqm(pointParcel.areaSqm ?? null);
+      setPerimeterM(pointParcel.perimeterM ?? null);
+      setDlsMapStatus("ready");
+      if (!industryType) {
+        setAwaitingRegulationAfterPin(true);
+        window.setTimeout(() => {
+          regulationSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 80);
+      } else {
+        setAwaitingRegulationAfterPin(false);
+      }
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : lang === "ar"
+            ? "تعذر جلب بيانات الأرض من دائرة الأراضي من موقع الدبوس."
+            : "Could not fetch DLS parcel data from the selected map point."
+      );
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -334,6 +435,8 @@ export function LandCheckForm() {
     setAreaSqm(null);
     setPerimeterM(null);
     setParcelPolygon(null);
+    setAdjacentRoads([]);
+    setAmmanAutoIndustryType(null);
     setDraftStatus("idle");
     setBlueprintReady(false);
     setPrintError("");
@@ -509,15 +612,34 @@ export function LandCheckForm() {
             />
           </div>
 
-          <p className="text-xs font-bold text-green">{t.landCheck.regulationSection}</p>
-          <RegulationGuide
-            value={industryType}
-            onChange={(key) => {
-              setIndustryType(key);
-            }}
-            scope="all"
-            required
-          />
+          <div ref={regulationSectionRef}>
+            <p className="text-xs font-bold text-green">{t.landCheck.regulationSection}</p>
+            <RegulationGuide
+              value={industryType}
+              onChange={(key) => {
+                setIndustryType(key);
+                if (key) setAwaitingRegulationAfterPin(false);
+              }}
+              scope="all"
+              required
+              selectDisabled={Boolean(ammanAutoIndustryType)}
+            />
+            {isAmmanGovernorate(fields.governorate) && (
+              <p
+                className={`mt-2 text-[11px] leading-relaxed ${
+                  ammanLookupStatus === "failed"
+                    ? "text-red-700"
+                    : ammanLookupStatus === "success"
+                      ? "text-green"
+                      : "text-ink-soft"
+                }`}
+              >
+                {ammanLookupStatus === "loading"
+                  ? (lang === "ar" ? "جارٍ التحميل..." : "Loading...")
+                  : ammanLookupNote}
+              </p>
+            )}
+          </div>
 
           <div className="rounded-2xl border border-line bg-white/60 p-3 sm:p-4 flex flex-col gap-3">
             <div className="flex items-start justify-between gap-3">
@@ -548,10 +670,12 @@ export function LandCheckForm() {
               ref={locationRef}
               value={fields.coordinates}
               onChange={(v) => setFields((f) => ({ ...f, coordinates: v }))}
+              onPinDrop={handlePinDrop}
               address={fields.address}
               onAddressChange={(address) => setFields((f) => ({ ...f, address }))}
               polygon={parcelPolygon}
-              lockEditing={dlsMapStatus === "ready"}
+              adjacentRoads={adjacentRoads}
+              lockEditing={dlsMapStatus === "ready" || awaitingRegulationAfterPin}
               loading={dlsMapStatus === "loading"}
               loadingLabel={t.owners.dlsMapLoading}
               statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReady : undefined}
@@ -560,6 +684,7 @@ export function LandCheckForm() {
               areaSqm={areaSqm}
               perimeterM={perimeterM}
               showDimensions
+              showTopo={Boolean(industryType)}
               onBlueprintReadyChange={setBlueprintReady}
               blueprint={{
                 governorate: fields.governorate,

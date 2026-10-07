@@ -2,6 +2,7 @@ import { Router } from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "../prisma";
+import { getSiteViewSeries } from "../lib/siteAnalytics";
 import { requireAdmin, requirePermission } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 
@@ -61,6 +62,11 @@ adminDashboardRouter.get(
       },
       storage: { fileCount: files.length, totalBytes },
       recentAudit,
+      siteViews: {
+        day1: await getSiteViewSeries(1),
+        day7: await getSiteViewSeries(7),
+        day30: await getSiteViewSeries(30),
+      },
     });
   })
 );

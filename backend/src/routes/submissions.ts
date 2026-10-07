@@ -15,10 +15,19 @@ import { industryTypeEnum } from "../lib/industryTypes";
 import { trackingEmail } from "../lib/emailTemplates";
 import { locationFieldsSchema, legacyCoordinates } from "../lib/location";
 import { lookupDlsAdministrativeValue, DlsLookupError } from "../lib/dlsAdministrativeValue";
-import { lookupDlsParcelLocation, DlsParcelLocationError } from "../lib/dlsParcelLocation";
-import { toWesternDigits, westernDigitsString } from "../lib/arabicDigits";
+import {
+  lookupDlsParcelByPoint,
+  lookupDlsParcelContextByPoint,
+  lookupDlsParcelLocation,
+  DlsParcelLocationError,
+} from "../lib/dlsParcelLocation";
+import { lookupAmmanZoning, AmmanZoningLookupError } from "../lib/ammanZoning";
+import { normalizeDecimalInput, toWesternDigits, westernDigitsString } from "../lib/arabicDigits";
+import { assertValidMultiParcel, canonicalParcelList } from "../lib/multiParcel";
+import { syncIndustryTypeCatalogOnce } from "../lib/industryTypeCatalog";
 
 export const submissionsRouter = Router();
+const PRICE_PER_SQM_RE = /^\d+(\.\d+)?$/;
 
 const UPLOAD_DIR = path.resolve(__dirname, "../../uploads");
 
@@ -53,7 +62,7 @@ const dlsValueLimiter = rateLimit({
 // used to hammer the government map service.
 const dlsLocationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 30,
+  limit: 120,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many map lookups — please wait a few minutes and try again." },
@@ -74,6 +83,35 @@ const dlsLocationSchema = z.object({
   sectorCode: westernDigitsString(z.string().min(1)),
   parcelNumber: westernDigitsString(z.string().min(1)),
 });
+
+const dlsPointSchema = z.object({
+  latitude: z.coerce.number().finite().gte(-90).lte(90),
+  longitude: z.coerce.number().finite().gte(-180).lte(180),
+});
+
+const ammanZoningSchema = z
+  .object({
+    latitude: z.coerce.number().finite().gte(-90).lte(90).optional(),
+    longitude: z.coerce.number().finite().gte(-180).lte(180).optional(),
+    villageCode: westernDigitsString(z.string().min(1)).optional(),
+    basinCode: westernDigitsString(z.string().min(1)).optional(),
+    sectorCode: westernDigitsString(z.string().min(1)).optional(),
+    parcelNumber: westernDigitsString(z.string().min(1)).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const hasPoint = value.latitude != null && value.longitude != null;
+    const hasParcelIdentity =
+      Boolean(value.villageCode?.trim()) &&
+      Boolean(value.basinCode?.trim()) &&
+      Boolean(value.sectorCode?.trim()) &&
+      Boolean(value.parcelNumber?.trim());
+    if (!hasPoint && !hasParcelIdentity) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide either latitude/longitude or full parcel identity values",
+      });
+    }
+  });
 
 submissionsRouter.post(
   "/dls-value",
@@ -120,6 +158,77 @@ submissionsRouter.post(
       }
       throw err;
     }
+  })
+);
+
+submissionsRouter.post(
+  "/dls-location-by-point",
+  dlsLocationLimiter,
+  asyncHandler(async (req, res) => {
+    const input = dlsPointSchema.parse(req.body);
+    try {
+      const result = await lookupDlsParcelByPoint(input);
+      if (!result) {
+        res.status(404).json({
+          error: "No parcel found at this map point — move the pin inside a parcel boundary",
+        });
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      if (err instanceof DlsParcelLocationError) {
+        res.status(502).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+  })
+);
+
+submissionsRouter.post(
+  "/dls-context-by-point",
+  dlsLocationLimiter,
+  asyncHandler(async (req, res) => {
+    const input = dlsPointSchema.parse(req.body);
+    try {
+      const result = await lookupDlsParcelContextByPoint(input);
+      res.json({ parcels: result });
+    } catch (err) {
+      if (err instanceof DlsParcelLocationError) {
+        res.status(502).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+  })
+);
+
+submissionsRouter.post(
+  "/amman-zoning",
+  dlsLocationLimiter,
+  asyncHandler(async (req, res) => {
+    ammanZoningSchema.parse(req.body);
+    try {
+      await lookupAmmanZoning({});
+      res.status(410).json({ error: "Live Amman City GIS lookup is disabled" });
+    } catch (err) {
+      if (err instanceof AmmanZoningLookupError) {
+        res.status(410).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+  })
+);
+
+submissionsRouter.get(
+  "/industry-types-catalog",
+  asyncHandler(async (_req, res) => {
+    await syncIndustryTypeCatalogOnce(prisma);
+    const rows = await prisma.industryTypeCatalog.findMany({
+      orderBy: { industryType: "asc" },
+    });
+    res.json(rows);
   })
 );
 
@@ -183,7 +292,13 @@ const submissionInputSchema = z.object({
   neighborhood: z.string().optional(),
   coordinates: westernDigitsString(z.string().optional()),
   area: westernDigitsString(z.string().optional()),
-  price: westernDigitsString(z.string().optional()),
+  price: z.preprocess(
+    (value) => (typeof value === "string" ? normalizeDecimalInput(value) : value),
+    z.string().optional()
+  ).refine(
+    (value) => value === undefined || value.trim() === "" || PRICE_PER_SQM_RE.test(value.trim()),
+    "Price must be a number per square meter (m²)."
+  ),
   administrativeValue: z.preprocess((value) => {
     if (value === "" || value === null || value === undefined) return undefined;
     if (typeof value === "string") return toWesternDigits(value);
@@ -216,6 +331,12 @@ submissionsRouter.post(
     }
 
     const input = submissionInputSchema.parse(req.body);
+    const parcelValidation = assertValidMultiParcel(input.parcel);
+    if (!parcelValidation.ok) {
+      res.status(400).json({ error: parcelValidation.error });
+      return;
+    }
+    const normalizedParcel = canonicalParcelList(input.parcel) ?? input.parcel;
     const files = req.files as Record<string, Express.Multer.File[]> | undefined;
 
     let images: string[] = [];
@@ -247,9 +368,9 @@ submissionsRouter.post(
       throw err;
     }
 
-    const key = listingKey(input.village, input.basin, input.parcel);
+    const key = listingKey(input.village, input.basin, normalizedParcel);
     let duplicate = false;
-    if (input.village && input.basin && input.parcel) {
+    if (input.village && input.basin && normalizedParcel) {
       const existing = await prisma.submission.findMany({
         where: { status: { not: "rejected" } },
         select: { village: true, basin: true, parcel: true },
@@ -262,6 +383,7 @@ submissionsRouter.post(
     const submission = await prisma.submission.create({
       data: {
         ...input,
+        parcel: normalizedParcel,
         coordinates: legacyCoordinates(input.latitude, input.longitude) ?? input.coordinates,
         serialNo,
         trackingCode,
