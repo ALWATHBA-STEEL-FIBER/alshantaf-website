@@ -17,6 +17,13 @@ const PARCEL_LAYER_URL =
 const PARCEL_LINES_LAYER_URL =
   "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service_STG/MapServer/2/query";
 const SOURCE_URL = "https://maps.dls.gov.jo/dlsweb/";
+/** Public token the official DLS map registers before querying ArcGIS. */
+const DLS_TOKEN_URL = "https://maps.dls.gov.jo/dlswebapi/api/DlsWebapi/gettoken";
+const DLS_MAP_HEADERS = {
+  Accept: "application/json",
+  Referer: SOURCE_URL,
+  "User-Agent": "Mozilla/5.0",
+};
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
@@ -289,27 +296,74 @@ export async function lookupDlsParcelContextByPoint(params: {
   }
 }
 
+type CachedDlsToken = { token: string; expiresAt: number };
+let cachedDlsToken: CachedDlsToken | null = null;
+let dlsTokenInflight: Promise<string> | null = null;
+
+async function fetchDlsMapToken(force = false): Promise<string> {
+  const now = Date.now();
+  if (!force && cachedDlsToken && cachedDlsToken.expiresAt - now > 60_000) {
+    return cachedDlsToken.token;
+  }
+  if (!force && dlsTokenInflight) return dlsTokenInflight;
+
+  const pending = (async () => {
+    const res = await fetch(DLS_TOKEN_URL, {
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        ...DLS_MAP_HEADERS,
+        "X-Random-Key": Math.random().toString(36).slice(2, 12),
+      },
+    });
+    if (!res.ok) {
+      throw new DlsParcelLocationError(`DLS map token service returned HTTP ${res.status}`);
+    }
+    const body = (await res.json()) as { token?: string; expires?: number; msg?: string };
+    if (!body.token || (typeof body.msg === "string" && body.msg.trim())) {
+      throw new DlsParcelLocationError("DLS map token was not issued");
+    }
+    const expiresAt =
+      typeof body.expires === "number" && body.expires > Date.now() ? body.expires : Date.now() + 30 * 60_000;
+    cachedDlsToken = { token: body.token, expiresAt };
+    return body.token;
+  })();
+
+  dlsTokenInflight = pending;
+  try {
+    return await pending;
+  } finally {
+    if (dlsTokenInflight === pending) dlsTokenInflight = null;
+  }
+}
+
 async function queryFeatures(
   params: Record<string, string | number | boolean>,
   signal: AbortSignal,
   endpoint = PARCEL_LAYER_URL
 ): Promise<DlsFeature[]> {
-  const url = new URL(endpoint);
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, String(value));
-  }
-  const res = await fetch(url, {
-    signal,
-    headers: { Accept: "application/json" },
-  });
-  if (!res.ok) {
-    throw new DlsParcelLocationError(`DLS map service returned HTTP ${res.status}`);
-  }
-  const body = (await res.json()) as DlsQueryBody;
-  if (body.error) {
-    throw new DlsParcelLocationError(body.error.message || "DLS map query failed");
-  }
-  return body.features ?? [];
+  const run = async (forceRefresh: boolean): Promise<DlsFeature[]> => {
+    const token = await fetchDlsMapToken(forceRefresh);
+    const url = new URL(endpoint);
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, String(value));
+    }
+    url.searchParams.set("token", token);
+    const res = await fetch(url, {
+      signal,
+      headers: DLS_MAP_HEADERS,
+    });
+    if (!res.ok) {
+      throw new DlsParcelLocationError(`DLS map service returned HTTP ${res.status}`);
+    }
+    const body = (await res.json()) as DlsQueryBody;
+    if (body.error) {
+      const message = body.error.message || "DLS map query failed";
+      if (!forceRefresh && /token/i.test(message)) return run(true);
+      throw new DlsParcelLocationError(message);
+    }
+    return body.features ?? [];
+  };
+  return run(false);
 }
 
 function sideFromPoint(point: [number, number], centroid: { lat: number; lng: number }): RoadSide {
