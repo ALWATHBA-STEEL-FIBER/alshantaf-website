@@ -1,6 +1,6 @@
 /**
  * Looks up a parcel's map location via the official DLS ArcGIS MapServer:
- *   https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service_STG/MapServer/3
+ *   https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service/MapServer/3
  * ("قطع الاراضي" — cadastral parcel polygons).
  *
  * Query keys match the cadastral DLS_KEY parts:
@@ -13,9 +13,17 @@
 import { toWesternDigits } from "./arabicDigits";
 
 const PARCEL_LAYER_URL =
+  "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service/MapServer/3/query";
+const PARCEL_LAYER_URL_FALLBACK =
   "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service_STG/MapServer/3/query";
 const PARCEL_LINES_LAYER_URL =
+  "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service/MapServer/2/query";
+const PARCEL_LINES_LAYER_URL_FALLBACK =
   "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service_STG/MapServer/2/query";
+const FALLBACK_ENDPOINTS: Record<string, string> = {
+  [PARCEL_LAYER_URL]: PARCEL_LAYER_URL_FALLBACK,
+  [PARCEL_LINES_LAYER_URL]: PARCEL_LINES_LAYER_URL_FALLBACK,
+};
 const SOURCE_URL = "https://maps.dls.gov.jo/dlsweb/";
 /** Public token the official DLS map registers before querying ArcGIS. */
 const DLS_TOKEN_URL = "https://maps.dls.gov.jo/dlswebapi/api/DlsWebapi/gettoken";
@@ -339,7 +347,8 @@ async function fetchDlsMapToken(force = false): Promise<string> {
 async function queryFeatures(
   params: Record<string, string | number | boolean>,
   signal: AbortSignal,
-  endpoint = PARCEL_LAYER_URL
+  endpoint = PARCEL_LAYER_URL,
+  allowFallback = true
 ): Promise<DlsFeature[]> {
   const run = async (forceRefresh: boolean): Promise<DlsFeature[]> => {
     const token = await fetchDlsMapToken(forceRefresh);
@@ -361,7 +370,14 @@ async function queryFeatures(
       if (!forceRefresh && /token/i.test(message)) return run(true);
       throw new DlsParcelLocationError(message);
     }
-    return body.features ?? [];
+    const features = body.features ?? [];
+    // Staging is missing whole basins that the live cadastral service still has
+    // (Abu Nseir / أصهي الفقير is one). Only fall back when the primary layer is empty.
+    const fallback = allowFallback ? FALLBACK_ENDPOINTS[endpoint] : undefined;
+    if (!features.length && fallback) {
+      return queryFeatures(params, signal, fallback, false);
+    }
+    return features;
   };
   return run(false);
 }
