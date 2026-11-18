@@ -31,6 +31,7 @@ import type {
   SiteExpenseInput,
   SiteExpenseMeta,
   SiteExpenseOverview,
+  SiteProjectCostSummary,
   SiteExpenseSummary,
   SiteEngineerExpenseSummary,
   SiteExpenseCategory,
@@ -689,7 +690,34 @@ export const api = {
     clientFetch<{ ok?: boolean; deactivated?: boolean } | void>(`/admin/site-work/workers/${id}`, {
       method: "DELETE",
     }),
-  siteProject: (id: string) => clientFetch<SiteProjectDetail>(`/admin/site-work/projects/${id}`),
+  siteProject: (id: string, params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    const q = qs.toString();
+    return clientFetch<SiteProjectDetail>(`/admin/site-work/projects/${id}${q ? `?${q}` : ""}`);
+  },
+  siteProjectCostSummary: (id: string, params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    const q = qs.toString();
+    return clientFetch<SiteProjectCostSummary>(
+      `/admin/site-work/projects/${id}/cost-summary${q ? `?${q}` : ""}`
+    );
+  },
+  createSiteExpenseAdmin: (data: SiteExpenseInput & { engineerId?: string | null }) =>
+    clientFetch<SiteExpense>("/admin/site-work/expenses", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  sitePortalProjectCostSummary: (id: string, params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    const q = qs.toString();
+    return clientFetch<SiteProjectCostSummary>(`/site/projects/${id}/cost-summary${q ? `?${q}` : ""}`);
+  },
   assignSiteProjectWorker: (
     projectId: string,
     data: Record<string, unknown>

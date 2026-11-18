@@ -19,11 +19,10 @@ type Props = {
   onDelete?: () => void;
 };
 
-export function ExpenseForm({ meta, initial, defaultScope, defaultProjectId, onSaved, onDelete }: Props) {
+export function ExpenseForm({ meta, initial, defaultScope: _defaultScope, defaultProjectId, onSaved, onDelete }: Props) {
   const today = todayLocalISO();
-  const [scope, setScope] = useState<SiteExpenseScope>(
-    initial?.scope || defaultScope || (meta.projects.length ? "PROJECT" : "COMPANY")
-  );
+  // Engineers record project expenses only; company expenses are admin-created.
+  const scope: SiteExpenseScope = "PROJECT";
   const [projectId, setProjectId] = useState<string>(
     initial?.projectId || defaultProjectId || (meta.projects.length === 1 ? meta.projects[0]!.id : "")
   );
@@ -132,62 +131,38 @@ export function ExpenseForm({ meta, initial, defaultScope, defaultProjectId, onS
 
   return (
     <div className="space-y-5">
-      {/* Scope toggle */}
-      <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-[#e9e4d8]">
-        {(
-          [
-            ["PROJECT", "مصروف مشروع", "مواد، معدات، نقل…"],
-            ["COMPANY", "مصروف شركة", "مكتب، سيارات، رواتب…"],
-          ] as const
-        ).map(([key, title, hint]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => {
-              setScope(key);
-              const allowed = meta.categories.find((c) => c.key === category)?.scopes.includes(key);
-              if (!allowed) setCategory("");
-            }}
-            disabled={key === "PROJECT" && meta.projects.length === 0}
-            className={`rounded-xl py-2.5 px-2 text-center transition disabled:opacity-40 ${
-              scope === key ? "bg-[#0f342f] text-white shadow" : "text-[#0f342f]"
-            }`}
-          >
-            <div className="text-sm font-extrabold">{title}</div>
-            <div className={`text-[10px] mt-0.5 ${scope === key ? "text-white/70" : "text-[#5a6b66]"}`}>{hint}</div>
-          </button>
-        ))}
+      <div className="rounded-2xl bg-[#0f342f] text-white px-4 py-3">
+        <div className="text-sm font-extrabold">مصروف مشروع</div>
+        <div className="text-[11px] text-white/70 mt-0.5">مواد، معدات، نقل… · مصاريف الشركة من لوحة الإدارة</div>
       </div>
 
       {/* Project picker */}
-      {scope === "PROJECT" ? (
-        <div>
-          <span className={label}>المشروع</span>
-          {meta.projects.length === 0 ? (
-            <p className="text-sm text-[#5a6b66]">لا توجد مشاريع مخصصة لك.</p>
-          ) : (
-            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
-              {meta.projects.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setProjectId(p.id)}
-                  className={`snap-start shrink-0 min-w-[8.5rem] rounded-xl border px-3 py-2.5 text-start transition ${
-                    projectId === p.id
-                      ? "bg-[#0f342f] border-[#0f342f] text-white"
-                      : "bg-white border-[#e4ddd0] text-[#0f342f]"
-                  }`}
-                >
-                  <div className="text-sm font-bold truncate">{p.name}</div>
-                  <div className={`text-[10px] mt-0.5 truncate ${projectId === p.id ? "text-white/70" : "text-[#5a6b66]"}`}>
-                    {p.isCoordinator ? "أنت المنسق" : p.coordinator ? `المنسق: ${p.coordinator.name}` : p.code || "—"}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : null}
+      <div>
+        <span className={label}>المشروع</span>
+        {meta.projects.length === 0 ? (
+          <p className="text-sm text-[#5a6b66]">لا توجد مشاريع مخصصة لك.</p>
+        ) : (
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
+            {meta.projects.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setProjectId(p.id)}
+                className={`snap-start shrink-0 min-w-[8.5rem] rounded-xl border px-3 py-2.5 text-start transition ${
+                  projectId === p.id
+                    ? "bg-[#0f342f] border-[#0f342f] text-white"
+                    : "bg-white border-[#e4ddd0] text-[#0f342f]"
+                }`}
+              >
+                <div className="text-sm font-bold truncate">{p.name}</div>
+                <div className={`text-[10px] mt-0.5 truncate ${projectId === p.id ? "text-white/70" : "text-[#5a6b66]"}`}>
+                  {p.isCoordinator ? "أنت المنسق" : p.coordinator ? `المنسق: ${p.coordinator.name}` : p.code || "—"}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Amount */}
       <div>
@@ -414,7 +389,7 @@ export function ExpenseForm({ meta, initial, defaultScope, defaultProjectId, onS
           {saving
             ? "جاري الحفظ…"
             : `حفظ${Number(amount) > 0 ? ` ${jod(amount)} د.أ` : ""}${
-                scope === "PROJECT" && selectedProject ? ` · ${selectedProject.name}` : scope === "COMPANY" ? " · الشركة" : ""
+                selectedProject ? ` · ${selectedProject.name}` : ""
               }`}
         </button>
         </div>

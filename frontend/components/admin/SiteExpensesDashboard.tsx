@@ -62,6 +62,7 @@ export function SiteExpensesDashboard() {
   const [payMethods, setPayMethods] = useState<Array<{ key: string; ar: string; en: string }>>([]);
   const [listLoading, setListLoading] = useState(false);
   const [editing, setEditing] = useState<SiteExpense | null>(null);
+  const [creating, setCreating] = useState(false);
 
   // Split state
   const [projects, setProjects] = useState<SiteProject[]>([]);
@@ -150,8 +151,20 @@ export function SiteExpensesDashboard() {
   }, [tab, loadList, filters.q]);
 
   useEffect(() => {
-    if (tab === "split" || tab === "coordinators") loadProjects();
-  }, [tab, loadProjects]);
+    if (tab === "split" || tab === "coordinators" || creating) loadProjects();
+  }, [tab, loadProjects, creating]);
+
+  useEffect(() => {
+    if (!creating) return;
+    if (categories.length && payMethods.length) return;
+    void api
+      .siteExpensesAdmin({ ...range })
+      .then((res) => {
+        setCategories(res.categories);
+        setPayMethods(res.paymentMethods);
+      })
+      .catch(() => undefined);
+  }, [creating, categories.length, payMethods.length, range]);
 
   function openProjectExpenses(projectId: string) {
     setFilters((f) => ({ ...f, projectId, coordinatorId: "", scope: "" }));
@@ -253,9 +266,18 @@ export function SiteExpensesDashboard() {
             )}
           </p>
         </div>
-        <button type="button" onClick={exportExcel} className="h-10 px-4 rounded-xl bg-green text-white text-sm font-bold self-start lg:self-auto">
-          {L("تصدير Excel", "Export Excel")}
-        </button>
+        <div className="flex flex-wrap gap-2 self-start lg:self-auto">
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="h-10 px-4 rounded-xl bg-ink text-white text-sm font-bold"
+          >
+            {L("+ مصروف شركة / مشروع", "+ Company / project expense")}
+          </button>
+          <button type="button" onClick={exportExcel} className="h-10 px-4 rounded-xl bg-green text-white text-sm font-bold">
+            {L("تصدير Excel", "Export Excel")}
+          </button>
+        </div>
       </header>
 
       {/* Range filter row */}
@@ -749,13 +771,38 @@ export function SiteExpensesDashboard() {
           expense={editing}
           categories={categories}
           payMethods={payMethods}
-          projects={allOverviewProjects.map((p) => ({ id: p.id, name: p.name }))}
+          projects={
+            projects.length
+              ? projects.map((p) => ({ id: p.id, name: p.name }))
+              : allOverviewProjects.map((p) => ({ id: p.id, name: p.name }))
+          }
           lang={lang}
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
             showSuccess(L("تم الحفظ", "Saved"));
             await Promise.all([loadList(), loadOverview()]);
+          }}
+          onError={(m) => showError(m)}
+        />
+      ) : null}
+
+      {creating ? (
+        <CreateExpenseModal
+          categories={categories}
+          payMethods={payMethods}
+          projects={
+            projects.length
+              ? projects.filter((p) => p.active).map((p) => ({ id: p.id, name: p.name }))
+              : allOverviewProjects.map((p) => ({ id: p.id, name: p.name }))
+          }
+          engineers={engineers}
+          lang={lang}
+          onClose={() => setCreating(false)}
+          onSaved={async () => {
+            setCreating(false);
+            showSuccess(L("تم تسجيل المصروف", "Expense recorded"));
+            await Promise.all([loadOverview(), tab === "expenses" ? loadList() : Promise.resolve()]);
           }}
           onError={(m) => showError(m)}
         />
@@ -1001,6 +1048,218 @@ function CategoryBars({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function CreateExpenseModal({
+  categories,
+  payMethods,
+  projects,
+  engineers,
+  lang,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  categories: SiteExpenseCategory[];
+  payMethods: Array<{ key: string; ar: string; en: string }>;
+  projects: Array<{ id: string; name: string }>;
+  engineers: Array<{ id: string; name: string }>;
+  lang: string;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (m: string) => void;
+}) {
+  const L = (ar: string, en: string) => (lang === "ar" ? ar : en);
+  const today = todayLocalISO();
+  const companyCats = categories.filter((c) => c.scopes.includes("COMPANY"));
+  const projectCats = categories.filter((c) => c.scopes.includes("PROJECT"));
+  const [form, setForm] = useState({
+    scope: "COMPANY" as "PROJECT" | "COMPANY",
+    projectId: projects[0]?.id || "",
+    category: companyCats[0]?.key || categories[0]?.key || "other",
+    description: "",
+    amount: "",
+    expenseDate: today,
+    vendor: "",
+    paymentMethod: "cash",
+    invoiceNo: "",
+    notes: "",
+    engineerId: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const cls = "w-full h-10 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold";
+  const lbl = "text-xs font-bold text-ink-soft mb-1 block";
+  const cats = form.scope === "COMPANY" ? companyCats : projectCats;
+
+  async function save() {
+    const amount = Number(form.amount);
+    if (!form.description.trim()) {
+      onError(L("الوصف مطلوب", "Description required"));
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      onError(L("أدخل مبلغاً صحيحاً", "Enter a valid amount"));
+      return;
+    }
+    if (form.scope === "PROJECT" && !form.projectId) {
+      onError(L("اختر المشروع", "Pick a project"));
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.createSiteExpenseAdmin({
+        scope: form.scope,
+        projectId: form.scope === "PROJECT" ? form.projectId : null,
+        category: form.category,
+        description: form.description.trim(),
+        amount,
+        expenseDate: form.expenseDate,
+        vendor: form.vendor.trim() || null,
+        paymentMethod: form.paymentMethod || null,
+        invoiceNo: form.invoiceNo.trim() || null,
+        notes: form.notes.trim() || null,
+        engineerId: form.engineerId || null,
+      });
+      onSaved();
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : L("تعذّر الحفظ", "Save failed"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div
+        className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl p-5 space-y-3 max-h-[90vh] overflow-auto"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-ink text-lg">{L("تسجيل مصروف", "Record expense")}</h3>
+          <button type="button" onClick={onClose} className="text-ink-soft text-xl leading-none" aria-label="close">
+            ×
+          </button>
+        </div>
+        <p className="text-xs text-ink-soft">
+          {L(
+            "مصاريف الشركة من هنا؛ مصاريف المشاريع يمكن للمهندسين إدخالها أيضاً من بوابة الموقع.",
+            "Company expenses go here; engineers can also log project expenses from the site portal."
+          )}
+        </p>
+        <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-surface-2">
+          {(
+            [
+              ["COMPANY", L("شركة", "Company")],
+              ["PROJECT", L("مشروع", "Project")],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                const nextCats = key === "COMPANY" ? companyCats : projectCats;
+                setForm((f) => ({
+                  ...f,
+                  scope: key,
+                  category: nextCats.some((c) => c.key === f.category) ? f.category : nextCats[0]?.key || "other",
+                }));
+              }}
+              className={`h-10 rounded-lg text-sm font-bold ${
+                form.scope === key ? "bg-ink text-white" : "text-ink-soft"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {form.scope === "PROJECT" ? (
+            <div className="col-span-2">
+              <span className={lbl}>{L("المشروع", "Project")}</span>
+              <select className={cls} value={form.projectId} onChange={(e) => setForm((f) => ({ ...f, projectId: e.target.value }))}>
+                <option value="">{L("اختر…", "Select…")}</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+          <div>
+            <span className={lbl}>{L("المبلغ (د.أ)", "Amount (JOD)")}</span>
+            <input className={cls} type="number" step="0.001" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} />
+          </div>
+          <div>
+            <span className={lbl}>{L("التاريخ", "Date")}</span>
+            <input className={cls} type="date" value={form.expenseDate} onChange={(e) => setForm((f) => ({ ...f, expenseDate: e.target.value }))} />
+          </div>
+          <div>
+            <span className={lbl}>{L("التصنيف", "Category")}</span>
+            <select className={cls} value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}>
+              {cats.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {lang === "ar" ? c.ar : c.en}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <span className={lbl}>{L("طريقة الدفع", "Payment")}</span>
+            <select className={cls} value={form.paymentMethod} onChange={(e) => setForm((f) => ({ ...f, paymentMethod: e.target.value }))}>
+              <option value="">—</option>
+              {payMethods.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {lang === "ar" ? p.ar : p.en}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <span className={lbl}>{L("الوصف", "Description")}</span>
+          <input className={cls} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <span className={lbl}>{L("المورّد", "Vendor")}</span>
+            <input className={cls} value={form.vendor} onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value }))} />
+          </div>
+          <div>
+            <span className={lbl}>{L("رقم الفاتورة", "Invoice #")}</span>
+            <input className={cls} value={form.invoiceNo} onChange={(e) => setForm((f) => ({ ...f, invoiceNo: e.target.value }))} />
+          </div>
+        </div>
+        {engineers.length ? (
+          <div>
+            <span className={lbl}>{L("نسب الإدخال لمهندس (اختياري)", "Attribute to engineer (optional)")}</span>
+            <select className={cls} value={form.engineerId} onChange={(e) => setForm((f) => ({ ...f, engineerId: e.target.value }))}>
+              <option value="">{L("حساب الإدارة", "Admin account")}</option>
+              {engineers.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+        <div>
+          <span className={lbl}>{L("ملاحظات", "Notes")}</span>
+          <textarea className={`${cls} h-20 py-2`} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button type="button" disabled={saving} onClick={save} className="flex-1 h-11 rounded-xl bg-green text-white text-sm font-bold disabled:opacity-60">
+            {saving ? L("جاري الحفظ…", "Saving…") : L("حفظ", "Save")}
+          </button>
+          <button type="button" onClick={onClose} className="h-11 px-5 rounded-xl border border-line text-sm font-bold">
+            {L("إلغاء", "Cancel")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

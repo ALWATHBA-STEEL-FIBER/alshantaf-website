@@ -39,6 +39,7 @@ import {
   expenseWhere,
   isCategory,
   isPaymentMethod,
+  buildProjectCostSummary,
   laborCostByProject,
   parseRangeQuery,
   paymentLabel,
@@ -46,6 +47,7 @@ import {
   summarizeRows,
 } from "../lib/siteExpenses";
 import { sendReceipt } from "./siteExpenses";
+import { ensureAdminSiteEngineer } from "../lib/siteAdminEngineer";
 
 export const adminSiteWorkRouter = Router();
 adminSiteWorkRouter.use(requireAdmin);
@@ -896,6 +898,10 @@ adminSiteWorkRouter.get(
         dailyPay: money(Number(w.dailyPay) || 0),
         extraHourPay: money(Number(w.extraHourPay) || 0),
       })),
+      costSummary: await buildProjectCostSummary(
+        project.id,
+        parseRangeQuery(req.query as Record<string, unknown>, parseDateOnly)
+      ),
     });
   })
 );
@@ -1745,6 +1751,116 @@ function adminExpenseFilter(query: Record<string, unknown>) {
     range: parseRangeQuery(query, parseDateOnly),
   };
 }
+
+const adminExpenseCreateSchema = z.object({
+  scope: z.enum(["PROJECT", "COMPANY"]),
+  projectId: z.string().uuid().optional().nullable(),
+  category: z.string().min(1).max(40),
+  description: z.string().trim().min(1).max(500),
+  amount: z.coerce.number().positive().max(10_000_000),
+  expenseDate: z.string(),
+  vendor: z.string().trim().max(200).optional().nullable(),
+  paymentMethod: z.string().max(20).optional().nullable(),
+  invoiceNo: z.string().trim().max(100).optional().nullable(),
+  receiptFile: z.string().max(80).optional().nullable(),
+  receiptMime: z.string().max(80).optional().nullable(),
+  notes: z.string().trim().max(2000).optional().nullable(),
+  /** Optional: attribute to a site engineer; defaults to admin site-engineer row. */
+  engineerId: z.string().uuid().optional().nullable(),
+});
+
+/** Admin creates company (or project) expenses without using the engineer portal. */
+adminSiteWorkRouter.post(
+  "/expenses",
+  asyncHandler(async (req, res) => {
+    const input = adminExpenseCreateSchema.parse(req.body ?? {});
+    const expenseDate = parseDateOnly(input.expenseDate);
+    if (!expenseDate) {
+      res.status(400).json({ error: "Invalid expense date" });
+      return;
+    }
+    if (!isCategory(input.category)) {
+      res.status(400).json({ error: "Unknown category" });
+      return;
+    }
+    if (input.paymentMethod && !isPaymentMethod(input.paymentMethod)) {
+      res.status(400).json({ error: "Unknown payment method" });
+      return;
+    }
+
+    let projectId: string | null = null;
+    if (input.scope === "PROJECT") {
+      if (!input.projectId) {
+        res.status(400).json({ error: "projectId required for PROJECT expenses" });
+        return;
+      }
+      const project = await prisma.siteProject.findUnique({ where: { id: input.projectId } });
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      projectId = project.id;
+    }
+
+    let engineerId = input.engineerId || null;
+    if (engineerId) {
+      const eng = await prisma.siteEngineer.findUnique({ where: { id: engineerId } });
+      if (!eng || !eng.active) {
+        res.status(400).json({ error: "Engineer not found" });
+        return;
+      }
+    } else {
+      const adminEng = await ensureAdminSiteEngineer();
+      engineerId = adminEng.id;
+    }
+
+    const created = await prisma.siteExpense.create({
+      data: {
+        scope: input.scope,
+        projectId,
+        engineerId,
+        category: input.category,
+        description: input.description,
+        amount: Math.round(input.amount * 1000) / 1000,
+        expenseDate,
+        vendor: input.vendor || null,
+        paymentMethod: input.paymentMethod || null,
+        invoiceNo: input.invoiceNo || null,
+        receiptFile: input.receiptFile || null,
+        receiptMime: input.receiptMime || null,
+        notes: input.notes || null,
+      },
+      include: expenseInclude,
+    });
+
+    await audit({
+      actorEmail: req.session!.email,
+      action: "site_expense.admin_create",
+      targetType: "site_expense",
+      targetId: created.id,
+      metadata: { amount: String(created.amount), scope: created.scope, projectId: created.projectId },
+      ip: req.ip,
+    });
+
+    res.status(201).json(serializeExpense(created, undefined, true));
+  })
+);
+
+adminSiteWorkRouter.get(
+  "/projects/:id/cost-summary",
+  asyncHandler(async (req, res) => {
+    const summary = await buildProjectCostSummary(
+      req.params.id,
+      parseRangeQuery(req.query as Record<string, unknown>, parseDateOnly)
+    );
+    if (!summary) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(summary);
+  })
+);
 
 adminSiteWorkRouter.get(
   "/expenses",

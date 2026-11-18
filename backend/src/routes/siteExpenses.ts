@@ -255,6 +255,11 @@ async function validateExpense(
   if (!isCategory(input.category)) return { error: "تصنيف غير معروف" };
   if (input.paymentMethod && !isPaymentMethod(input.paymentMethod)) return { error: "طريقة دفع غير معروفة" };
 
+  // Company expenses are admin-only (admin site-work dashboard). Engineers record project costs.
+  if (input.scope === "COMPANY" && !req.siteEngineer!.isAdmin) {
+    return { error: "مصاريف الشركة تُسجَّل من لوحة الإدارة فقط" };
+  }
+
   let projectId: string | null = null;
   if (input.scope === "PROJECT") {
     if (!input.projectId) return { error: "اختر المشروع" };

@@ -97,15 +97,18 @@ function ProjectsHome({ engineerName }: { engineerName: string }) {
             </div>
           ) : null}
         </Link>
-        <div className="grid grid-cols-2 border-t border-[#eee8dc] text-xs font-bold">
+        <div className="grid grid-cols-3 border-t border-[#eee8dc] text-xs font-bold">
           <Link href={`/site/projects/${p.id}?date=${today}`} className="h-11 flex items-center justify-center text-[#0f342f] border-e border-[#eee8dc]">
-            تسجيل الحضور
+            الحضور
+          </Link>
+          <Link href={`/site/projects/${p.id}/cost`} className="h-11 flex items-center justify-center text-[#0f342f] border-e border-[#eee8dc]">
+            التكاليف
           </Link>
           <Link
             href={`/site/expenses/new?scope=PROJECT&projectId=${p.id}&back=${encodeURIComponent("/site")}`}
             className="h-11 flex items-center justify-center text-[#0f342f] bg-[#d4a84b]/15"
           >
-            + مصروف للمشروع
+            + مصروف
           </Link>
         </div>
       </div>
@@ -121,7 +124,7 @@ function ProjectsHome({ engineerName }: { engineerName: string }) {
         </div>
       </div>
 
-      {/* Quick actions */}
+      {/* Quick actions — project expenses by engineers; company expenses via admin */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <Link
           href={`/site/expenses/new?scope=PROJECT&back=${encodeURIComponent("/site")}`}
@@ -132,12 +135,12 @@ function ProjectsHome({ engineerName }: { engineerName: string }) {
           <div className="text-[10px] text-white/70 mt-0.5">مواد، معدات، نقل…</div>
         </Link>
         <Link
-          href={`/site/expenses/new?scope=COMPANY&back=${encodeURIComponent("/site")}`}
+          href="/site/expenses"
           className="rounded-2xl bg-[#d4a84b] text-[#0f342f] p-4 active:scale-[0.98] transition"
         >
-          <div className="text-2xl leading-none">＋</div>
-          <div className="font-extrabold mt-2 text-sm">مصروف شركة</div>
-          <div className="text-[10px] text-[#0f342f]/70 mt-0.5">مكتب، سيارات، رواتب…</div>
+          <div className="text-2xl leading-none">☰</div>
+          <div className="font-extrabold mt-2 text-sm">سجل المصاريف</div>
+          <div className="text-[10px] text-[#0f342f]/70 mt-0.5">عرض وتصفية إدخالاتك</div>
         </Link>
       </div>
 

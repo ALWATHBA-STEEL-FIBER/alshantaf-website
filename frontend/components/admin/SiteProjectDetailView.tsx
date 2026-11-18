@@ -8,6 +8,7 @@ import type { SiteProjectDetail } from "@/lib/types";
 import { useToast } from "./Toast";
 import { EmptyState, Spinner, SkeletonBlock } from "./EmptyState";
 import { SiteExcelViewer } from "@/components/site/SiteExcelViewer";
+import { ProjectCostBoard } from "@/components/site/ProjectCostBoard";
 
 const inputClass =
   "w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold";
@@ -27,7 +28,8 @@ export function SiteProjectDetailView({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [excelOpen, setExcelOpen] = useState(false);
-  const [meta, setMeta] = useState({ name: "", code: "", notes: "", active: true });
+  const [tab, setTab] = useState<"cost" | "setup" | "roster" | "activity">("cost");
+  const [meta, setMeta] = useState({ name: "", code: "", notes: "", active: true, budget: "" });
   const [existingId, setExistingId] = useState("");
   const [newWorker, setNewWorker] = useState({
     name: "",
@@ -47,6 +49,7 @@ export function SiteProjectDetailView({ projectId }: { projectId: string }) {
         code: p.code || "",
         notes: p.notes || "",
         active: p.active,
+        budget: p.budget != null ? String(p.budget) : "",
       });
     } catch (err) {
       showError(err instanceof ApiError ? err.message : t.admin.saveFailed);
@@ -69,6 +72,7 @@ export function SiteProjectDetailView({ projectId }: { projectId: string }) {
         code: meta.code.trim() || null,
         notes: meta.notes.trim() || null,
         active: meta.active,
+        budget: meta.budget.trim() === "" ? null : Number(meta.budget),
       });
       showSuccess(lang === "ar" ? "تم حفظ المشروع" : "Project saved");
       await load();
@@ -161,6 +165,12 @@ export function SiteProjectDetailView({ projectId }: { projectId: string }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
+            href={`/admin/site-work/expenses?projectId=${projectId}`}
+            className="h-10 px-3 rounded-xl border border-line text-xs font-bold inline-flex items-center"
+          >
+            {lang === "ar" ? "مصاريف المشروع" : "Project expenses"}
+          </Link>
+          <Link
             href="/admin/site-work"
             className="h-10 px-3 rounded-xl border border-line text-xs font-bold inline-flex items-center"
           >
@@ -195,6 +205,36 @@ export function SiteProjectDetailView({ projectId }: { projectId: string }) {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-1 border-b border-line pb-1">
+        {(
+          [
+            { id: "cost" as const, ar: "التكاليف والمؤشرات", en: "Costs & KPIs" },
+            { id: "setup" as const, ar: "إعداد المشروع", en: "Project setup" },
+            { id: "roster" as const, ar: "العمال", en: "Roster" },
+            { id: "activity" as const, ar: "الحضور والدفعات", en: "Attendance & payouts" },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`h-9 px-3 rounded-xl text-xs font-bold ${
+              tab === t.id ? "bg-green text-white" : "text-ink-soft hover:bg-surface-2"
+            }`}
+          >
+            {lang === "ar" ? t.ar : t.en}
+          </button>
+        ))}
+      </div>
+
+      {tab === "cost" && data.costSummary ? (
+        <ProjectCostBoard cost={data.costSummary} lang={lang} adminLinks projectId={projectId} />
+      ) : null}
+      {tab === "cost" && !data.costSummary ? (
+        <EmptyState title={lang === "ar" ? "لا ملخص تكاليف" : "No cost summary"} />
+      ) : null}
+
+      {tab === "setup" ? (
       <div className="grid lg:grid-cols-2 gap-4">
         <form onSubmit={saveMeta} className="bg-white rounded-2xl border border-line p-4 space-y-3">
           <h2 className="font-bold text-green">{lang === "ar" ? "تفاصيل المشروع" : "Project details"}</h2>
@@ -213,6 +253,18 @@ export function SiteProjectDetailView({ projectId }: { projectId: string }) {
               className={inputClass}
               value={meta.code}
               onChange={(e) => setMeta((f) => ({ ...f, code: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>{lang === "ar" ? "الموازنة (د.أ)" : "Budget (JOD)"}</label>
+            <input
+              className={inputClass}
+              type="number"
+              min="0"
+              step="0.001"
+              value={meta.budget}
+              onChange={(e) => setMeta((f) => ({ ...f, budget: e.target.value }))}
+              placeholder="—"
             />
           </div>
           <div>
@@ -340,7 +392,9 @@ export function SiteProjectDetailView({ projectId }: { projectId: string }) {
           </form>
         </div>
       </div>
+      ) : null}
 
+      {tab === "roster" ? (
       <div className="bg-white rounded-2xl border border-line p-4">
         <h2 className="font-bold text-green mb-3">
           {lang === "ar" ? "قائمة العمال" : "Worker roster"} ({data.roster.length})
@@ -403,7 +457,9 @@ export function SiteProjectDetailView({ projectId }: { projectId: string }) {
           </div>
         )}
       </div>
+      ) : null}
 
+      {tab === "activity" ? (
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl border border-line p-4">
           <h2 className="font-bold text-green mb-3">
@@ -466,6 +522,7 @@ export function SiteProjectDetailView({ projectId }: { projectId: string }) {
           </div>
         </div>
       </div>
+      ) : null}
 
       <SiteExcelViewer
         open={excelOpen}

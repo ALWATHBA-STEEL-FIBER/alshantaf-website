@@ -281,3 +281,120 @@ export function parseRangeQuery(query: Record<string, unknown>, parse: (s: strin
   const to = typeof query.to === "string" && query.to ? parse(query.to) : null;
   return { from, to };
 }
+
+/**
+ * Full project cost board: recorded expenses + labor (hours → pay) + payout status + budget KPIs.
+ * Labor and expenses stay separate buckets — `daily_labor` expense rows are not auto-payroll.
+ */
+export async function buildProjectCostSummary(projectId: string, range: DateRange = {}) {
+  const project = await prisma.siteProject.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      budget: true,
+      active: true,
+      coordinator: { select: { id: true, name: true } },
+      _count: { select: { workers: true, records: true } },
+    },
+  });
+  if (!project) return null;
+
+  const dw = dateWhere(range);
+  const [expenseRows, laborMap, hourAgg, payoutRows, recentExpenses] = await Promise.all([
+    prisma.siteExpense.findMany({
+      where: { projectId, scope: "PROJECT", ...(dw ? { expenseDate: dw } : {}) },
+      select: { category: true, amount: true, expenseDate: true, scope: true },
+    }),
+    laborCostByProject([projectId], range),
+    prisma.siteDailyRecord.aggregate({
+      where: { projectId, ...(dw ? { workDate: dw } : {}) },
+      _count: true,
+      _sum: { regularHours: true, extraHours: true },
+    }),
+    prisma.siteWorkerWeekPayout.findMany({
+      where: {
+        projectId,
+        ...(range.from || range.to
+          ? {
+              weekStart: {
+                ...(range.from ? { gte: range.from } : {}),
+                ...(range.to ? { lte: range.to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { weekStart: "desc" },
+      take: 40,
+      include: { worker: { select: { id: true, name: true } } },
+    }),
+    prisma.siteExpense.findMany({
+      where: { projectId, scope: "PROJECT", ...(dw ? { expenseDate: dw } : {}) },
+      include: expenseInclude,
+      orderBy: [{ expenseDate: "desc" }, { createdAt: "desc" }],
+      take: 50,
+    }),
+  ]);
+
+  const expenseSummary = summarizeRows(expenseRows);
+  const labor = laborMap.get(projectId) || { total: 0, paid: 0, unpaid: 0 };
+  const expensesNum = Number(expenseSummary.total) || 0;
+  const grand = r3(expensesNum + labor.total);
+  const budget = project.budget != null ? Number(project.budget) : null;
+  const daysWorkedApprox = await prisma.siteDailyRecord.count({
+    where: {
+      projectId,
+      ...(dw ? { workDate: dw } : {}),
+      OR: [{ regularHours: { gt: 0 } }, { extraHours: { gt: 0 } }],
+    },
+  });
+
+  return {
+    project: {
+      id: project.id,
+      name: project.name,
+      code: project.code,
+      active: project.active,
+      coordinator: project.coordinator,
+      workerCount: project._count.workers,
+      recordCount: project._count.records,
+    },
+    range: {
+      from: range.from ? formatDateOnly(range.from) : null,
+      to: range.to ? formatDateOnly(range.to) : null,
+    },
+    kpis: {
+      expenses: expenseSummary.total,
+      expenseCount: expenseSummary.count,
+      labor: money(labor.total),
+      laborPaid: money(labor.paid),
+      laborUnpaid: money(labor.unpaid),
+      grandTotal: money(grand),
+      budget: budget != null ? money(budget) : null,
+      budgetRemaining: budget != null ? money(budget - grand) : null,
+      budgetUsedPct: budget && budget > 0 ? Math.round((grand / budget) * 1000) / 10 : null,
+    },
+    hours: {
+      attendanceRows: hourAgg._count,
+      daysWorked: daysWorkedApprox,
+      totalRegular: money(Number(hourAgg._sum.regularHours || 0)),
+      totalExtra: money(Number(hourAgg._sum.extraHours || 0)),
+    },
+    byCategory: expenseSummary.byCategory,
+    note:
+      "Payroll labor is derived from attendance × worker rates (paid weeks use payout snapshots). Manual daily_labor expenses are separate and not double-counted into labor.",
+    payouts: payoutRows.map((p) => ({
+      id: p.id,
+      workerId: p.workerId,
+      workerName: p.worker.name,
+      weekStart: formatDateOnly(p.weekStart),
+      daysWorked: p.daysWorked,
+      totalExtraHours: money(Number(p.totalExtraHours)),
+      amount: money(Number(p.amount)),
+      paid: p.paid,
+      paidAt: p.paidAt?.toISOString() ?? null,
+    })),
+    recentExpenses: recentExpenses.map((e) => serializeExpense(e, undefined, true)),
+  };
+}

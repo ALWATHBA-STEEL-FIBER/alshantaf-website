@@ -14,6 +14,7 @@ import {
 import { serializeDailyRecord } from "../lib/siteWorkSerialize";
 import { ensureProjectExcel, syncProjectDayToExcel } from "../lib/siteWorkSync";
 import { buildExcelPreview } from "../lib/siteWorkExcel";
+import { buildProjectCostSummary, parseRangeQuery } from "../lib/siteExpenses";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -89,6 +90,27 @@ siteWorkRouter.get(
         isAdminView: false,
       }))
     );
+  })
+);
+
+siteWorkRouter.get(
+  "/projects/:id/cost-summary",
+  asyncHandler(async (req, res) => {
+    const projectId = req.params.id;
+    if (!(await assertAssigned(req, projectId))) {
+      res.status(403).json({ error: "Project not assigned" });
+      return;
+    }
+    const summary = await buildProjectCostSummary(
+      projectId,
+      parseRangeQuery(req.query as Record<string, unknown>, parseDateOnly)
+    );
+    if (!summary) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(summary);
   })
 );
 

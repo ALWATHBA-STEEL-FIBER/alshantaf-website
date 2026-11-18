@@ -612,6 +612,50 @@ export interface SiteWorkerDetail extends SiteWorker {
   };
 }
 
+export interface SiteProjectCostSummary {
+  project: {
+    id: string;
+    name: string;
+    code: string | null;
+    active: boolean;
+    coordinator: { id: string; name: string } | null;
+    workerCount: number;
+    recordCount: number;
+  };
+  range: { from: string | null; to: string | null };
+  kpis: {
+    expenses: string;
+    expenseCount: number;
+    labor: string;
+    laborPaid: string;
+    laborUnpaid: string;
+    grandTotal: string;
+    budget: string | null;
+    budgetRemaining: string | null;
+    budgetUsedPct: number | null;
+  };
+  hours: {
+    attendanceRows: number;
+    daysWorked: number;
+    totalRegular: string;
+    totalExtra: string;
+  };
+  byCategory: Array<{ key: string; label: string; amount: string }>;
+  note: string;
+  payouts: Array<{
+    id: string;
+    workerId: string;
+    workerName: string;
+    weekStart: string;
+    daysWorked: number;
+    totalExtraHours: string;
+    amount: string;
+    paid: boolean;
+    paidAt: string | null;
+  }>;
+  recentExpenses: SiteExpense[];
+}
+
 export interface SiteProjectDetail extends SiteProject {
   roster: Array<{
     workerId: string;
@@ -656,6 +700,7 @@ export interface SiteProjectDetail extends SiteProject {
     dailyPay: string;
     extraHourPay: string;
   }>;
+  costSummary?: SiteProjectCostSummary | null;
 }
 
 export interface SiteExcelPreview {
@@ -937,7 +982,7 @@ export interface SiteExpenseOverview {
     isCoordinator: boolean;
   }>;
   months: Array<{ month: string; project: string; company: string; total: string }>;
-  engineers: Array<{ id: string; name: string; active: boolean }>;
+  engineers: Array<{ id: string; name: string; active: boolean; role?: string; isCoordinator?: boolean }>;
 }
 
 export interface SiteDayPayload {

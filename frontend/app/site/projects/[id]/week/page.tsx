@@ -60,6 +60,12 @@ function WeekSheet({ engineerName }: { engineerName: string }) {
       showLogout
     >
       <div className="flex flex-wrap gap-2 mb-4">
+        <Link
+          href={`/site/projects/${projectId}/cost`}
+          className="h-10 px-3 rounded-xl bg-[#d4a84b]/25 text-[#0f342f] text-sm font-bold inline-flex items-center"
+        >
+          التكاليف والـ KPI
+        </Link>
         <button
           type="button"
           className="h-10 px-3 rounded-xl bg-white border border-[#e4ddd0] text-sm font-bold"
