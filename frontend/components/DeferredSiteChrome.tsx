@@ -13,6 +13,11 @@ const PresenceHeartbeat = dynamic(
   { ssr: false, loading: () => null }
 );
 
+const VisitorNamePrompt = dynamic(
+  () => import("@/components/VisitorNamePrompt").then((m) => m.VisitorNamePrompt),
+  { ssr: false, loading: () => null }
+);
+
 const AiAssistant = dynamic(() => import("@/components/AiAssistant").then((m) => m.AiAssistant), {
   ssr: false,
   loading: () => null,
@@ -23,6 +28,7 @@ export function DeferredSiteChrome() {
   return (
     <>
       <PresenceHeartbeat />
+      <VisitorNamePrompt />
       <CookieConsent />
       <AiAssistant />
       <StandaloneExternalLinks />

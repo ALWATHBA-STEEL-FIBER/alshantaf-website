@@ -59,7 +59,8 @@ const listingBaseSchema = z.object({
   phone: westernDigitsString(z.string().optional()),
   status: z.enum(["available", "reserved", "sold", "rented", "canceled"]).default("available"),
   publishStatus: z.enum(["published", "draft", "archived"]).default("published"),
-  featured: z.boolean().default(false),
+  featured: z.boolean().optional(),
+  importance: z.enum(["none", "golden", "platinum", "titanium"]).default("none"),
   presenterRole: z.enum(["owner", "presenter", "broker", "company", "other"]).optional().nullable(),
   presenterName: z.string().optional(),
   showPresenter: z.boolean().default(false),
@@ -130,6 +131,18 @@ function firstImage(media: { url: string; kind: string; position: number }[]) {
     .sort((a, b) => a.position - b.position)[0]?.url;
 }
 
+type OfferImportance = "none" | "golden" | "platinum" | "titanium";
+
+/** Keep `featured` in sync with titanium for older clients / homepage boosts. */
+function resolveImportance(input: { importance?: OfferImportance; featured?: boolean }): {
+  importance: OfferImportance;
+  featured: boolean;
+} {
+  const importance =
+    input.importance ?? (input.featured === true ? "titanium" : "none");
+  return { importance, featured: importance === "titanium" };
+}
+
 adminListingsRouter.post(
   "/",
   asyncHandler(async (req, res) => {
@@ -142,10 +155,13 @@ adminListingsRouter.post(
     const normalizedParcel = canonicalParcelList(input.parcel) ?? input.parcel;
     const listingNo = await nextListingNo(prisma, input.area);
     const ownerAccessCode = await nextOwnerAccessCode(prisma);
-    const { media, ...rest } = input;
+    const { media, featured: _featured, importance: _importance, ...rest } = input;
+    const { importance, featured } = resolveImportance(input);
     const listing = await prisma.listing.create({
       data: {
         ...rest,
+        importance,
+        featured,
         parcel: normalizedParcel,
         locationUrl: legacyCoordinates(input.latitude, input.longitude) ?? input.locationUrl,
         listingNo,
@@ -188,14 +204,22 @@ adminListingsRouter.patch(
       res.status(404).json({ error: "Listing not found" });
       return;
     }
-    const { media, ...rest } = input;
+    const { media, featured: _featured, importance: _importance, ...rest } = input;
     const normalizedParcel = canonicalParcelList(input.parcel) ?? input.parcel;
     const ownerAccessCode = existing.ownerAccessCode ?? (await nextOwnerAccessCode(prisma));
     const nextStatus = input.status ?? existing.status;
+    const importancePatch =
+      input.importance !== undefined || input.featured !== undefined
+        ? resolveImportance({
+            importance: input.importance,
+            featured: input.featured,
+          })
+        : null;
     const listing = await prisma.listing.update({
       where: { id: req.params.id },
       data: {
         ...rest,
+        ...(importancePatch ?? {}),
         ...(input.parcel !== undefined ? { parcel: normalizedParcel } : {}),
         ownerAccessCode,
         ...(input.latitude !== undefined && input.longitude !== undefined ? { locationUrl: legacyCoordinates(input.latitude, input.longitude) } : {}),
@@ -285,10 +309,19 @@ adminListingsRouter.patch(
 adminListingsRouter.patch(
   "/:id/feature",
   asyncHandler(async (req, res) => {
-    const { featured } = z.object({ featured: z.boolean() }).parse(req.body);
+    const body = z
+      .object({
+        featured: z.boolean().optional(),
+        importance: z.enum(["none", "golden", "platinum", "titanium"]).optional(),
+      })
+      .refine((v) => v.featured !== undefined || v.importance !== undefined, {
+        message: "featured or importance required",
+      })
+      .parse(req.body);
+    const { importance, featured } = resolveImportance(body);
     const listing = await prisma.listing.update({
       where: { id: req.params.id },
-      data: { featured },
+      data: { featured, importance },
       include: { media: true },
     });
     await audit({
@@ -296,6 +329,7 @@ adminListingsRouter.patch(
       action: featured ? "listing.feature" : "listing.unfeature",
       targetType: "listing",
       targetId: listing.id,
+      metadata: { importance },
       ip: req.ip,
     });
     res.json(serializeListing(listing));

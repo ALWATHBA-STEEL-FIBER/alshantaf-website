@@ -52,13 +52,16 @@ export function MeasureThreadsOverlay({
       ? snap.lengthM + (snap.closed || snap.liveSegmentM == null ? 0 : snap.liveSegmentM)
       : snap?.liveSegmentM ?? null;
 
+  // AR: top-left (clear of DLS stack). EN: top-right so it reads clearly on the map.
+  const positionStyle =
+    lang === "ar"
+      ? { top: "0.5rem", left: "3.35rem", right: "auto", bottom: "auto" }
+      : { top: "0.5rem", right: "0.5rem", left: "auto", bottom: "auto" };
+
   return (
     <div
-      className={`map-measure-overlay pointer-events-none absolute z-20 max-h-[42%] max-w-[min(18rem,72%)] overflow-y-auto rounded-xl border px-2.5 py-2 ${shell}`}
-      style={{
-        top: "0.5rem",
-        insetInlineStart: "0.5rem",
-      }}
+      className={`map-measure-overlay pointer-events-none absolute z-[40] max-h-[38%] max-w-[min(17rem,calc(100%-4rem))] overflow-y-auto rounded-xl border px-2.5 py-2 ${shell}`}
+      style={positionStyle}
       dir={lang === "ar" ? "rtl" : "ltr"}
     >
       {threads.length > 0 && (

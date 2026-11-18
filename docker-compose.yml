@@ -19,6 +19,9 @@ services:
   backend:
     build: ./backend
     restart: always
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,25 +35,41 @@ services:
       NODE_ENV: ${NODE_ENV}
       CHROMIUM_PATH: /usr/bin/chromium
       PUBLIC_SITE_URL: ${PUBLIC_SITE_URL:-https://alshantaf.com}
+      STEELFIBER_PUBLIC_SITE_URL: ${STEELFIBER_PUBLIC_SITE_URL:-https://alwathbasteelfiber.com}
+      STEELFIBER_ORDERS_ADMIN_KEY: ${STEELFIBER_ORDERS_ADMIN_KEY:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-info@alshantaf.com}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-luna}
+      OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.55}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
+      OPENAI_MAX_COMPLETION_TOKENS: ${OPENAI_MAX_COMPLETION_TOKENS:-900}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-allam-2-7b}
       GROQ_TEMPERATURE: ${GROQ_TEMPERATURE:-0.15}
       GROQ_GUARD_MODEL: ${GROQ_GUARD_MODEL:-meta-llama/llama-prompt-guard-2-86m}
       GROQ_GUARD_THRESHOLD: ${GROQ_GUARD_THRESHOLD:-0.85}
       GROQ_GUARD_ENABLED: ${GROQ_GUARD_ENABLED:-1}
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_HOSTNAMES: ${TURNSTILE_HOSTNAMES:-alshantaf.com,www.alshantaf.com}
+      SITE_WORK_DATA_DIR: /app/data/site-work
+      GOOGLE_DRIVE_FOLDER_ID: ${GOOGLE_DRIVE_FOLDER_ID:-}
+      GOOGLE_DRIVE_CREDENTIALS_JSON: ${GOOGLE_DRIVE_CREDENTIALS_JSON:-}
+      GOOGLE_DRIVE_CREDENTIALS_FILE: ${GOOGLE_DRIVE_CREDENTIALS_FILE:-}
     volumes:
       - ./backend/uploads:/app/uploads
+      - ./backend/data/site-work:/app/data/site-work
 
   frontend:
     build:
       context: ./frontend
       args:
         ADMIN_GATE_SECRET: ${ADMIN_GATE_SECRET}
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
     restart: always
     depends_on:
       - backend
@@ -59,6 +78,7 @@ services:
       BACKEND_INTERNAL_URL: http://backend:4000
       GOOGLE_SITE_VERIFICATION: ${GOOGLE_SITE_VERIFICATION:-}
       ADMIN_GATE_SECRET: ${ADMIN_GATE_SECRET}
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
 
   nginx:
     image: nginx:1.27-alpine

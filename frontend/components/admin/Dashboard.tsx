@@ -15,6 +15,7 @@ import {
   ListingsIcon,
   MapCheckIcon,
   MessageIcon,
+  MonitorIcon,
   SettingsIcon,
   ShieldIcon,
 } from "@/components/icons";
@@ -67,6 +68,7 @@ const QUICK_LINKS = [
   { href: "/admin/contact", key: "contact" as const, icon: MessageIcon },
   { href: "/admin/land-checks", key: "landChecks" as const, icon: MapCheckIcon },
   { href: "/admin/media", key: "media" as const, icon: FolderIcon },
+  { href: "/admin/monitor", key: "monitor" as const, icon: MonitorIcon },
   { href: "/admin/security", key: "security" as const, icon: ShieldIcon },
   { href: "/admin/settings", key: "settings" as const, icon: SettingsIcon },
 ];
@@ -147,6 +149,26 @@ export function Dashboard() {
       </section>
 
       {!hasAnyData && <EmptyState title={t.admin.emptyDashboardTitle} note={t.admin.emptyDashboardNote} />}
+
+      {data.uniqueIps && (
+        <section>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-lg font-bold text-green flex items-center gap-2">
+              <MonitorIcon className="w-4 h-4" />
+              {t.admin.uniqueIpsTitle}
+            </h2>
+            <Link href="/admin/monitor" className="text-xs font-bold text-green hover:text-gold">
+              {t.admin.sidebar.monitor} →
+            </Link>
+          </div>
+          <p className="text-xs text-ink-soft mb-3">{t.admin.uniqueIpsNote}</p>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <StatCard label={t.admin.uniqueIps1d} value={data.uniqueIps.day1.uniqueIps} href="/admin/monitor" icon={<MonitorIcon />} />
+            <StatCard label={t.admin.uniqueIps7d} value={data.uniqueIps.day7.uniqueIps} href="/admin/monitor" />
+            <StatCard label={t.admin.uniqueIps30d} value={data.uniqueIps.day30.uniqueIps} href="/admin/monitor" />
+          </div>
+        </section>
+      )}
 
       {data.siteViews && (
         <section>

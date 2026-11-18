@@ -9,9 +9,13 @@ export const ADMIN_FEATURES = [
   "contact",
   "landChecks",
   "media",
+  "monitor",
   "security",
   "users",
   "settings",
+  "orders",
+  "siteWork",
+  "invest",
 ] as const;
 
 export type AdminFeature = (typeof ADMIN_FEATURES)[number];

@@ -22,8 +22,8 @@ interface CascadeOption {
   display: string;
 }
 
-const inputClass = "w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold";
-const labelClass = "text-xs font-bold text-ink-soft mb-1 block";
+const inputClass = "w-full h-9 rounded-md border border-line bg-surface-2 px-2.5 text-[13px] outline-none focus:border-gold";
+const labelClass = "text-[11px] font-bold text-ink-soft";
 
 interface Props {
   governorate: string;
@@ -37,32 +37,51 @@ interface Props {
    * true (the public request form); admin editing of pre-existing listings passes false so
    * opening an older, not-yet-tagged listing doesn't block saving unrelated edits. */
   required?: boolean;
+  /** First step number shown beside the governorate field. Defaults to 1. */
+  startNumber?: number;
+  /** When false, labels render without sequence numbers. Defaults to true. */
+  numbered?: boolean;
+  /** `stack` = one field per line (public forms). `grid` = two columns (admin). */
+  layout?: "stack" | "grid" | "desktop-grid";
 }
 
 /** Closed DLS picklists only — no free-text / "other" fallback. Options come from the
  * same governorate→…→neighborhood cascade used on apex-dls.dls.gov.jo. */
 function CascadeField({
+  step,
   label,
+  placeholder,
   value,
   options,
   onChange,
   disabled,
   required,
   loading,
+  numbered,
 }: {
+  step?: number;
   label: string;
+  placeholder: string;
   value: string;
   options: CascadeOption[];
   onChange: (label: string) => void;
   disabled?: boolean;
   required?: boolean;
   loading?: boolean;
+  numbered?: boolean;
 }) {
   const matches = options.some((o) => o.label === value);
 
   return (
-    <div>
-      <label className={labelClass}>{label}</label>
+    <div className="w-full">
+      <div className="mb-1 flex items-center gap-1.5">
+        {numbered && step != null && (
+          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-green text-[10px] font-bold text-white">
+            {step}
+          </span>
+        )}
+        <label className={labelClass}>{label}</label>
+      </div>
       <select
         className={inputClass}
         value={matches ? value : ""}
@@ -71,7 +90,7 @@ function CascadeField({
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="" disabled>
-          {loading ? "…" : "—"}
+          {loading ? "…" : placeholder}
         </option>
         {options.map((o) => (
           <option key={o.value} value={o.label}>
@@ -83,8 +102,20 @@ function CascadeField({
   );
 }
 
-export function LocationCascade({ governorate, directorate, village, basin, neighborhood, onChange, labels, required = true }: Props) {
-  const { lang } = useLanguage();
+export function LocationCascade({
+  governorate,
+  directorate,
+  village,
+  basin,
+  neighborhood,
+  onChange,
+  labels,
+  required = true,
+  startNumber = 1,
+  numbered = true,
+  layout = "stack",
+}: Props) {
+  const { lang, t } = useLanguage();
   const [data, setData] = useState<DlsData>({ governorates: [] });
   const [loading, setLoading] = useState(true);
 
@@ -132,10 +163,24 @@ export function LocationCascade({ governorate, directorate, village, basin, neig
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, basin, neighborhood, neighborhoodKey]);
 
+  const n = startNumber;
+
   return (
-    <div className="grid sm:grid-cols-2 gap-3" dir={lang === "ar" ? "rtl" : "ltr"}>
+    <div
+      className={
+        layout === "grid"
+          ? "grid w-full gap-3 sm:grid-cols-2"
+          : layout === "desktop-grid"
+            ? "flex w-full flex-col gap-3 xl:grid xl:grid-cols-2 xl:gap-2.5"
+            : "flex w-full flex-col gap-3"
+      }
+      dir={lang === "ar" ? "rtl" : "ltr"}
+    >
       <CascadeField
+        step={n}
+        numbered={numbered}
         label={labels.governorate}
+        placeholder={t.owners.chooseGovernorate}
         value={governorate}
         options={governorateOptions}
         required={required}
@@ -143,7 +188,10 @@ export function LocationCascade({ governorate, directorate, village, basin, neig
         onChange={(v) => onChange({ governorate: v, directorate: "", village: "", basin: "", neighborhood: "" })}
       />
       <CascadeField
+        step={n + 1}
+        numbered={numbered}
         label={labels.directorate}
+        placeholder={t.owners.chooseDirectorate}
         value={directorate}
         options={directorateOptions}
         required={required}
@@ -152,7 +200,10 @@ export function LocationCascade({ governorate, directorate, village, basin, neig
         onChange={(v) => onChange({ directorate: v, village: "", basin: "", neighborhood: "" })}
       />
       <CascadeField
+        step={n + 2}
+        numbered={numbered}
         label={labels.village}
+        placeholder={t.owners.chooseVillage}
         value={village}
         options={villageOptions}
         required={required}
@@ -161,21 +212,39 @@ export function LocationCascade({ governorate, directorate, village, basin, neig
         onChange={(v) => onChange({ village: v, basin: "", neighborhood: "" })}
       />
       <CascadeField
+        step={n + 3}
+        numbered={numbered}
         label={labels.basin}
+        placeholder={t.owners.chooseBasin}
         value={basin}
         options={basinOptions}
         required={required}
         loading={loading}
         disabled={!village}
-        onChange={(v) => onChange({ basin: v, neighborhood: "" })}
+        onChange={(v) => {
+          // Set the sole neighborhood immediately so submit isn't blocked while
+          // waiting for the effect below (common when the option is "جدول الأحياء").
+          const next = withDisplay(
+            governorate && directorate && village
+              ? neighborhoodsForBasin(data, governorate, directorate, village, v)
+              : []
+          );
+          onChange({
+            basin: v,
+            neighborhood: next.length === 1 ? next[0].label : "",
+          });
+        }}
       />
       <CascadeField
+        step={n + 4}
+        numbered={numbered}
         label={labels.neighborhood}
+        placeholder={t.owners.chooseNeighborhood}
         value={neighborhood}
         options={neighborhoodOptions}
-        required={required}
+        required={required && neighborhoodOptions.length > 0}
         loading={loading}
-        disabled={!basin}
+        disabled={!basin || neighborhoodOptions.length === 0}
         onChange={(v) => onChange({ neighborhood: v })}
       />
     </div>

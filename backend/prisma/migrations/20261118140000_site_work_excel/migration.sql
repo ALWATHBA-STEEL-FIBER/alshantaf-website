@@ -1,0 +1,16 @@
+-- AlterTable
+ALTER TABLE "SiteProject" ADD COLUMN IF NOT EXISTS "excelFilename" TEXT;
+ALTER TABLE "SiteProject" ADD COLUMN IF NOT EXISTS "driveFileId" TEXT;
+ALTER TABLE "SiteProject" ADD COLUMN IF NOT EXISTS "weekCounter" INTEGER NOT NULL DEFAULT 0;
+
+-- AlterTable
+ALTER TABLE "SiteWorker" ADD COLUMN IF NOT EXISTS "fullName" TEXT;
+
+-- AlterTable
+ALTER TABLE "SiteProjectWorker" ADD COLUMN IF NOT EXISTS "displayName" TEXT;
+ALTER TABLE "SiteProjectWorker" ADD COLUMN IF NOT EXISTS "jobTitle" TEXT;
+ALTER TABLE "SiteProjectWorker" ADD COLUMN IF NOT EXISTS "hourlyRate" DECIMAL(8,3) NOT NULL DEFAULT 0;
+ALTER TABLE "SiteProjectWorker" ADD COLUMN IF NOT EXISTS "sortOrder" INTEGER NOT NULL DEFAULT 0;
+
+-- AlterTable
+ALTER TABLE "SiteDailyRecord" ADD COLUMN IF NOT EXISTS "otherWorks" TEXT;

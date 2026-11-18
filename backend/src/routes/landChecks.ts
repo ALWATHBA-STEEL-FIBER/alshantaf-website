@@ -8,6 +8,7 @@ import { locationFieldsSchema, legacyCoordinates } from "../lib/location";
 import { toWesternDigits, westernDigitsString } from "../lib/arabicDigits";
 import { audit } from "../lib/audit";
 import { industryTypeEnum } from "../lib/industryTypes";
+import { requireBotGuard } from "../middleware/botGuard";
 
 export const landChecksRouter = Router();
 
@@ -169,6 +170,7 @@ landChecksRouter.post(
 landChecksRouter.post(
   "/",
   createLimiter,
+  requireBotGuard("land_check"),
   asyncHandler(async (req, res) => {
     const input = landPayloadSchema.parse(req.body);
     if (!input.governorate || !input.directorate || !input.village || !input.basin || !input.neighborhood || !input.parcel) {

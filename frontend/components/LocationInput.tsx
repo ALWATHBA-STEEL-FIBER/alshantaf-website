@@ -1,7 +1,18 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useLanguage } from "@/lib/LanguageProvider";
+import { DlsMapControls, type EditTool, type SurfaceView } from "@/components/DlsMapControls";
+import { useParcelMapHeaderActions } from "@/components/ParcelMapWorkspace";
 import {
   coordsToString,
   formatMeters,
@@ -29,13 +40,19 @@ import {
 import { MeasureToolbar } from "@/components/MeasureToolbar";
 import { MeasureThreadsOverlay } from "@/components/MeasureThreadsOverlay";
 import { downloadParcelCadDxf } from "@/lib/parcelCadExport";
+import { localizePlaceName } from "@/lib/localizePlace";
+import {
+  ESRI_SAT_TILE_URL,
+  MAP_MAX_ZOOM,
+  MEASURE_MAX_ZOOM,
+  OSM_TILE_URL,
+  PARCEL_FIT_MAX_ZOOM,
+  osmTileOptions,
+  satTileOptions,
+} from "@/lib/mapTiles";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
-/** Normal browsing zoom ceiling (native tiles). */
-const MAP_MAX_ZOOM = 19;
-/** Extra overzoom while measuring for precise taps (tiles scale past native). */
-const MEASURE_MAX_ZOOM = 22;
 type SearchResult = { latitude: number; longitude: number; address: string };
 /** Leaflet-ready ring: [lat, lng][]. */
 export type ParcelRing = [number, number][];
@@ -72,7 +89,7 @@ interface Props {
   readOnly?: boolean;
   /** Official DLS cadastral outline — when set with lockEditing, drawn and not editable. */
   polygon?: ParcelRing[] | null;
-  /** Disallow pin/search edits (used when DLS geometry is authoritative). */
+  /** Disallow pin/search edits (e.g. while a DLS fetch is in flight). */
   lockEditing?: boolean;
   loading?: boolean;
   loadingLabel?: string;
@@ -96,6 +113,8 @@ interface Props {
     industryValue?: string;
     industryUserChoseNote?: string;
   } | null;
+  /** Official DLS_KEY — shown in fullscreen identity next to dimensions. */
+  dlsKey?: string | null;
   /** Optional per-ring parcel numbers (for multi-parcel offers). */
   parcelNumbers?: string[] | null;
   adjacentRoads?: AdjacentRoad[] | null;
@@ -108,6 +127,16 @@ interface Props {
   showMap?: boolean;
   /** When false, omit the 3D topography block. */
   showTopo?: boolean;
+  /**
+   * Desktop only: grow the map to fill leftover column height (parent must be a flex column).
+   * Mobile heights stay unchanged.
+   */
+  fillColumn?: boolean;
+  /**
+   * DLS-style full-bleed map: no card chrome, floating toolbar, fills parent.
+   * Parent should be a positioned box (e.g. ParcelMapWorkspace map slot).
+   */
+  variant?: "default" | "workspace";
 }
 
 function Spinner({ className = "w-5 h-5" }: { className?: string }) {
@@ -140,6 +169,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   perimeterM = null,
   showDimensions = true,
   blueprint = null,
+  dlsKey = null,
   parcelNumbers = null,
   adjacentRoads = null,
   onBlueprintReadyChange,
@@ -147,9 +177,13 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   onMapReadyChange,
   showMap = true,
   showTopo = true,
+  fillColumn = false,
+  variant = "default",
 }: Props,
   ref
 ) {
+  const workspace = variant === "workspace";
+  const workspaceChrome = useParcelMapHeaderActions();
   const { t, lang } = useLanguage();
   const lp = t.locationPicker;
   const sideViewRef = useRef<ParcelSideViewHandle>(null);
@@ -366,6 +400,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [message, setMessage] = useState("");
   const [mapReady, setMapReady] = useState(false);
   const [basemap, setBasemap] = useState<Basemap>("satellite");
+  const [surfaceView, setSurfaceView] = useState<SurfaceView>("map");
   const [drawDimensions, setDrawDimensions] = useState(true);
   const [mapFullscreen, setMapFullscreen] = useState(false);
   const [measureMode, setMeasureMode] = useState<MeasureMode>("off");
@@ -388,8 +423,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const dimensionLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const osmLayerRef = useRef<import("leaflet").TileLayer | null>(null);
   const satLayerRef = useRef<import("leaflet").TileLayer | null>(null);
+  const leafletRef = useRef<typeof import("leaflet") | null>(null);
   const basemapRef = useRef<Basemap>(basemap);
   basemapRef.current = basemap;
+  const prevSurfaceRef = useRef<SurfaceView>(surfaceView);
   const onMapReadyChangeRef = useRef(onMapReadyChange);
   onMapReadyChangeRef.current = onMapReadyChange;
   const onPinDropRef = useRef(onPinDrop);
@@ -476,8 +513,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       const start = selected ? ([selected.lat, selected.lng] as [number, number]) : DEFAULT_CENTER;
       const map = L.map(mapDivRef.current, {
-        zoomControl: true,
+        zoomControl: false,
         attributionControl: false,
+        preferCanvas: true,
         dragging: true,
         scrollWheelZoom: true,
         doubleClickZoom: !locked,
@@ -485,21 +523,9 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         maxZoom: MAP_MAX_ZOOM,
       }).setView(start, selected ? 16 : 8);
 
-      const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap",
-        maxNativeZoom: MAP_MAX_ZOOM,
-        maxZoom: MEASURE_MAX_ZOOM,
-        crossOrigin: true,
-      });
-      const sat = L.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        {
-          attribution: "© Esri",
-          maxNativeZoom: MAP_MAX_ZOOM,
-          maxZoom: MEASURE_MAX_ZOOM,
-          crossOrigin: true,
-        }
-      );
+      leafletRef.current = L;
+      const osm = L.tileLayer(OSM_TILE_URL, osmTileOptions());
+      const sat = L.tileLayer(ESRI_SAT_TILE_URL, satTileOptions());
       sat.addTo(map);
       osmLayerRef.current = osm;
       satLayerRef.current = sat;
@@ -627,8 +653,18 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   }, [mapReady, lang]);
 
   useEffect(() => {
-    measureToolRef.current?.setMode(measureMode);
-    if (measureMode === "off") setMeasureSnap(null);
+    // Prefer restore when turning tools on so we don't wipe threads (mirrors fullscreen).
+    if (measureMode === "off") {
+      measureToolRef.current?.setMode("off");
+    } else if (measureToolRef.current) {
+      const cur = measureSnap;
+      if (cur && (cur.threads.length > 0 || cur.points.length > 0)) {
+        measureToolRef.current.restoreSnapshot({ ...cur, mode: measureMode });
+      } else {
+        measureToolRef.current.setMode(measureMode);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [measureMode]);
 
   useEffect(() => {
@@ -720,6 +756,76 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     }
     window.setTimeout(() => map.invalidateSize({ animate: false }), 40);
   }, [basemap, mapReady]);
+
+  /** Tear down covered/stale tile layers and attach fresh ones — only reliable fix after topo. */
+  const reviveMapTiles = useCallback(() => {
+    const map = mapRef.current;
+    const L = leafletRef.current;
+    if (!map || !L) return;
+
+    const el = map.getContainer();
+    el.style.visibility = "visible";
+    el.style.opacity = "1";
+    el.style.pointerEvents = "";
+    el.removeAttribute("aria-hidden");
+
+    for (const ref of [osmLayerRef, satLayerRef]) {
+      const layer = ref.current;
+      if (!layer) continue;
+      try {
+        if (map.hasLayer(layer)) map.removeLayer(layer);
+      } catch {
+        /* ignore */
+      }
+      ref.current = null;
+    }
+
+    const osm = L.tileLayer(OSM_TILE_URL, {
+      ...osmTileOptions(),
+      updateWhenIdle: false,
+      updateWhenZooming: true,
+    });
+    const sat = L.tileLayer(ESRI_SAT_TILE_URL, {
+      ...satTileOptions(),
+      updateWhenIdle: false,
+      updateWhenZooming: true,
+    });
+    osmLayerRef.current = osm;
+    satLayerRef.current = sat;
+    (basemapRef.current === "satellite" ? sat : osm).addTo(map);
+
+    map.invalidateSize({ animate: false });
+    try {
+      const c = map.getCenter();
+      const z = map.getZoom();
+      map.setView([c.lat, c.lng], z, { animate: false });
+      // Force the tile grid to request again.
+      map.fire("viewreset");
+      map.fire("zoomend");
+      map.fire("moveend");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Leaving topography → rebuild tiles after the overlay unmounts.
+  useEffect(() => {
+    const prev = prevSurfaceRef.current;
+    prevSurfaceRef.current = surfaceView;
+    if (!mapReady || surfaceView !== "map" || prev !== "topo") return;
+
+    const run = () => reviveMapTiles();
+    const raf = window.requestAnimationFrame(run);
+    const t1 = window.setTimeout(run, 60);
+    const t2 = window.setTimeout(run, 250);
+    const t3 = window.setTimeout(run, 600);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+    };
+  }, [surfaceView, mapReady, reviveMapTiles]);
 
   // Inline map never enters fullscreen — portal mounts a separate Leaflet instance.
 
@@ -832,7 +938,11 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         polygonRef.current = layer;
 
         try {
-          map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 19, animate: false });
+          map.fitBounds(layer.getBounds(), {
+            padding: [40, 40],
+            maxZoom: PARCEL_FIT_MAX_ZOOM,
+            animate: false,
+          });
         } catch {
           /* ignore */
         }
@@ -949,7 +1059,12 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     setStatus("locating");
     setMessage("");
     navigator.geolocation.getCurrentPosition(
-      (position) => commit({ lat: position.coords.latitude, lng: position.coords.longitude }),
+      (position) => {
+        const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+        commit(coords);
+        const map = mapRef.current;
+        if (map) map.setView([coords.lat, coords.lng], Math.max(map.getZoom(), 16), { animate: true });
+      },
       () => {
         setStatus("error");
         setMessage(lp.unavailable);
@@ -957,6 +1072,226 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
   }
+
+  function zoomBy(delta: number) {
+    const map = mapRef.current;
+    if (!map) return;
+    if (delta > 0) map.zoomIn();
+    else map.zoomOut();
+  }
+
+  function goHomeView() {
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      const layer = polygonRef.current as unknown as { getBounds?: () => import("leaflet").LatLngBounds } | null;
+      const bounds = layer?.getBounds?.();
+      if (bounds?.isValid?.()) {
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: PARCEL_FIT_MAX_ZOOM, animate: true });
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+    if (selected) {
+      map.setView([selected.lat, selected.lng], 16, { animate: true });
+      return;
+    }
+    map.setView(DEFAULT_CENTER, 8, { animate: true });
+  }
+
+  function resetNorth() {
+    const map = mapRef.current;
+    if (!map) return;
+    // Leaflet maps are always north-up; nudge a soft re-center as the compass affordance.
+    const c = map.getCenter();
+    map.setView(c, map.getZoom(), { animate: true });
+  }
+
+  const editTool: EditTool | null =
+    measureMode === "distance" ? "lines" : measureMode === "area" ? "space" : null;
+
+  function setEditTool(tool: EditTool | null) {
+    if (tool === "lines") setMeasureMode("distance");
+    else if (tool === "space") setMeasureMode("area");
+    else setMeasureMode("off");
+  }
+
+  function setSurface(view: SurfaceView) {
+    if (view === "topo") setMeasureMode("off");
+    setSurfaceView(view);
+  }
+
+  const dlsCtrlLabels = {
+    zoomIn: lp.ctrlZoomIn,
+    zoomOut: lp.ctrlZoomOut,
+    tools: lp.ctrlTools,
+    toolsClose: lp.ctrlToolsClose,
+    edit: lp.ctrlEdit,
+    editLines: lp.ctrlEditLines,
+    editSpace: lp.ctrlEditSpace,
+    topo: lp.ctrlTopo,
+    topoMap: lp.ctrlTopoMap,
+    draw: lp.ctrlDraw,
+    measure: lp.ctrlMeasure,
+    locate: lp.ctrlLocate,
+    locating: lp.locating,
+    home: lp.ctrlHome,
+    layers: lp.ctrlLayers,
+    layersMap: lp.basemapMap,
+    layersSatellite: lp.basemapSatellite,
+    compass: lp.ctrlCompass,
+  };
+
+  const parcelIdentity = useMemo(
+    () => ({
+      governorate: blueprint?.governorate
+        ? localizePlaceName(blueprint.governorate, lang)
+        : null,
+      directorate: blueprint?.directorate
+        ? localizePlaceName(blueprint.directorate, lang)
+        : null,
+      basin: blueprint?.basin
+        ? localizePlaceName(blueprint.basin, lang)
+        : null,
+      neighborhood: blueprint?.neighborhood
+        ? localizePlaceName(blueprint.neighborhood, lang)
+        : null,
+      parcel: blueprint?.parcel?.trim() || null,
+      dlsKey: dlsKey?.trim() || null,
+    }),
+    [
+      blueprint?.governorate,
+      blueprint?.directorate,
+      blueprint?.basin,
+      blueprint?.neighborhood,
+      blueprint?.parcel,
+      dlsKey,
+      lang,
+    ]
+  );
+
+  const fullscreenLabels = {
+    basemapLabel: lp.basemapLabel,
+    basemapMap: lp.basemapMap,
+    basemapSatellite: lp.basemapSatellite,
+    dimensionsOnMap: lp.dimensionsOnMap,
+    identityTitle: lp.identityTitle,
+    identityGovernorate: lp.identityGovernorate,
+    identityDirectorate: lp.identityDirectorate,
+    identityBasin: lp.identityBasin,
+    identityNeighborhood: lp.identityNeighborhood,
+    identityParcel: lp.identityParcel,
+    identityDlsKey: lp.identityDlsKey,
+    dimensionsTitle: lp.dimensionsTitle,
+    dimensionsArea: lp.dimensionsArea,
+    dimensionsPerimeter: lp.dimensionsPerimeter,
+    dimensionsExtent: lp.dimensionsExtent,
+    streetInfoTitle: lp.streetInfoTitle,
+    streetWidthLabel: lp.streetWidthLabel,
+    streetWidthUnknown: lp.streetWidthUnknown,
+    streetUnnamed: lp.streetUnnamed,
+    streetSideNorth: lp.streetSideNorth,
+    streetSideSouth: lp.streetSideSouth,
+    streetSideEast: lp.streetSideEast,
+    streetSideWest: lp.streetSideWest,
+    exitFullscreen: lp.exitFullscreen,
+    measureEnter: lp.measureEnter,
+    measureExit: lp.measureExit,
+    measureLabel: lp.measureLabel,
+    measureDistance: lp.measureDistance,
+    measureArea: lp.measureArea,
+    measureTotal: lp.measureTotal,
+    measureClear: lp.measureClear,
+    measureFinish: lp.measureFinish,
+    measureUndo: lp.measureUndo,
+    measureNewLine: lp.measureNewLine,
+    measureThreads: lp.measureThreads,
+    measureSnapOn: lp.measureSnapOn,
+    measureEdgeSnap: lp.measureEdgeSnap,
+    measureLineSnap: lp.measureLineSnap,
+    measureFixed1m: lp.measureFixed1m,
+    measureFixed5m: lp.measureFixed5m,
+    measureLineColor: lp.measureLineColor,
+    measureHintDistance: lp.measureHintDistance,
+    measureHintArea: lp.measureHintArea,
+    measureExportCad: lp.measureExportCad,
+    measureExportCadHint: lp.measureExportCadHint,
+    useLocation: lp.use,
+    locating: lp.locating,
+    locationUnavailable: lp.unavailable,
+    ctrlZoomIn: lp.ctrlZoomIn,
+    ctrlZoomOut: lp.ctrlZoomOut,
+    ctrlDraw: lp.ctrlDraw,
+    ctrlMeasure: lp.ctrlMeasure,
+    ctrlTools: lp.ctrlTools,
+    ctrlToolsClose: lp.ctrlToolsClose,
+    ctrlEdit: lp.ctrlEdit,
+    ctrlEditLines: lp.ctrlEditLines,
+    ctrlEditSpace: lp.ctrlEditSpace,
+    ctrlTopo: lp.ctrlTopo,
+    ctrlTopoMap: lp.ctrlTopoMap,
+    ctrlLocate: lp.ctrlLocate,
+    ctrlHome: lp.ctrlHome,
+    ctrlLayers: lp.ctrlLayers,
+    ctrlCompass: lp.ctrlCompass,
+  };
+
+  const dlsControls = (
+    <DlsMapControls
+      labels={dlsCtrlLabels}
+      basemap={basemap}
+      editTool={editTool}
+      surfaceView={surfaceView}
+      locating={status === "locating"}
+      locateDisabled={locked}
+      topoDisabled={!showTopo}
+      onZoomIn={() => zoomBy(1)}
+      onZoomOut={() => zoomBy(-1)}
+      onEditToolChange={setEditTool}
+      onSurfaceViewChange={setSurface}
+      onLocate={useMyLocation}
+      onHome={goHomeView}
+      onToggleLayers={() => setBasemap((b) => (b === "satellite" ? "map" : "satellite"))}
+      onCompass={resetNorth}
+    />
+  );
+
+  const showTopoSurface = surfaceView === "topo" && showTopo;
+  const measuringOnMap = measuring && !showTopoSurface;
+
+  // Park fullscreen / exit-measure / back-to-map in the workspace header.
+  useLayoutEffect(() => {
+    if (!workspace || !workspaceChrome) return;
+    workspaceChrome.setHeaderHandlers({
+      onFullscreen: () => setMapFullscreen(true),
+      onExitMeasure: () => {
+        measureToolRef.current?.clear();
+        setMeasureMode("off");
+      },
+      onBackToMap: () => setSurface("map"),
+    });
+    workspaceChrome.setHeaderChrome({
+      fullscreenLabel: lp.fullscreen,
+      measureExitLabel: lp.measureExit,
+      showExitMeasure: measuringOnMap,
+      showBackToMap: showTopoSurface,
+      backToMapLabel: lp.ctrlTopoMap,
+    });
+  }, [
+    workspace,
+    workspaceChrome,
+    measuringOnMap,
+    showTopoSurface,
+    lp.fullscreen,
+    lp.measureExit,
+    lp.ctrlTopoMap,
+  ]);
+
+  useLayoutEffect(() => {
+    if (!workspace || !workspaceChrome) return;
+    return () => workspaceChrome.setHeaderChrome(null);
+  }, [workspace, workspaceChrome]);
 
   function clear() {
     if (locked) return;
@@ -1008,11 +1343,250 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       perimeterM != null ||
       extents);
 
+  const topoBlueprintMeta = {
+    lang,
+    brandName: lp.blueprintBrand,
+    sheetTitle: lp.blueprintSheetTitle,
+    topViewLabel: lp.blueprintTopView,
+    sideViewLabel: lp.blueprintSideView,
+    paramsLabel: lp.blueprintParams,
+    elevRangeLabel: lp.blueprintElevRange,
+    contourStepLabel: lp.blueprintContourStep,
+    approxNote: lp.blueprintApproxNote,
+    footerNote: lp.blueprintFooter,
+    governorate: blueprint?.governorate,
+    directorate: blueprint?.directorate,
+    village: blueprint?.village,
+    basin: blueprint?.basin,
+    neighborhood: blueprint?.neighborhood,
+    parcel: blueprint?.parcel,
+    address: address || undefined,
+    coordinates: value || undefined,
+    areaLabel,
+    areaSqm,
+    perimeterM,
+    notes: blueprint?.notes,
+    notesLabel: lp.blueprintNotes,
+    industryLabel: blueprint?.industryLabel,
+    industryValue: blueprint?.industryValue,
+    industryUserChoseNote: blueprint?.industryUserChoseNote ?? lp.blueprintZoningUserChose,
+    labels: {
+      governorate: lp.blueprintGovernorate,
+      directorate: lp.blueprintDirectorate,
+      village: lp.blueprintVillage,
+      basin: lp.blueprintBasin,
+      neighborhood: lp.blueprintNeighborhood,
+      parcel: lp.blueprintParcel,
+      address: lp.blueprintAddress,
+      coordinates: lp.blueprintCoordinates,
+      area: lp.blueprintArea,
+      perimeter: lp.blueprintPerimeter,
+      extent: lp.blueprintExtent,
+    },
+  } satisfies BlueprintMeta;
+
+  const topoViewPane = showTopo ? (
+    <ParcelSideView
+      ref={sideViewRef}
+      polygon={polygon}
+      title={lp.sideViewTitle}
+      note={lp.sideViewNote}
+      lengthLabel={lp.sideViewLength}
+      widthLabel={lp.sideViewWidth}
+      schematicNote={lp.sideViewSchematic}
+      disclaimer={lp.sideViewDisclaimer}
+      googleEarthCta={lp.sideViewGoogleEarthShort}
+      googleMapsCta={lp.sideViewGoogleMapsShort}
+      loadingLabel={lp.sideViewLoading}
+      fullscreenLabel={lp.fullscreen}
+      exitFullscreenLabel={lp.exitFullscreen}
+      lang={lang}
+      onReadyChange={handleReadyChange}
+      onSettledChange={onTopoSettledChange}
+      embedded
+      fillSurface={showTopoSurface}
+      adjacentRoads={roads}
+      blueprintMeta={topoBlueprintMeta}
+    />
+  ) : null;
+
+  if (workspace) {
+    return (
+      <div className="absolute inset-0 flex flex-col overflow-hidden" dir={lang === "ar" ? "rtl" : "ltr"}>
+        {showMap && (
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            {/* Hide map widget stack while topography owns the stage — avoids control collisions.
+                Keep tools inside the map stage (below the mobile sheet stacking context). */}
+            {!showTopoSurface ? (
+              <div className="pointer-events-auto absolute left-1.5 top-1.5 z-20 max-h-[calc(100%-0.75rem)] overflow-y-auto overscroll-contain sm:left-3 sm:top-3">
+                {dlsControls}
+              </div>
+            ) : null}
+            {measuringOnMap && (
+              <div className="absolute inset-x-2 bottom-14 z-20 sm:inset-x-3 sm:bottom-16">
+                <div className="overflow-x-auto rounded-lg border border-white/20 bg-green/90 p-1.5 shadow-lg backdrop-blur-sm">
+                  <MeasureToolbar
+                    mode={measureMode}
+                    snap={measureSnap}
+                    hasParcelSnap={snapTargets.length > 0}
+                    edgeSnap={edgeSnap}
+                    onEdgeSnapChange={setEdgeSnap}
+                    lineSnap={lineSnap}
+                    onLineSnapChange={setLineSnap}
+                    fixedSnapM={fixedSnapM}
+                    onFixedSnapMChange={setFixedSnapM}
+                    lineColor={lineColor}
+                    onLineColorChange={setLineColor}
+                    lang={lang}
+                    variant="dark"
+                    compact
+                    labels={measureLabels}
+                    onEnter={() => setMeasureMode("distance")}
+                    onModeChange={(m) => setMeasureMode(m)}
+                    onUndo={() => measureToolRef.current?.undo()}
+                    onClear={() => measureToolRef.current?.clear()}
+                    onFinish={() => measureToolRef.current?.finish()}
+                    onNewLine={() => measureToolRef.current?.newThread()}
+                    onExportCad={exportArchitectureCad}
+                    canExportCad={Boolean(polygon?.[0]?.length)}
+                  />
+                </div>
+              </div>
+            )}
+            {(loading || hint) && !showTopoSurface && (
+              <div className="pointer-events-none absolute inset-x-2 bottom-2 z-20 sm:inset-x-3 sm:bottom-3">
+                <p className="inline-flex max-w-[min(100%,24rem)] rounded-lg border border-white/15 bg-green/85 px-2.5 py-1.5 text-[10px] font-semibold leading-snug text-white/90 shadow-lg backdrop-blur-sm">
+                  {loading && loadingLabel ? loadingLabel : hint}
+                </p>
+              </div>
+            )}
+
+            <div className="absolute inset-0 z-0 overflow-hidden">
+              <div
+                ref={mapDivRef}
+                className="location-map-pane absolute inset-0 z-0 h-full w-full bg-[#071816]"
+                style={
+                  showTopoSurface
+                    ? { visibility: "hidden", pointerEvents: "none" }
+                    : { visibility: "visible" }
+                }
+              />
+              {/* Topo replaces the map stage in place — edge-to-edge, no nested frames. */}
+              {showTopoSurface ? (
+                <div className="absolute inset-0 z-[5] overflow-hidden bg-[#071816]">
+                  {Boolean(polygon?.[0]?.length) && !loading ? (
+                    topoViewPane
+                  ) : (
+                    <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 px-4 text-center">
+                      <p className="max-w-xs text-[12px] font-bold leading-relaxed text-gold-2">
+                        {loading
+                          ? loadingLabel || lp.sideViewLoading
+                          : lang === "ar"
+                            ? "اختر القطعة من النموذج أو الخريطة لعرض الطبوغرافيا ثلاثية الأبعاد."
+                            : "Select a parcel from the form or map to load the 3D topography."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+              {/* Print/blueprint target when map is showing (keeps owner print working). */}
+              {showTopo && !showTopoSurface ? (
+                <div className="pointer-events-none fixed -left-[120vw] top-0 z-0 h-[70vh] w-[70vw] overflow-hidden opacity-0" aria-hidden>
+                  {topoViewPane}
+                </div>
+              ) : null}
+              {measuring && !showTopoSurface && (
+                <MeasureThreadsOverlay
+                  snap={measureSnap}
+                  lang={lang}
+                  variant="dark"
+                  labels={{
+                    measureThreads: lp.measureThreads,
+                    measureDistance: lp.measureDistance,
+                    measureArea: lp.measureArea,
+                    measureTotal: lp.measureTotal,
+                    measureClear: lp.measureClear,
+                    dimensionsArea: lp.dimensionsArea,
+                  }}
+                  onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
+                />
+              )}
+              {loading && !showTopoSurface && (
+                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/35 px-4 text-center">
+                  <Spinner className="h-7 w-7 border-white/25 border-t-gold" />
+                  <p className="text-sm font-bold text-white">{loadingLabel || lp.loading}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <MapFullscreenPortal
+          open={mapFullscreen}
+          onClose={() => {
+            setMapFullscreen(false);
+            const snap = measureSnap;
+            if (snap && measureToolRef.current) {
+              window.setTimeout(() => {
+                measureToolRef.current?.restoreSnapshot(snap);
+              }, 0);
+            }
+          }}
+          locked={locked}
+          onPickLocation={async (coords) => {
+            if (locked) return;
+            commit(coords);
+            await onPinDropRef.current?.(coords);
+          }}
+          basemap={basemap}
+          onBasemapChange={setBasemap}
+          drawDimensions={drawDimensions}
+          onDrawDimensionsChange={setDrawDimensions}
+          showDimensions={showDimensions}
+          measureMode={measureMode}
+          onMeasureModeChange={setMeasureMode}
+          measureSnapshot={measureSnap}
+          onMeasureSnapshotChange={setMeasureSnap}
+          edgeSnap={edgeSnap}
+          onEdgeSnapChange={setEdgeSnap}
+          lineSnap={lineSnap}
+          onLineSnapChange={setLineSnap}
+          fixedSnapM={fixedSnapM}
+          onFixedSnapMChange={setFixedSnapM}
+          lineColor={lineColor}
+          onLineColorChange={setLineColor}
+          polygon={polygon}
+          selected={selected}
+          perimeterM={perimeterM}
+          areaLabel={areaLabel}
+          areaSqm={areaSqm}
+          extents={extents}
+          parcelNumber={blueprint?.parcel?.trim() || null}
+          parcelNumbers={parcelNumbers}
+          parcelIdentity={parcelIdentity}
+          adjacentRoads={roads}
+          contextParcels={contextParcels}
+          showContextGrid={showContextGrid}
+          onToggleContextGrid={() => setShowContextGrid((v) => !v)}
+          parcelLabel={lp.blueprintParcel}
+          lang={lang}
+          labels={fullscreenLabels}
+          surfaceView={surfaceView}
+          onSurfaceViewChange={setSurface}
+          showTopo={showTopo}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-4" dir={lang === "ar" ? "rtl" : "ltr"}>
+    <div
+      className={fillColumn ? "space-y-4 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:gap-3 xl:space-y-0" : "space-y-4"}
+      dir={lang === "ar" ? "rtl" : "ltr"}
+    >
       {(showMap || !locked) && (
       <section
-        className="rounded-2xl border border-line bg-surface-2/55 p-3 sm:p-4"
+        className={`rounded-2xl border border-line bg-surface-2/55 p-3 sm:p-4 ${fillColumn ? "xl:shrink-0" : ""}`}
         aria-label={locked ? lp.viewLabel : lp.pickingLabel}
       >
       {!locked && (
@@ -1083,10 +1657,12 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       {showMap && (
       <section
-        className="location-map-section w-full rounded-2xl border-2 border-green bg-white p-3 sm:p-4 shadow-sm"
+        className={`location-map-section w-full rounded-2xl border-2 border-green bg-white p-3 sm:p-4 shadow-sm ${
+          fillColumn ? "xl:flex xl:min-h-0 xl:flex-1 xl:flex-col" : ""
+        }`}
         aria-label={lp.mapSectionTitle}
       >
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className={`mb-3 flex flex-wrap items-center justify-between gap-2 ${fillColumn ? "xl:mb-2 xl:shrink-0" : ""}`}>
           <h3 className="text-sm font-bold text-green tracking-wide">{lp.mapSectionTitle}</h3>
           {blueprint?.parcel?.trim() && (
             <p className="text-xs font-bold text-ink tabular-nums">
@@ -1096,7 +1672,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           )}
         </div>
 
-      <div ref={mapShellRef} className="location-map-shell flex flex-col gap-2">
+      <div
+        ref={mapShellRef}
+        className={`location-map-shell flex flex-col gap-2 ${fillColumn ? "xl:min-h-0 xl:flex-1" : ""}`}
+      >
         <div className="location-map-toolbar shrink-0 flex flex-wrap items-center justify-end gap-2 rounded-xl border border-line bg-white px-2 py-2">
           <div
             className="inline-flex rounded-full border border-line bg-surface-2 p-0.5"
@@ -1229,12 +1808,52 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           />
         )}
 
-        <div className="relative z-0 overflow-hidden rounded-xl border border-line isolate">
+        <div
+          className={`relative z-0 isolate overflow-hidden rounded-xl border border-line ${
+            fillColumn
+              ? "h-72 sm:h-[28rem] xl:h-auto xl:min-h-[14rem] xl:flex-1"
+              : "h-72 sm:h-[28rem]"
+          }`}
+        >
+          {!(surfaceView === "topo" && showTopo) ? (
+            <div className="absolute left-2 top-2 z-50">{dlsControls}</div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSurface("map")}
+              className="absolute right-2 top-2 z-50 inline-flex h-9 items-center gap-1.5 rounded-md bg-gold px-3 text-[11px] font-bold text-green shadow-sm"
+              aria-label={lp.ctrlTopoMap}
+            >
+              {lp.ctrlTopoMap}
+            </button>
+          )}
           <div
             ref={mapDivRef}
-            className="location-map-pane relative z-0 w-full h-72 sm:h-[28rem] overflow-hidden bg-[#e8eef0]"
+            className="location-map-pane absolute inset-0 z-0 h-full w-full overflow-hidden bg-[#e8eef0]"
+            style={
+              surfaceView === "topo" && showTopo
+                ? { visibility: "hidden", pointerEvents: "none" }
+                : { visibility: "visible" }
+            }
           />
-          {measuring && (
+          {surfaceView === "topo" && showTopo ? (
+            <div className="absolute inset-0 z-[5] overflow-hidden bg-[#071816]">
+              {Boolean(polygon?.[0]?.length) && !loading ? (
+                topoViewPane
+              ) : (
+                <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-3 px-4 text-center">
+                  <p className="max-w-xs text-[12px] font-bold leading-relaxed text-gold-2">
+                    {loading
+                      ? loadingLabel || lp.sideViewLoading
+                      : lang === "ar"
+                        ? "اختر القطعة من النموذج أو الخريطة لعرض الطبوغرافيا ثلاثية الأبعاد."
+                        : "Select a parcel from the form or map to load the 3D topography."}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : null}
+          {measuring && surfaceView !== "topo" && (
             <MeasureThreadsOverlay
               snap={measureSnap}
               lang={lang}
@@ -1250,52 +1869,29 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
             />
           )}
-          {loading && (
-            <div className="absolute inset-0 z-30 bg-white/75 flex flex-col items-center justify-center gap-3 px-4 text-center">
-              <Spinner className="w-7 h-7" />
-              <p className="text-sm font-bold text-ink">{loadingLabel || lp.loading}</p>
+          {loading && surfaceView !== "topo" && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-white/55 px-4 text-center">
+              <Spinner className="h-7 w-7" />
+              <p className="text-sm font-bold text-green">{loadingLabel || lp.loading}</p>
             </div>
           )}
+          <p className="pointer-events-none absolute bottom-1.5 right-2 z-[20] rounded bg-black/55 px-2 py-0.5 text-[10px] text-white/95">
+            {basemap === "map" ? "© OpenStreetMap" : "© Esri"}
+          </p>
         </div>
-
-        {hasDimensions && !loading && !measuring && (
-          <div className="shrink-0 rounded-xl border border-line bg-surface-2/80 px-3 py-2">
-            <p className="text-[10px] font-bold tracking-wide mb-1 text-green">{lp.dimensionsTitle}</p>
-            <ul className="space-y-0.5 text-[11px] leading-snug text-ink">
-              {blueprint?.parcel?.trim() && (
-                <li>
-                  <span className="text-ink-soft">{lp.blueprintParcel}: </span>
-                  <b>{blueprint.parcel.trim()}</b>
-                </li>
-              )}
-              {(areaLabel || areaSqm != null) && (
-                <li>
-                  <span className="text-ink-soft">{lp.dimensionsArea}: </span>
-                  <b>{areaLabel || `${areaSqm!.toLocaleString("en-JO")} m²`}</b>
-                </li>
-              )}
-              {perimeterM != null && perimeterM > 0 && (
-                <li>
-                  <span className="text-ink-soft">{lp.dimensionsPerimeter}: </span>
-                  <b>{formatMeters(perimeterM, lang)}</b>
-                </li>
-              )}
-              {extents && (
-                <li>
-                  <span className="text-ink-soft">{lp.dimensionsExtent}: </span>
-                  <b>
-                    {formatMeters(extents.lengthM, lang)} × {formatMeters(extents.widthM, lang)}
-                  </b>
-                </li>
-              )}
-            </ul>
-          </div>
-        )}
       </div>
 
       <MapFullscreenPortal
         open={mapFullscreen}
-        onClose={() => setMapFullscreen(false)}
+        onClose={() => {
+          setMapFullscreen(false);
+          const snap = measureSnap;
+          if (snap && measureToolRef.current) {
+            window.setTimeout(() => {
+              measureToolRef.current?.restoreSnapshot(snap);
+            }, 0);
+          }
+        }}
         locked={locked}
         onPickLocation={async (coords) => {
           if (locked) return;
@@ -1309,6 +1905,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         showDimensions={showDimensions}
         measureMode={measureMode}
         onMeasureModeChange={setMeasureMode}
+        measureSnapshot={measureSnap}
+        onMeasureSnapshotChange={setMeasureSnap}
         edgeSnap={edgeSnap}
         onEdgeSnapChange={setEdgeSnap}
         lineSnap={lineSnap}
@@ -1325,55 +1923,17 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         extents={extents}
         parcelNumber={blueprint?.parcel?.trim() || null}
         parcelNumbers={parcelNumbers}
+        parcelIdentity={parcelIdentity}
         adjacentRoads={roads}
         contextParcels={contextParcels}
         showContextGrid={showContextGrid}
         onToggleContextGrid={() => setShowContextGrid((v) => !v)}
         parcelLabel={lp.blueprintParcel}
         lang={lang}
-        labels={{
-          basemapLabel: lp.basemapLabel,
-          basemapMap: lp.basemapMap,
-          basemapSatellite: lp.basemapSatellite,
-          dimensionsOnMap: lp.dimensionsOnMap,
-          dimensionsTitle: lp.dimensionsTitle,
-          dimensionsArea: lp.dimensionsArea,
-          dimensionsPerimeter: lp.dimensionsPerimeter,
-          dimensionsExtent: lp.dimensionsExtent,
-          streetInfoTitle: lp.streetInfoTitle,
-          streetWidthLabel: lp.streetWidthLabel,
-          streetWidthUnknown: lp.streetWidthUnknown,
-          streetUnnamed: lp.streetUnnamed,
-          streetSideNorth: lp.streetSideNorth,
-          streetSideSouth: lp.streetSideSouth,
-          streetSideEast: lp.streetSideEast,
-          streetSideWest: lp.streetSideWest,
-          exitFullscreen: lp.exitFullscreen,
-          measureEnter: lp.measureEnter,
-          measureExit: lp.measureExit,
-          measureLabel: lp.measureLabel,
-          measureDistance: lp.measureDistance,
-          measureArea: lp.measureArea,
-          measureTotal: lp.measureTotal,
-          measureClear: lp.measureClear,
-          measureFinish: lp.measureFinish,
-          measureUndo: lp.measureUndo,
-          measureNewLine: lp.measureNewLine,
-          measureThreads: lp.measureThreads,
-          measureSnapOn: lp.measureSnapOn,
-          measureEdgeSnap: lp.measureEdgeSnap,
-          measureLineSnap: lp.measureLineSnap,
-          measureFixed1m: lp.measureFixed1m,
-          measureFixed5m: lp.measureFixed5m,
-          measureLineColor: lp.measureLineColor,
-          measureHintDistance: lp.measureHintDistance,
-          measureHintArea: lp.measureHintArea,
-          measureExportCad: lp.measureExportCad,
-          measureExportCadHint: lp.measureExportCadHint,
-          useLocation: lp.use,
-          locating: lp.locating,
-          locationUnavailable: lp.unavailable,
-        }}
+        labels={fullscreenLabels}
+        surfaceView={surfaceView}
+        onSurfaceViewChange={setSurface}
+        showTopo={showTopo}
       />
 
       <p className="mt-2 text-[10px] text-ink-soft">
@@ -1386,73 +1946,32 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       </section>
       )}
 
-      {showTopo && Boolean(polygon?.[0]?.length) && !loading && (
+      {showTopo && surfaceView !== "topo" && (
         <section
-          className="location-topo-section w-full rounded-2xl border-2 border-white bg-gradient-to-br from-[#0a1f1c] via-[#0f342f] to-[#0a1f1c] p-3 sm:p-4 shadow-sm ring-1 ring-black/10"
+          className={`location-topo-section w-full rounded-2xl border-2 border-white bg-gradient-to-br from-[#0a1f1c] via-[#0f342f] to-[#0a1f1c] p-3 sm:p-4 shadow-sm ring-1 ring-black/10 ${
+            fillColumn ? "xl:shrink-0" : ""
+          }`}
           aria-label={lp.topoSectionTitle}
         >
           <h3 className="text-sm font-bold text-gold tracking-wide mb-1 px-1">{lp.topoSectionTitle}</h3>
-          <ParcelSideView
-            ref={sideViewRef}
-            polygon={polygon}
-            title={lp.sideViewTitle}
-            note={lp.sideViewNote}
-            lengthLabel={lp.sideViewLength}
-            widthLabel={lp.sideViewWidth}
-            schematicNote={lp.sideViewSchematic}
-            disclaimer={lp.sideViewDisclaimer}
-            googleEarthCta={lp.sideViewGoogleEarthShort}
-            googleMapsCta={lp.sideViewGoogleMapsShort}
-            loadingLabel={lp.sideViewLoading}
-            fullscreenLabel={lp.fullscreen}
-            exitFullscreenLabel={lp.exitFullscreen}
-            lang={lang}
-            onReadyChange={handleReadyChange}
-            onSettledChange={onTopoSettledChange}
-            embedded
-            adjacentRoads={roads}
-            blueprintMeta={{
-              lang,
-              brandName: lp.blueprintBrand,
-              sheetTitle: lp.blueprintSheetTitle,
-              topViewLabel: lp.blueprintTopView,
-              sideViewLabel: lp.blueprintSideView,
-              paramsLabel: lp.blueprintParams,
-              elevRangeLabel: lp.blueprintElevRange,
-              contourStepLabel: lp.blueprintContourStep,
-              approxNote: lp.blueprintApproxNote,
-              footerNote: lp.blueprintFooter,
-              governorate: blueprint?.governorate,
-              directorate: blueprint?.directorate,
-              village: blueprint?.village,
-              basin: blueprint?.basin,
-              neighborhood: blueprint?.neighborhood,
-              parcel: blueprint?.parcel,
-              address: address || undefined,
-              coordinates: value || undefined,
-              areaLabel,
-              areaSqm,
-              perimeterM,
-              notes: blueprint?.notes,
-              notesLabel: lp.blueprintNotes,
-              industryLabel: blueprint?.industryLabel,
-              industryValue: blueprint?.industryValue,
-              industryUserChoseNote: blueprint?.industryUserChoseNote ?? lp.blueprintZoningUserChose,
-              labels: {
-                governorate: lp.blueprintGovernorate,
-                directorate: lp.blueprintDirectorate,
-                village: lp.blueprintVillage,
-                basin: lp.blueprintBasin,
-                neighborhood: lp.blueprintNeighborhood,
-                parcel: lp.blueprintParcel,
-                address: lp.blueprintAddress,
-                coordinates: lp.blueprintCoordinates,
-                area: lp.blueprintArea,
-                perimeter: lp.blueprintPerimeter,
-                extent: lp.blueprintExtent,
-              },
-            } satisfies BlueprintMeta}
-          />
+          {Boolean(polygon?.[0]?.length) && !loading ? (
+            topoViewPane
+          ) : (
+            <div className="mt-2 flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-lg border border-gold/25 bg-[#071816] px-4 py-8 text-center">
+              <div className="relative h-16 w-28 opacity-70" aria-hidden>
+                <span className="absolute inset-x-4 bottom-2 h-8 rounded-sm bg-gradient-to-t from-gold/35 to-gold/5" />
+                <span className="absolute inset-x-6 bottom-5 h-6 rounded-sm bg-gradient-to-t from-gold/45 to-transparent" />
+                <span className="absolute left-8 right-10 bottom-8 h-5 rounded-sm bg-gradient-to-t from-gold/55 to-transparent" />
+              </div>
+              <p className="max-w-xs text-[12px] font-bold leading-relaxed text-gold-2">
+                {loading
+                  ? loadingLabel || lp.sideViewLoading
+                  : lang === "ar"
+                    ? "اختر القطعة من النموذج أو الخريطة لعرض الطبوغرافيا ثلاثية الأبعاد."
+                    : "Select a parcel from the form or map to load the 3D topography."}
+              </p>
+            </div>
+          )}
         </section>
       )}
       {message && (

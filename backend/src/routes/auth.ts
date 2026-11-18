@@ -13,6 +13,7 @@ import {
 import { requireAdmin } from "../middleware/auth";
 import { audit } from "../lib/audit";
 import { asyncHandler } from "../lib/asyncHandler";
+import { requireBotGuard } from "../middleware/botGuard";
 
 export const authRouter = Router();
 
@@ -40,6 +41,7 @@ function requestIsSecure(req: { get: (n: string) => string | undefined; secure?:
 authRouter.post(
   "/login",
   loginLimiter,
+  requireBotGuard("login"),
   asyncHandler(async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email } });

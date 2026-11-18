@@ -17,6 +17,7 @@ import { adminUsersRouter } from "./routes/adminUsers";
 import { adminAuditRouter } from "./routes/adminAudit";
 import { adminDlsRouter } from "./routes/adminDls";
 import { presenceRouter, adminPresenceRouter } from "./routes/presence";
+import { adminMonitorRouter } from "./routes/adminMonitor";
 import { teamRouter } from "./routes/team";
 import { locationRouter } from "./routes/location";
 import { landChecksRouter } from "./routes/landChecks";
@@ -26,7 +27,16 @@ import { adminContactRequestsRouter } from "./routes/adminContactRequests";
 import { ownerListingsRouter } from "./routes/ownerListings";
 import { assistantRouter } from "./routes/assistant";
 import { adminAssistantKnowledgeRouter } from "./routes/adminAssistantKnowledge";
+import { adminAiConfigRouter } from "./routes/adminAiConfig";
 import { marketIntelligenceRouter, adminMarketIntelligenceRouter } from "./routes/marketIntelligence";
+import { captchaRouter } from "./routes/captcha";
+import { adminOrdersRouter } from "./routes/adminOrders";
+import { publicOrdersRouter } from "./routes/publicOrders";
+import { siteAuthRouter } from "./routes/siteAuth";
+import { siteWorkRouter } from "./routes/siteWork";
+import { siteExpensesRouter } from "./routes/siteExpenses";
+import { adminSiteWorkRouter } from "./routes/adminSiteWork";
+import { investRouter } from "./invest/routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 /** Internal craft signature (wal8y) — HTTP header only, not public UI copy. */
@@ -58,6 +68,7 @@ app.use(
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
+app.use("/api/captcha", captchaRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/listings", listingsRouter);
 app.use("/api/owner/listings", ownerListingsRouter);
@@ -74,6 +85,7 @@ app.use("/api/contact-requests", contactRequestsRouter);
 app.use("/api/admin/contact-requests", adminContactRequestsRouter);
 app.use("/api/admin/settings", adminSettingsRouter);
 app.use("/api/admin/assistant-knowledge", adminAssistantKnowledgeRouter);
+app.use("/api/admin/ai-config", adminAiConfigRouter);
 app.use("/api/admin/dashboard", adminDashboardRouter);
 app.use("/api/admin/media", adminMediaRouter);
 app.use("/api/admin/standby", adminStandbyRouter);
@@ -82,8 +94,16 @@ app.use("/api/admin/audit", adminAuditRouter);
 app.use("/api/admin/dls", adminDlsRouter);
 app.use("/api/presence", presenceRouter);
 app.use("/api/admin/presence", adminPresenceRouter);
+app.use("/api/admin/monitor", adminMonitorRouter);
 app.use("/api/assistant", assistantRouter);
 app.use("/api/market-intelligence", marketIntelligenceRouter);
 app.use("/api/admin/market-intelligence", adminMarketIntelligenceRouter);
+app.use("/api/admin/orders", adminOrdersRouter);
+app.use("/api/public/orders", publicOrdersRouter);
+app.use("/api/site/auth", siteAuthRouter);
+app.use("/api/site/expenses", siteExpensesRouter);
+app.use("/api/site", siteWorkRouter);
+app.use("/api/invest", investRouter);
+app.use("/api/admin/site-work", adminSiteWorkRouter);
 
 app.use(errorHandler);

@@ -28,7 +28,37 @@ import type { Listing } from "@/lib/types";
 import { LocationInput, type LocationInputHandle } from "@/components/LocationInput";
 import { DlsPricingHint } from "@/components/DlsPricingHint";
 import { RegulationGuide } from "@/components/RegulationGuide";
+import { OfferImportanceBadge } from "@/components/OfferImportanceBadge";
 import { useAnalyticsAllowed } from "@/components/CookieConsent";
+
+function OfferVideo({ src, label }: { src: string; label: string }) {
+  const [buffering, setBuffering] = useState(true);
+
+  return (
+    <div className="w-full sm:w-[min(88vw,420px)] rounded-2xl border border-line bg-white overflow-hidden">
+      <div className="px-3 py-2 border-b border-line text-[11px] font-bold text-green">{label}</div>
+      <div className="relative bg-black">
+        <video
+          key={src}
+          src={src}
+          controls
+          playsInline
+          preload="metadata"
+          className="w-full aspect-video object-contain"
+          onLoadStart={() => setBuffering(true)}
+          onWaiting={() => setBuffering(true)}
+          onCanPlay={() => setBuffering(false)}
+          onPlaying={() => setBuffering(false)}
+        />
+        {buffering && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="h-11 w-11 rounded-full border-2 border-white/25 border-t-gold animate-spin" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function OfferDetail({ listing }: { listing: Listing }) {
   const { t, lang } = useLanguage();
@@ -725,16 +755,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
           <div className="mt-5">
             <h2 className="text-[11px] font-bold text-gold tracking-wide mb-3">{t.offers.filesLabel}</h2>
             <div className="flex flex-col gap-3 sm:offer-media-rail">
-              {listing.video && (
-                <div className="w-full sm:w-[min(88vw,420px)] rounded-2xl border border-line bg-white overflow-hidden">
-                  <div className="px-3 py-2 border-b border-line text-[11px] font-bold text-green">
-                    {t.offers.videoLabel}
-                  </div>
-                  <video controls className="w-full aspect-video bg-black" preload="metadata">
-                    <source src={listing.video} />
-                  </video>
-                </div>
-              )}
+              {listing.video && <OfferVideo src={listing.video} label={t.offers.videoLabel} />}
               {listing.document && (
                 <button
                   type="button"
@@ -762,11 +783,7 @@ export function OfferDetail({ listing }: { listing: Listing }) {
             <span dir="ltr" className="text-xs font-mono text-green bg-surface-2 px-2.5 py-1 rounded-full">
               {listing.listingNo}
             </span>
-            {listing.featured && (
-              <span className="text-[10px] font-bold bg-gold text-[#152126] px-2.5 py-1 rounded-full">
-                {t.offers.featured}
-              </span>
-            )}
+            <OfferImportanceBadge importance={listing.importance ?? (listing.featured ? "titanium" : "none")} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2.5">
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-balance">{title}</h1>

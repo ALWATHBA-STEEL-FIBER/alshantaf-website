@@ -1,75 +1,142 @@
-export type MarketMetric = {
-  metricKey: string;
-  metricName: string;
-  category: string;
-  value: number | null;
-  displayValue: string;
-  unit: string;
-  currency: string | null;
-  periodStart: string | null;
-  periodEnd: string | null;
-  periodLabel: string;
-  frequency: string | null;
-  status: string;
-  freshness: string;
-  isEstimate: boolean;
-  isCalculated: boolean;
-  confidence: string | null;
-  previousValue: number | null;
-  changePercent: number | null;
-  source: {
-    key: string;
-    name: string;
-    tier: number;
-    url: string;
-    reliability: string;
-  } | null;
-  sourceUrl: string | null;
+export type LandChartPoint = {
+  key: string;
+  labelAr: string;
+  labelEn: string;
+  value: number;
+};
+
+export type LandKpi = {
+  key: string;
+  value: number;
+  displayAr: string;
+  displayEn: string;
+  labelAr: string;
+  labelEn: string;
+  hintAr?: string;
+  hintEn?: string;
+};
+
+export type LandSource = {
+  key: string;
+  name: string;
+  nameAr?: string;
+  url: string;
+  kind: string;
+  frequency: string;
   retrievedAt: string | null;
-  sourcePublishedAt: string | null;
-  notes: string | null;
-  sparkline: Array<{ periodEnd: string; value: number }>;
-  available: boolean;
+  period: string | null;
 };
 
-export type MarketSnapshot = {
-  title: string;
-  subtitle: string;
-  honestyNote: string;
-  lastRefresh: string | null;
-  indicatorCount: number;
-  trackedIndicatorCount: number;
-  sourceCount: number;
-  coverage: string;
-  metrics: MarketMetric[];
-  pulse: MarketMetric[];
-  sources: Array<{
-    key: string;
-    name: string;
-    tier: number;
-    url: string;
-    sourceType: string;
-    updateFrequency: string;
-    reliability: string;
-    lastChecked: string | null;
-    lastSuccessAt: string | null;
-    notes: string | null;
-  }>;
-};
-
-export type MarketSeries = {
-  metricKey: string;
-  range: string;
-  points: Array<{
-    date: string;
-    value: number;
-    displayValue: string;
-    changePercent: number | null;
-    source: string;
-    sourceUrl: string;
-    status: string;
-    isEstimate: boolean;
-  }>;
+export type LandMarketSnapshot = {
+  kind: "land_parcels";
+  updatedAt: string;
+  generatedAt: string;
+  offerCount: number;
+  national: {
+    source: {
+      name: string;
+      nameAr: string;
+      url: string;
+      retrievedAt: string;
+      frequency: string;
+      baseYear: number;
+      period: string | null;
+    };
+    kpis: LandKpi[];
+    charts: {
+      latestByType: LandChartPoint[];
+      landsTrend: LandChartPoint[];
+      industrialTrend: LandChartPoint[];
+      generalTrend: LandChartPoint[];
+      residentialTrend: LandChartPoint[];
+      landsResidentialTrend: LandChartPoint[];
+      landsCommercialTrend: LandChartPoint[];
+      commercialTrend: LandChartPoint[];
+      nonResidentialTrend: LandChartPoint[];
+      landsYearly: LandChartPoint[];
+      industrialYearly: LandChartPoint[];
+      generalYearly: LandChartPoint[];
+      byGovernorate: LandChartPoint[];
+      govQoqChange: LandChartPoint[];
+      qoqByType: LandChartPoint[];
+      landsBreakdown: LandChartPoint[];
+    };
+    window?: {
+      quarters: number;
+      labelEn: string;
+      labelAr: string;
+    };
+  } | null;
+  ase: {
+    source: {
+      name: string;
+      nameAr: string;
+      url: string;
+      retrievedAt: string;
+      frequency: string;
+      disclaimerEn: string;
+      disclaimerAr: string;
+    };
+    kpis: LandKpi[];
+    charts: {
+      realEstateTrend: LandChartPoint[];
+      constructionTrend: LandChartPoint[];
+      generalTrend: LandChartPoint[];
+      financeTrend: LandChartPoint[];
+      latestLevels: LandChartPoint[];
+      realEstateValueTraded: LandChartPoint[];
+    };
+    tickers: Array<{
+      symbol: string;
+      nameEn: string;
+      nameAr: string;
+      sectorEn: string;
+      sectorAr: string;
+      tradingView?: string;
+      aseSearchUrl: string;
+    }>;
+  } | null;
+  dlsRates: {
+    kpis: LandKpi[];
+    byArea: LandChartPoint[];
+  };
+  platform: {
+    offerCount: number;
+    updatedAt: string;
+    kpis: LandKpi[];
+    charts: {
+      byArea: LandChartPoint[];
+      byStatus: LandChartPoint[];
+      byDeal: LandChartPoint[];
+      listingsByMonth: LandChartPoint[];
+    };
+  };
+  sources: LandSource[];
+  kpis: LandKpi[];
+  charts: {
+    byArea: LandChartPoint[];
+    byStatus: LandChartPoint[];
+    byDeal: LandChartPoint[];
+    byIndustry: LandChartPoint[];
+    priceByArea: LandChartPoint[];
+    listingsByMonth: LandChartPoint[];
+    latestByType: LandChartPoint[];
+    landsTrend: LandChartPoint[];
+    industrialTrend: LandChartPoint[];
+    generalTrend: LandChartPoint[];
+    residentialTrend: LandChartPoint[];
+    landsResidentialTrend: LandChartPoint[];
+    landsCommercialTrend: LandChartPoint[];
+    commercialTrend: LandChartPoint[];
+    nonResidentialTrend: LandChartPoint[];
+    landsYearly: LandChartPoint[];
+    industrialYearly: LandChartPoint[];
+    generalYearly: LandChartPoint[];
+    byGovernorate: LandChartPoint[];
+    govQoqChange: LandChartPoint[];
+    qoqByType: LandChartPoint[];
+    landsBreakdown: LandChartPoint[];
+  };
 };
 
 const CLIENT_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
@@ -78,39 +145,52 @@ function serverBase() {
   return `${process.env.BACKEND_INTERNAL_URL || "http://localhost:4000"}/api`;
 }
 
-export async function fetchMarketSnapshotServer(): Promise<MarketSnapshot | null> {
+function isLandMarketSnapshot(data: unknown): data is LandMarketSnapshot {
+  if (!data || typeof data !== "object") return false;
+  const d = data as Record<string, unknown>;
+  if (typeof d.updatedAt !== "string" || typeof d.offerCount !== "number") return false;
+
+  const platform = d.platform;
+  if (!platform || typeof platform !== "object") return false;
+  const p = platform as Record<string, unknown>;
+  if (typeof p.offerCount !== "number" || !p.charts || typeof p.charts !== "object") return false;
+
+  const dls = d.dlsRates;
+  if (!dls || typeof dls !== "object") return false;
+  const dr = dls as Record<string, unknown>;
+  if (!Array.isArray(dr.kpis) || !Array.isArray(dr.byArea)) return false;
+
+  // Reject legacy credit-market payloads that lack land fields.
+  if (d.kind != null && d.kind !== "land_parcels") return false;
+  return true;
+}
+
+export async function fetchMarketSnapshotServer(): Promise<LandMarketSnapshot | null> {
   try {
     const res = await fetch(`${serverBase()}/market-intelligence/snapshot`, {
       next: { revalidate: 300 },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) return null;
-    return res.json();
+    const data: unknown = await res.json();
+    return isLandMarketSnapshot(data) ? data : null;
   } catch {
     return null;
   }
 }
 
-export async function fetchMarketSnapshotClient(): Promise<MarketSnapshot> {
-  const res = await fetch(`${CLIENT_BASE}/market-intelligence/snapshot`, { credentials: "include" });
-  if (!res.ok) throw new Error("Failed to load market snapshot");
-  return res.json();
+export function chartLabel(p: LandChartPoint, lang: "ar" | "en") {
+  return lang === "ar" ? p.labelAr : p.labelEn;
 }
 
-export async function fetchMarketSeries(metricKey: string, range: string): Promise<MarketSeries> {
-  const res = await fetch(
-    `${CLIENT_BASE}/market-intelligence/series/${encodeURIComponent(metricKey)}?range=${encodeURIComponent(range)}`,
-    { credentials: "include" }
-  );
-  if (!res.ok) throw new Error("Failed to load series");
-  return res.json();
+export function kpiLabel(k: LandKpi, lang: "ar" | "en") {
+  return lang === "ar" ? k.labelAr : k.labelEn;
 }
 
-export function freshnessLabel(m: MarketMetric, lang: "ar" | "en"): string {
-  if (!m.available) return lang === "ar" ? "غير متاح" : "Unavailable";
-  if (m.freshness === "estimate" || m.isEstimate) return lang === "ar" ? "تقدير سوقي" : "Market estimate";
-  if (m.freshness === "annual") return lang === "ar" ? `بيانات سنوية — ${m.periodLabel}` : `Annual — ${m.periodLabel}`;
-  if (m.freshness === "recent_monthly")
-    return lang === "ar" ? `أحدث منشور: ${m.periodLabel}` : `Latest available: ${m.periodLabel}`;
-  return lang === "ar" ? `أحدث متاح: ${m.periodLabel}` : `Latest available: ${m.periodLabel}`;
+export function kpiDisplay(k: LandKpi, lang: "ar" | "en") {
+  return lang === "ar" ? k.displayAr : k.displayEn;
+}
+
+export function kpiHint(k: LandKpi, lang: "ar" | "en") {
+  return lang === "ar" ? k.hintAr : k.hintEn;
 }

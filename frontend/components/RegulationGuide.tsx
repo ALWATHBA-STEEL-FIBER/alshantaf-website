@@ -63,7 +63,7 @@ export function RegulationGuide({
             {required ? <span className="text-red-600"> *</span> : null}
           </label>
           <select
-            className="w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold"
+            className="w-full h-9 rounded-md border border-line bg-surface-2 px-2.5 text-[13px] outline-none focus:border-gold"
             value={value}
             disabled={selectDisabled}
             required={required}

@@ -11,15 +11,23 @@ import { RegulationGuide } from "@/components/RegulationGuide";
 import { toWesternDigits } from "@/lib/arabicDigits";
 import { adminMedianEstimate } from "@/lib/adminPricing";
 import { parseCoords, coordsToString, formatDlsArea } from "@/lib/mapCoords";
-import { loadDlsLocations, codesForSelection, selectionForCodes } from "@/lib/dlsLocations";
+import {
+  loadDlsLocations,
+  codesForSelection,
+  selectionForCodes,
+  neighborhoodsForBasin,
+  DLS_DEFAULT_NEIGHBORHOOD_LABEL,
+} from "@/lib/dlsLocations";
 import { CheckIcon } from "@/components/icons";
 import { useJourney } from "@/lib/journey/JourneyProvider";
 import type { IndustryType } from "@/lib/types";
 import { isAmmanGovernorate } from "@/lib/ammanZoning";
+import { BotGuard, type BotGuardHandle } from "@/components/BotGuard";
+import { ParcelMapWorkspace } from "@/components/ParcelMapWorkspace";
 
 const inputClass =
-  "w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold";
-const labelClass = "text-xs font-bold text-ink-soft mb-1 block";
+  "w-full h-9 rounded-md border border-line bg-white px-2.5 text-[13px] outline-none focus:border-gold";
+const labelClass = "text-[11px] font-bold text-ink-soft mb-1 block";
 const DRAFT_KEY = "alshantaf_land_check_client_key";
 
 function getOrCreateClientKey() {
@@ -56,6 +64,7 @@ export function LandCheckForm() {
   const clientKeyRef = useRef<string>("");
   const locationRef = useRef<LocationInputHandle>(null);
   const regulationSectionRef = useRef<HTMLDivElement>(null);
+  const regulationHintKeyRef = useRef("");
   const [blueprintReady, setBlueprintReady] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState("");
@@ -92,6 +101,7 @@ export function LandCheckForm() {
   const [ammanLookupStatus, setAmmanLookupStatus] = useState<"idle" | "loading" | "success" | "failed">("idle");
   const [ammanLookupNote, setAmmanLookupNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const botRef = useRef<BotGuardHandle>(null);
   const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [error, setError] = useState("");
   const [serialNo, setSerialNo] = useState<string | null>(null);
@@ -165,18 +175,21 @@ export function LandCheckForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields, industryType, areaSqm, perimeterM, dlsKey, dlsHint, serialNo]);
 
+  function hintRegulation(key: string) {
+    setAwaitingRegulationAfterPin(true);
+    if (regulationHintKeyRef.current === key) return;
+    regulationHintKeyRef.current = key;
+    window.setTimeout(() => {
+      regulationSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+  }
+
   useEffect(() => {
     let cancelled = false;
     const { governorate, directorate, village, basin, neighborhood, parcel } = fields;
     const parcelNo = parcel.trim();
     const timer = setTimeout(async () => {
-      if (!industryType) {
-        if (awaitingRegulationAfterPin) {
-          setDlsHint(null);
-          setDlsHintStatus("idle");
-          setDlsMapStatus("ready");
-          return;
-        }
+      if (!governorate || !directorate || !village || !basin || !parcelNo) {
         setDlsHint(null);
         setDlsHintStatus("idle");
         setDlsMapStatus("idle");
@@ -187,7 +200,10 @@ export function LandCheckForm() {
         setPerimeterM(null);
         return;
       }
-      if (!governorate || !directorate || !village || !basin || !neighborhood || !parcelNo) {
+      const dlsData = await loadDlsLocations();
+      if (cancelled) return;
+      const neighborhoodOpts = neighborhoodsForBasin(dlsData, governorate, directorate, village, basin);
+      if (neighborhoodOpts.length > 0 && !neighborhood) {
         setDlsHint(null);
         setDlsHintStatus("idle");
         setDlsMapStatus("idle");
@@ -198,6 +214,9 @@ export function LandCheckForm() {
         setPerimeterM(null);
         return;
       }
+      const neighborhoodForLookup =
+        neighborhood ||
+        (neighborhoodOpts.length === 1 ? neighborhoodOpts[0].label : DLS_DEFAULT_NEIGHBORHOOD_LABEL);
       setDlsHint(null);
       setDlsHintStatus("loading");
       setDlsMapStatus("loading");
@@ -213,7 +232,7 @@ export function LandCheckForm() {
           directorate,
           village,
           basin,
-          neighborhood,
+          neighborhood: neighborhoodForLookup,
           parcelNumber: parcelNo,
         })
         .then((result) => {
@@ -231,8 +250,14 @@ export function LandCheckForm() {
 
       const mapPromise = (async () => {
         try {
-          const data = await loadDlsLocations();
-          const codes = codesForSelection(data, governorate, directorate, village, basin, neighborhood);
+          const codes = codesForSelection(
+            dlsData,
+            governorate,
+            directorate,
+            village,
+            basin,
+            neighborhoodForLookup
+          );
           if (!codes) {
             if (!cancelled) {
               setParcelPolygon(null);
@@ -254,6 +279,9 @@ export function LandCheckForm() {
             areaLabel: location.areaSqm != null ? formatDlsArea(location.areaSqm, lang) : f.areaLabel,
           }));
           setDlsMapStatus("ready");
+          if (!industryType) {
+            hintRegulation([governorate, directorate, village, basin, neighborhood, parcelNo].join("|"));
+          }
         } catch (err) {
           if (!cancelled) {
             setParcelPolygon(null);
@@ -279,11 +307,13 @@ export function LandCheckForm() {
     fields.parcel,
     industryType,
     lang,
-    awaitingRegulationAfterPin,
   ]);
 
   useEffect(() => {
-    if (industryType) setAwaitingRegulationAfterPin(false);
+    if (industryType) {
+      setAwaitingRegulationAfterPin(false);
+      regulationHintKeyRef.current = "";
+    }
   }, [industryType]);
 
   useEffect(() => {
@@ -334,6 +364,7 @@ export function LandCheckForm() {
 
   async function handlePinDrop(coords: { lat: number; lng: number }) {
     setError("");
+    setDlsMapStatus("loading");
     try {
       const [pointParcel, dlsData] = await Promise.all([
         api.dlsParcelByPointPublic({ latitude: coords.lat, longitude: coords.lng }),
@@ -345,6 +376,7 @@ export function LandCheckForm() {
         sectorCode: pointParcel.sectorCode,
       });
       if (!selection) {
+        setDlsMapStatus(parcelPolygon ? "ready" : "failed");
         setError(lang === "ar" ? "تعذر مطابقة موقع الدبوس مع بيانات المناطق." : "Could not map the pin point to DLS location labels.");
         return;
       }
@@ -367,14 +399,14 @@ export function LandCheckForm() {
       setPerimeterM(pointParcel.perimeterM ?? null);
       setDlsMapStatus("ready");
       if (!industryType) {
-        setAwaitingRegulationAfterPin(true);
-        window.setTimeout(() => {
-          regulationSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-        }, 80);
+        hintRegulation(
+          [selection.governorate, selection.directorate, selection.village, selection.basin, selection.neighborhood, parcel].join("|")
+        );
       } else {
         setAwaitingRegulationAfterPin(false);
       }
     } catch (err) {
+      setDlsMapStatus(parcelPolygon ? "ready" : "failed");
       setError(
         err instanceof ApiError
           ? err.message
@@ -392,20 +424,56 @@ export function LandCheckForm() {
       setError(t.landCheck.regulationRequired);
       return;
     }
-    if (!fields.governorate || !fields.directorate || !fields.village || !fields.basin || !fields.neighborhood || !fields.parcel) {
-      setError(t.landCheck.requiredError);
+    const dlsData = await loadDlsLocations();
+    const neighborhoodOpts =
+      fields.governorate && fields.directorate && fields.village && fields.basin
+        ? neighborhoodsForBasin(
+            dlsData,
+            fields.governorate,
+            fields.directorate,
+            fields.village,
+            fields.basin
+          )
+        : [];
+    let neighborhood = fields.neighborhood.trim();
+    if (!neighborhood && neighborhoodOpts.length === 1) {
+      neighborhood = neighborhoodOpts[0].label;
+      setFields((f) => ({ ...f, neighborhood }));
+    } else if (!neighborhood && neighborhoodOpts.length === 0 && fields.basin) {
+      neighborhood = DLS_DEFAULT_NEIGHBORHOOD_LABEL;
+      setFields((f) => ({ ...f, neighborhood }));
+    }
+    const missing: string[] = [];
+    if (!fields.governorate) missing.push(t.owners.governorate);
+    if (!fields.directorate) missing.push(t.owners.directorate);
+    if (!fields.village) missing.push(t.owners.village);
+    if (!fields.basin) missing.push(t.owners.basin);
+    if (neighborhoodOpts.length > 0 && !neighborhood) missing.push(t.owners.neighborhood);
+    if (!fields.parcel.trim()) missing.push(t.owners.parcel);
+    if (missing.length) {
+      setError(`${t.owners.missingFields} ${missing.join(lang === "ar" ? "، " : ", ")}`);
       return;
     }
     if (!clientKeyRef.current) clientKeyRef.current = getOrCreateClientKey();
+    const bot = botRef.current?.getPayload();
+    if (!bot) {
+      setError(t.botGuard.required);
+      return;
+    }
     setSubmitting(true);
     try {
-      const result = await api.createLandCheck(buildPayload(true));
+      const result = await api.createLandCheck({
+        ...buildPayload(true),
+        neighborhood: neighborhood || DLS_DEFAULT_NEIGHBORHOOD_LABEL,
+        ...bot,
+      });
       clearClientKey();
       clientKeyRef.current = "";
       setSerialNo(result.serialNo);
       if (industryType) patchJourney({ industryType, landCheckDone: true });
       else patchJourney({ landCheckDone: true });
     } catch (err) {
+      botRef.current?.reset();
       setError(err instanceof ApiError ? err.message : t.owners.genericError);
     } finally {
       setSubmitting(false);
@@ -443,44 +511,255 @@ export function LandCheckForm() {
     setError("");
   }
 
+  const mapStatusLabel =
+    dlsMapStatus === "loading"
+      ? t.owners.dlsMapLoading
+      : dlsMapStatus === "ready"
+        ? awaitingRegulationAfterPin && !industryType
+          ? t.owners.regulationHint
+          : t.owners.dlsMapReady
+        : dlsMapStatus === "missing"
+          ? t.owners.dlsMapMissing
+          : dlsMapStatus === "failed"
+            ? t.owners.dlsMapFailed
+            : t.owners.dlsMapIdle;
+
+  const searchPanel = (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-bold text-green">{t.landCheck.landSection}</p>
+        {draftStatus === "saving" && <span className="text-[11px] text-ink-soft">{t.landCheck.draftSaving}</span>}
+        {draftStatus === "saved" && <span className="text-[11px] font-bold text-green">{t.landCheck.draftSaved}</span>}
+      </div>
+      <LocationCascade
+        governorate={fields.governorate}
+        directorate={fields.directorate}
+        village={fields.village}
+        basin={fields.basin}
+        neighborhood={fields.neighborhood}
+        onChange={(patch) => setFields((f) => ({ ...f, ...patch }))}
+        labels={{
+          governorate: t.owners.governorate,
+          directorate: t.owners.directorate,
+          village: t.owners.village,
+          basin: t.owners.basin,
+          neighborhood: t.owners.neighborhood,
+          other: t.owners.locationOther,
+        }}
+      />
+      <div>
+        <label className={labelClass} htmlFor="lc-parcel">
+          {t.owners.parcel}
+        </label>
+        <input
+          id="lc-parcel"
+          className={inputClass}
+          value={fields.parcel}
+          onChange={updateDigits("parcel")}
+          placeholder={t.owners.enterParcel}
+          required
+        />
+      </div>
+      <div
+        ref={regulationSectionRef}
+        className={`border-t border-line pt-3 ${
+          awaitingRegulationAfterPin && !industryType ? "rounded-xl border border-amber-200 bg-amber-50/80 p-3" : ""
+        }`}
+      >
+        <p className="mb-2 text-xs font-bold text-green">{t.landCheck.regulationSection}</p>
+        {awaitingRegulationAfterPin && !industryType && (
+          <p className="mb-2 rounded-lg border border-amber-300 bg-white px-2.5 py-2 text-[11px] font-bold leading-relaxed text-amber-900">
+            {t.owners.regulationHint}
+          </p>
+        )}
+        <RegulationGuide
+          value={industryType}
+          onChange={(key) => {
+            setIndustryType(key);
+            if (key) setAwaitingRegulationAfterPin(false);
+          }}
+          scope="all"
+          required
+          selectDisabled={Boolean(ammanAutoIndustryType)}
+        />
+        {isAmmanGovernorate(fields.governorate) && (
+          <p
+            className={`mt-2 text-[11px] leading-relaxed ${
+              ammanLookupStatus === "failed"
+                ? "text-red-700"
+                : ammanLookupStatus === "success"
+                  ? "text-green"
+                  : "text-ink-soft"
+            }`}
+          >
+            {ammanLookupStatus === "loading" ? (lang === "ar" ? "جارٍ التحميل..." : "Loading...") : ammanLookupNote}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+
+  const detailsPanel = (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs font-bold text-green">{t.landCheck.detailsSection}</p>
+      <div>
+        <label className={labelClass}>{t.owners.area}</label>
+        <input
+          className={inputClass}
+          value={fields.areaLabel}
+          readOnly
+          placeholder={lang === "ar" ? "تُملأ تلقائيًا من دائرة الأراضي" : "Filled automatically from DLS"}
+        />
+        {dlsMapStatus === "ready" && fields.areaLabel && (
+          <p className="mt-1.5 text-[11px] text-ink-soft">{t.owners.areaDlsNote}</p>
+        )}
+      </div>
+      {/* DLS admin rate / m² — desktop only; mobile unified sheet mirrors DLS parcel info without pricing */}
+      <div className="hidden md:block">
+        <label className={labelClass}>{lang === "ar" ? "القيمة الاسترشادية" : "Guide value"}</label>
+        {dlsHintStatus === "loading" && (
+          <div className="mt-1 flex items-center gap-2 rounded-xl border border-line bg-white px-3 py-2.5 text-[11px] text-ink-soft">
+            <span className="inline-block h-4 w-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin" aria-hidden />
+            <span>{t.owners.dlsHintLoading}</span>
+          </div>
+        )}
+        {dlsHintStatus === "missing" && (
+          <p className="mt-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[11px] leading-relaxed text-red-700">
+            {t.owners.dlsHintMissing}
+          </p>
+        )}
+        {dlsHintStatus === "failed" && <p className="mt-1 text-[11px] text-ink-soft">{t.owners.dlsHintFailed}</p>}
+        {dlsHint && (
+          <DlsPricingHint
+            ratePerSqm={dlsHint.value}
+            areaSqm={areaSqm}
+            sizeLabel={fields.areaLabel}
+            source={dlsHint.source}
+            retrievedAt={dlsHint.retrievedAt}
+          />
+        )}
+        {!dlsHint && dlsHintStatus === "idle" && (
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-soft">
+            {awaitingRegulationAfterPin && !industryType ? t.owners.regulationHint : t.owners.dlsMapIdle}
+          </p>
+        )}
+      </div>
+      <div>
+        <label className={labelClass} htmlFor="lc-notes">
+          {t.landCheck.notes}
+        </label>
+        <textarea
+          id="lc-notes"
+          className={`${inputClass} h-24 min-h-[5rem] resize-y py-2`}
+          value={fields.notes}
+          onChange={update("notes")}
+          placeholder={t.landCheck.notesPlaceholder}
+          maxLength={2000}
+        />
+      </div>
+      <div className="border-t border-line pt-3">
+        <p className="mb-2 text-xs font-bold text-green">{t.landCheck.contactSection}</p>
+        <div className="grid gap-3">
+          <div>
+            <label className={labelClass} htmlFor="lc-name">
+              {t.landCheck.name}
+            </label>
+            <input id="lc-name" className={inputClass} value={fields.name} onChange={update("name")} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="lc-phone">
+              {t.landCheck.phone}
+            </label>
+            <input
+              id="lc-phone"
+              type="tel"
+              className={inputClass}
+              value={fields.phone}
+              onChange={updateDigits("phone")}
+              placeholder="07XXXXXXXX"
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="lc-email">
+              {t.landCheck.email}
+            </label>
+            <input
+              id="lc-email"
+              type="email"
+              dir="ltr"
+              className={inputClass}
+              value={fields.email}
+              onChange={update("email")}
+              placeholder="name@example.com"
+            />
+            <p className="mt-1 text-[11px] text-ink-soft">{t.landCheck.emailNote}</p>
+          </div>
+        </div>
+      </div>
+      <BotGuard ref={botRef} action="land_check" />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {printError && <p className="text-sm text-red-600">{printError}</p>}
+    </div>
+  );
+
+  const footerActions = (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        disabled={!blueprintReady || printing || !parcelPolygon?.[0]?.length}
+        onClick={handlePrint}
+        className="h-9 rounded-md bg-gold px-3 text-[13px] font-extrabold text-green transition-colors hover:bg-gold-2 disabled:opacity-50"
+      >
+        {printing ? t.locationPicker.sideViewPrinting : t.locationPicker.sideViewPrint}
+      </button>
+      <button
+        type="submit"
+        disabled={submitting}
+        className="h-9 rounded-md bg-white px-3 text-[13px] font-extrabold text-green transition-colors hover:bg-gold disabled:opacity-60"
+      >
+        {submitting ? t.landCheck.submitting : t.landCheck.submit}
+      </button>
+    </div>
+  );
+
   return (
-    <section className="py-16 md:py-20">
+    <section className={serialNo ? "bg-bg py-16 md:py-20" : ""}>
       {serialNo && (
-        <div className="mx-auto max-w-[640px] px-4 mb-10">
-          <div className="bg-white rounded-[1.75rem] border border-line p-8 md:p-10 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]">
-            <div className="w-12 h-12 rounded-full bg-green/10 text-green flex items-center justify-center mx-auto">
+        <div className="mx-auto mb-10 max-w-[640px] px-4">
+          <div className="rounded-[1.75rem] border border-line bg-white p-8 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)] md:p-10">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green/10 text-green">
               <CheckIcon />
             </div>
-            <h2 className="text-2xl font-bold text-center mt-4">{t.landCheck.resultTitle}</h2>
-            <div className="mt-6 bg-surface-2 rounded-xl p-4 text-center">
+            <h2 className="mt-4 text-center text-2xl font-bold">{t.landCheck.resultTitle}</h2>
+            <div className="mt-6 rounded-xl bg-surface-2 p-4 text-center">
               <small className="block text-[10px] text-ink-soft">{t.landCheck.resultSerial}</small>
-              <b className="text-sm font-mono" dir="ltr">
+              <b className="font-mono text-sm" dir="ltr">
                 {serialNo}
               </b>
             </div>
-            <p className="text-sm text-ink-soft text-center mt-4 leading-relaxed">{t.landCheck.resultNote}</p>
-            {printError && <p className="text-sm text-red-600 text-center mt-3">{printError}</p>}
+            <p className="mt-4 text-center text-sm leading-relaxed text-ink-soft">{t.landCheck.resultNote}</p>
+            {printError && <p className="mt-3 text-center text-sm text-red-600">{printError}</p>}
             <div className="mt-6 flex flex-col gap-3">
               <button
                 type="button"
                 disabled={!blueprintReady || printing || !parcelPolygon?.[0]?.length}
                 onClick={handlePrint}
-                className="h-11 rounded-full bg-gold text-green text-sm font-bold hover:bg-gold-2 transition-colors disabled:opacity-50"
+                className="h-11 rounded-full bg-gold text-sm font-bold text-green transition-colors hover:bg-gold-2 disabled:opacity-50"
               >
                 {printing ? t.locationPicker.sideViewPrinting : t.locationPicker.sideViewPrint}
               </button>
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 {journey.intent === "build_hangar" && journey.hasLand && (
                   <Link
                     href="/journey"
-                    className="h-11 rounded-full bg-green text-white text-sm font-bold flex items-center justify-center hover:bg-green-2 transition-colors sm:flex-1"
+                    className="flex h-11 items-center justify-center rounded-full bg-green text-sm font-bold text-white transition-colors hover:bg-green-2 sm:flex-1"
                   >
                     {t.journey.hangarSpecsTitle}
                   </Link>
                 )}
                 <Link
                   href="/request-publish"
-                  className={`h-11 rounded-full text-sm font-bold flex items-center justify-center transition-colors sm:flex-1 ${
+                  className={`flex h-11 items-center justify-center rounded-full text-sm font-bold transition-colors sm:flex-1 ${
                     journey.intent === "build_hangar" && journey.hasLand
                       ? "border border-line hover:bg-surface-2"
                       : "bg-green text-white hover:bg-green-2"
@@ -491,7 +770,7 @@ export function LandCheckForm() {
                 <button
                   type="button"
                   onClick={resetAll}
-                  className="h-11 rounded-full border border-line text-sm font-bold hover:bg-surface-2 transition-colors sm:flex-1"
+                  className="h-11 rounded-full border border-line text-sm font-bold transition-colors hover:bg-surface-2 sm:flex-1"
                 >
                   {t.landCheck.resultAgain}
                 </button>
@@ -501,173 +780,31 @@ export function LandCheckForm() {
         </div>
       )}
 
-      <div
-        className={
-          serialNo
-            ? "fixed top-0 left-[-200vw] w-[1100px] opacity-0 pointer-events-none"
-            : "mx-auto max-w-[1240px] px-4 grid lg:grid-cols-[1fr_1.3fr] gap-10"
-        }
+      <form
+        onSubmit={handleSubmit}
+        className={serialNo ? "fixed left-[-200vw] top-0 w-[1100px] opacity-0 pointer-events-none" : "contents"}
         aria-hidden={serialNo ? true : undefined}
       >
-        <div>
-          <span className="text-gold text-xs font-bold tracking-wide">{t.landCheck.eyebrow}</span>
-          <h1 className="text-3xl md:text-4xl font-bold mt-2 text-balance">{t.landCheck.title}</h1>
-          <p className="text-ink-soft mt-3 leading-relaxed">{t.landCheck.subtitle}</p>
-          <div className="mt-8 grid grid-cols-3 gap-3">
-            {t.landCheck.steps.map((step) => (
-              <div
-                key={step.n}
-                className="bg-white/85 rounded-2xl border border-line p-3.5 transition-colors hover:border-gold/40"
-              >
-                <span className="w-7 h-7 rounded-full bg-green text-white text-xs flex items-center justify-center font-bold">
-                  {step.n}
-                </span>
-                <b className="block mt-2 text-sm">{step.title}</b>
-                <small className="text-ink-soft text-xs">{step.note}</small>
-              </div>
-            ))}
-          </div>
-          <p className="mt-6 text-xs bg-white/70 border border-line rounded-2xl p-4 leading-relaxed text-ink-soft">
-            {t.landCheck.sidebarNote}
-          </p>
-        </div>
-
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white rounded-[1.75rem] border border-line p-6 md:p-8 flex flex-col gap-4 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs font-bold text-green">{t.landCheck.contactSection}</p>
-            {draftStatus === "saving" && (
-              <span className="text-[11px] text-ink-soft">{t.landCheck.draftSaving}</span>
-            )}
-            {draftStatus === "saved" && (
-              <span className="text-[11px] font-bold text-green">{t.landCheck.draftSaved}</span>
-            )}
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass} htmlFor="lc-name">
-                {t.landCheck.name}
-              </label>
-              <input id="lc-name" className={inputClass} value={fields.name} onChange={update("name")} />
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="lc-phone">
-                {t.landCheck.phone}
-              </label>
-              <input
-                id="lc-phone"
-                type="tel"
-                className={inputClass}
-                value={fields.phone}
-                onChange={updateDigits("phone")}
-                placeholder="07XXXXXXXX"
-              />
-            </div>
-            <div className="sm:col-span-2">
-              <label className={labelClass} htmlFor="lc-email">
-                {t.landCheck.email}
-              </label>
-              <input
-                id="lc-email"
-                type="email"
-                dir="ltr"
-                className={inputClass}
-                value={fields.email}
-                onChange={update("email")}
-                placeholder="name@example.com"
-              />
-              <p className="text-[11px] text-ink-soft mt-1">{t.landCheck.emailNote}</p>
-            </div>
-          </div>
-
-          <p className="text-xs font-bold text-green">{t.landCheck.landSection}</p>
-          <LocationCascade
-            governorate={fields.governorate}
-            directorate={fields.directorate}
-            village={fields.village}
-            basin={fields.basin}
-            neighborhood={fields.neighborhood}
-            onChange={(patch) => setFields((f) => ({ ...f, ...patch }))}
-            labels={{
-              governorate: t.owners.governorate,
-              directorate: t.owners.directorate,
-              village: t.owners.village,
-              basin: t.owners.basin,
-              neighborhood: t.owners.neighborhood,
-              other: t.owners.locationOther,
-            }}
-          />
-          <div>
-            <label className={labelClass} htmlFor="lc-parcel">
-              {t.owners.parcel}
-            </label>
-            <input
-              id="lc-parcel"
-              className={inputClass}
-              value={fields.parcel}
-              onChange={updateDigits("parcel")}
-              required
-            />
-          </div>
-
-          <div ref={regulationSectionRef}>
-            <p className="text-xs font-bold text-green">{t.landCheck.regulationSection}</p>
-            <RegulationGuide
-              value={industryType}
-              onChange={(key) => {
-                setIndustryType(key);
-                if (key) setAwaitingRegulationAfterPin(false);
-              }}
-              scope="all"
-              required
-              selectDisabled={Boolean(ammanAutoIndustryType)}
-            />
-            {isAmmanGovernorate(fields.governorate) && (
-              <p
-                className={`mt-2 text-[11px] leading-relaxed ${
-                  ammanLookupStatus === "failed"
-                    ? "text-red-700"
-                    : ammanLookupStatus === "success"
-                      ? "text-green"
-                      : "text-ink-soft"
-                }`}
-              >
-                {ammanLookupStatus === "loading"
-                  ? (lang === "ar" ? "جارٍ التحميل..." : "Loading...")
-                  : ammanLookupNote}
-              </p>
-            )}
-          </div>
-
-          <div className="rounded-2xl border border-line bg-white/60 p-3 sm:p-4 flex flex-col gap-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold text-green">{t.owners.dlsMapSection}</p>
-                <p className="text-[11px] text-ink-soft mt-0.5 leading-relaxed">
-                  {!industryType
-                    ? t.owners.dlsMapNeedRegulation
-                    : dlsMapStatus === "loading"
-                      ? t.owners.dlsMapLoading
-                      : dlsMapStatus === "ready"
-                        ? t.owners.dlsMapReady
-                        : dlsMapStatus === "missing"
-                          ? t.owners.dlsMapMissing
-                          : dlsMapStatus === "failed"
-                            ? t.owners.dlsMapFailed
-                            : t.owners.dlsMapIdle}
-                </p>
-              </div>
-              {dlsMapStatus === "loading" && (
-                <span
-                  className="inline-block w-5 h-5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
-                  aria-hidden
-                />
-              )}
-            </div>
+        <ParcelMapWorkspace
+          title={t.landCheck.title}
+          subtitle={t.landCheck.subtitle}
+          status={
+            <span className="inline-flex max-w-[12rem] items-center gap-1.5 truncate rounded-md bg-white/10 px-2 py-0.5">
+              {dlsMapStatus === "loading" ? (
+                <span className="inline-block h-3 w-3 shrink-0 rounded-full border-2 border-white/30 border-t-gold animate-spin" aria-hidden />
+              ) : null}
+              <span className="truncate">{mapStatusLabel}</span>
+            </span>
+          }
+          tabs={[
+            { id: "search", label: lang === "ar" ? "بحث القطعة" : "Find parcel", railLabel: lang === "ar" ? "بحث" : "Find" },
+            { id: "details", label: lang === "ar" ? "التفاصيل" : "Details", railLabel: lang === "ar" ? "تفاصيل" : "Info" },
+          ]}
+          panels={{ search: searchPanel, details: detailsPanel }}
+          map={
             <LocationInput
               ref={locationRef}
+              variant="workspace"
               value={fields.coordinates}
               onChange={(v) => setFields((f) => ({ ...f, coordinates: v }))}
               onPinDrop={handlePinDrop}
@@ -675,17 +812,18 @@ export function LandCheckForm() {
               onAddressChange={(address) => setFields((f) => ({ ...f, address }))}
               polygon={parcelPolygon}
               adjacentRoads={adjacentRoads}
-              lockEditing={dlsMapStatus === "ready" || awaitingRegulationAfterPin}
+              lockEditing={dlsMapStatus === "loading"}
               loading={dlsMapStatus === "loading"}
               loadingLabel={t.owners.dlsMapLoading}
-              statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReady : undefined}
-              idleNote={!industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
+              statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReadyRepick : undefined}
+              idleNote={t.owners.dlsMapIdle}
               areaLabel={fields.areaLabel}
               areaSqm={areaSqm}
               perimeterM={perimeterM}
               showDimensions
-              showTopo={Boolean(industryType)}
+              showTopo
               onBlueprintReadyChange={setBlueprintReady}
+              dlsKey={dlsKey}
               blueprint={{
                 governorate: fields.governorate,
                 directorate: fields.directorate,
@@ -700,103 +838,10 @@ export function LandCheckForm() {
                   : undefined,
               }}
             />
-          </div>
-
-          <p className="text-xs font-bold text-green">{t.landCheck.detailsSection}</p>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass}>{t.owners.area}</label>
-              <input
-                className={inputClass}
-                value={fields.areaLabel}
-                readOnly
-                placeholder={lang === "ar" ? "تُملأ تلقائيًا من دائرة الأراضي" : "Filled automatically from DLS"}
-              />
-              {dlsMapStatus === "ready" && fields.areaLabel && (
-                <p className="text-[11px] text-ink-soft mt-1.5">{t.owners.areaDlsNote}</p>
-              )}
-              {dlsMapStatus === "loading" && !fields.areaLabel && (
-                <div className="mt-2 flex items-center gap-2 text-[11px] text-ink-soft">
-                  <span
-                    className="inline-block w-3.5 h-3.5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
-                    aria-hidden
-                  />
-                  <span>{t.owners.dlsMapLoading}</span>
-                </div>
-              )}
-            </div>
-            <div>
-              <label className={labelClass}>{lang === "ar" ? "القيمة الاسترشادية" : "Guide value"}</label>
-              {dlsHintStatus === "loading" && (
-                <div className="mt-1 flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[11px] text-ink-soft">
-                  <span
-                    className="inline-block w-4 h-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin"
-                    aria-hidden
-                  />
-                  <span>{t.owners.dlsHintLoading}</span>
-                </div>
-              )}
-              {dlsHintStatus === "missing" && (
-                <p className="text-[11px] text-red-700 mt-1 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 leading-relaxed">
-                  {t.owners.dlsHintMissing}
-                </p>
-              )}
-              {dlsHintStatus === "failed" && (
-                <p className="text-[11px] text-ink-soft mt-1">{t.owners.dlsHintFailed}</p>
-              )}
-              {dlsHint && (
-                <DlsPricingHint
-                  ratePerSqm={dlsHint.value}
-                  areaSqm={areaSqm}
-                  sizeLabel={fields.areaLabel}
-                  source={dlsHint.source}
-                  retrievedAt={dlsHint.retrievedAt}
-                />
-              )}
-              {!dlsHint && dlsHintStatus === "idle" && (
-                <p className="text-[11px] text-ink-soft mt-1 leading-relaxed">
-                  {!industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label className={labelClass} htmlFor="lc-notes">
-              {t.landCheck.notes}
-            </label>
-            <textarea
-              id="lc-notes"
-              className={`${inputClass} h-24 py-2`}
-              value={fields.notes}
-              onChange={update("notes")}
-              placeholder={t.landCheck.notesPlaceholder}
-              maxLength={2000}
-            />
-          </div>
-
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {printError && <p className="text-sm text-red-600">{printError}</p>}
-
-          <div className="flex flex-col sm:flex-row gap-2">
-            <button
-              type="button"
-              disabled={!blueprintReady || printing || !parcelPolygon?.[0]?.length}
-              onClick={handlePrint}
-              className="h-12 px-5 rounded-full bg-gold text-green font-bold hover:bg-gold-2 transition-colors disabled:opacity-50 sm:flex-1"
-            >
-              {printing ? t.locationPicker.sideViewPrinting : t.locationPicker.sideViewPrint}
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="h-12 px-5 rounded-full bg-green text-white font-bold hover:bg-green-2 transition-colors disabled:opacity-60 sm:flex-1"
-            >
-              {submitting ? t.landCheck.submitting : t.landCheck.submit}
-            </button>
-          </div>
-        </form>
-      </div>
+          }
+          footer={footerActions}
+        />
+      </form>
     </section>
   );
 }

@@ -16,8 +16,15 @@ export function CheckIcon() {
 
 export function CloseIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <path d="M4 4l10 10M14 4L4 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      aria-hidden="true"
+      className="block shrink-0"
+    >
+      <path d="M4.5 4.5l9 9M13.5 4.5l-9 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }
@@ -203,23 +210,85 @@ export function MessageIcon({ className = "w-4 h-4" }: { className?: string }) {
   );
 }
 
-export function ShareIcon({ className = "w-4 h-4" }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
-      <circle cx="14.5" cy="4.5" r="2" stroke="currentColor" strokeWidth="1.4" />
-      <circle cx="14.5" cy="15.5" r="2" stroke="currentColor" strokeWidth="1.4" />
-      <circle cx="5.5" cy="10" r="2" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M7.3 9.1 12.7 5.9M7.3 10.9l5.4 3.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 export function HardDriveIcon({ className = "w-4 h-4" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <rect x="3" y="4" width="14" height="12" rx="1.6" stroke="currentColor" strokeWidth="1.4" />
       <path d="M3 11.5h14" stroke="currentColor" strokeWidth="1.4" />
       <circle cx="13.5" cy="14.2" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function MonitorIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="2.5" y="3.5" width="15" height="10" rx="1.6" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M7 16.5h6M10 13.5v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="7" cy="8.2" r="1.1" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M9.2 8.2h5.3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function ReceiptIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M5.5 2.75h9A1.75 1.75 0 0 1 16.25 4.5v12.1l-1.6-.9-1.5.9-1.5-.9-1.5.9-1.5-.9-1.5.9-1.6-.9V4.5A1.75 1.75 0 0 1 5.5 2.75Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M7.5 6.5h5M7.5 9.25h5M7.5 12h3.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function InvestPartnershipIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M10 3.5v13M3.5 10h13" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path
+        d="M10 10 L14.2 6.2 A4.6 4.6 0 0 1 10 3.5Z"
+        fill="currentColor"
+        fillOpacity="0.25"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function HardHatIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="M3.5 12.5h13v1.75A1.75 1.75 0 0 1 14.75 16h-9.5A1.75 1.75 0 0 1 3.5 14.25V12.5Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4.25 12.25v-.5a5.75 5.75 0 0 1 11.5 0v.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+      <path d="M10 3.5v2.25M8.25 6.75h3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function WalletIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1" />
+      <path d="M3 7v10a2 2 0 0 0 2 2h14a1 1 0 0 0 1-1v-3" />
+      <path d="M20 9h-5a2.5 2.5 0 0 0 0 5h5a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1z" />
+      <circle cx="15.5" cy="11.5" r="0.6" fill="currentColor" />
     </svg>
   );
 }

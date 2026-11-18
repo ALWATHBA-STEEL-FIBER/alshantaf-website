@@ -1,87 +1,91 @@
 import {
-  groqChatJson,
-  GroqRequestError,
-  scorePromptRisk,
-  guardThreshold,
-  DEFAULT_GROQ_MODEL,
-  DEFAULT_GROQ_GUARD_MODEL,
-  type GroqMessage,
-} from "./groq";
-import {
-  openaiChatJson,
-  openaiConfigured,
-  openaiModel,
-  OpenAIRequestError,
-  type ChatMessage,
-} from "./openai";
+  getAiConfigResolved,
+  resolveActiveProvider,
+  type AiConfigResolved,
+} from "./aiConfig";
+import { GroqRequestError, groqChatJson, scorePromptRisk, type GroqMessage } from "./groq";
+import { OpenAiRequestError, openaiChatJson, type OpenAiMessage } from "./openai";
 
-export type LlmMessage = ChatMessage;
+export type LlmMessage = GroqMessage | OpenAiMessage;
 
-export class LlmRequestError extends Error {
+export class AiRequestError extends Error {
   constructor(
     message: string,
     public status: number,
-    public rateLimited: boolean,
-    public provider: "openai" | "groq"
+    public rateLimited: boolean
   ) {
     super(message);
-    this.name = "LlmRequestError";
+    this.name = "AiRequestError";
   }
 }
 
-export function llmConfigured() {
-  return openaiConfigured() || Boolean(process.env.GROQ_API_KEY?.trim());
+export async function getResolvedAi(): Promise<{
+  cfg: AiConfigResolved;
+  provider: "openai" | "groq" | null;
+}> {
+  const cfg = await getAiConfigResolved();
+  return { cfg, provider: resolveActiveProvider(cfg) };
 }
 
-export function activeLlmProvider(): "openai" | "groq" | null {
-  if (openaiConfigured()) return "openai";
-  if (process.env.GROQ_API_KEY?.trim()) return "groq";
+export async function aiEnabled() {
+  const { provider } = await getResolvedAi();
+  return provider !== null;
+}
+
+export async function activeChatModel() {
+  const { cfg, provider } = await getResolvedAi();
+  if (provider === "openai") return cfg.openaiModel;
+  if (provider === "groq") return cfg.groqModel;
   return null;
 }
 
-export function activeChatModel(): string {
-  const provider = activeLlmProvider();
-  if (provider === "openai") return openaiModel();
-  if (provider === "groq") return process.env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL;
-  return "none";
+export async function activeGuardModel() {
+  const cfg = await getAiConfigResolved();
+  if (!cfg.groqApiKey || !cfg.guardEnabled) return null;
+  return cfg.guardModel;
 }
 
-export function llmStatus() {
-  return {
-    provider: activeLlmProvider(),
-    model: activeChatModel(),
-    openaiEnabled: openaiConfigured(),
-    groqEnabled: Boolean(process.env.GROQ_API_KEY?.trim()),
-    guardModel: process.env.GROQ_GUARD_MODEL?.trim() || DEFAULT_GROQ_GUARD_MODEL,
-  };
+export async function guardThreshold() {
+  const cfg = await getAiConfigResolved();
+  return cfg.guardThreshold;
 }
 
-export { scorePromptRisk, guardThreshold };
+export { scorePromptRisk };
 
-export async function chatJson(params: {
+export async function llmChatJson(params: {
   messages: LlmMessage[];
   temperature?: number;
-}): Promise<string> {
-  const provider = activeLlmProvider();
+}) {
+  const { cfg, provider } = await getResolvedAi();
   if (!provider) {
-    throw new LlmRequestError("No LLM API key configured", 503, false, "groq");
+    throw new AiRequestError("No AI provider configured", 503, false);
   }
 
   try {
     if (provider === "openai") {
-      return await openaiChatJson(params);
+      return await openaiChatJson({
+        messages: params.messages as OpenAiMessage[],
+        temperature: params.temperature ?? cfg.openaiTemperature,
+        apiKey: cfg.openaiApiKey,
+        model: cfg.openaiModel,
+      });
     }
     return await groqChatJson({
       messages: params.messages as GroqMessage[],
-      temperature: params.temperature,
+      temperature: params.temperature ?? cfg.groqTemperature,
+      apiKey: cfg.groqApiKey,
+      model: cfg.groqModel,
     });
   } catch (err) {
-    if (err instanceof OpenAIRequestError) {
-      throw new LlmRequestError(err.message, err.status, err.rateLimited, "openai");
-    }
-    if (err instanceof GroqRequestError) {
-      throw new LlmRequestError(err.message, err.status, err.rateLimited, "groq");
+    if (err instanceof OpenAiRequestError || err instanceof GroqRequestError) {
+      throw new AiRequestError(err.message, err.status, err.rateLimited);
     }
     throw err;
   }
 }
+
+export {
+  DEFAULT_OPENAI_MODEL,
+  DEFAULT_GROQ_MODEL,
+  DEFAULT_GROQ_GUARD_MODEL,
+} from "./aiConfig";

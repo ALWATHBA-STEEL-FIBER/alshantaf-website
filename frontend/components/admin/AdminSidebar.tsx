@@ -14,9 +14,14 @@ import {
   MapCheckIcon,
   MenuIcon,
   MessageIcon,
+  MonitorIcon,
+  HardHatIcon,
+  InvestPartnershipIcon,
+  ReceiptIcon,
   SettingsIcon,
   ShieldIcon,
   UsersIcon,
+  WalletIcon,
 } from "@/components/icons";
 import { LiveVisitors } from "@/components/admin/LiveVisitors";
 import { useAdminSession, type AdminFeature } from "@/lib/adminPermissions";
@@ -27,7 +32,12 @@ const NAV = [
   { href: "/admin/submissions", key: "submissions" as const, icon: InboxIcon, feature: "submissions" as AdminFeature },
   { href: "/admin/contact", key: "contact" as const, icon: MessageIcon, feature: "contact" as AdminFeature },
   { href: "/admin/land-checks", key: "landChecks" as const, icon: MapCheckIcon, feature: "landChecks" as AdminFeature },
+  { href: "/admin/orders", key: "orders" as const, icon: ReceiptIcon, feature: "orders" as AdminFeature },
+  { href: "/admin/site-work", key: "siteWork" as const, icon: HardHatIcon, feature: "siteWork" as AdminFeature },
+  { href: "/admin/site-work/expenses", key: "siteExpenses" as const, icon: WalletIcon, feature: "siteWork" as AdminFeature },
+  { href: "/admin/invest", key: "invest" as const, icon: InvestPartnershipIcon, feature: "invest" as AdminFeature },
   { href: "/admin/media", key: "media" as const, icon: FolderIcon, feature: "media" as AdminFeature },
+  { href: "/admin/monitor", key: "monitor" as const, icon: MonitorIcon, feature: "monitor" as AdminFeature },
   { href: "/admin/security", key: "security" as const, icon: ShieldIcon, feature: "security" as AdminFeature },
   { href: "/admin/users", key: "admins" as const, icon: UsersIcon, feature: "users" as AdminFeature },
   { href: "/admin/settings", key: "settings" as const, icon: SettingsIcon, feature: "settings" as AdminFeature },
@@ -46,8 +56,12 @@ export function AdminSidebar() {
     router.refresh();
   }
 
-  const isActive = (href: string) => (href === "/admin" ? pathname === "/admin" : pathname.startsWith(href));
   const visibleNav = NAV.filter((item) => has(item.feature));
+  // Most specific match wins so /admin/site-work/expenses doesn't also light up /admin/site-work.
+  const activeHref = visibleNav
+    .filter((item) => (item.href === "/admin" ? pathname === "/admin" : pathname === item.href || pathname.startsWith(`${item.href}/`)))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+  const isActive = (href: string) => href === activeHref;
 
   const navList = (
     <nav className="flex flex-col gap-1">

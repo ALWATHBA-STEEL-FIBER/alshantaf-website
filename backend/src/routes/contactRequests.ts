@@ -6,6 +6,7 @@ import { asyncHandler } from "../lib/asyncHandler";
 import { nextContactRequestSerial } from "../lib/submissionCode";
 import { westernDigitsString } from "../lib/arabicDigits";
 import { audit } from "../lib/audit";
+import { requireBotGuard } from "../middleware/botGuard";
 
 export const contactRequestsRouter = Router();
 
@@ -29,6 +30,7 @@ const createSchema = z.object({
 contactRequestsRouter.post(
   "/",
   limiter,
+  requireBotGuard("contact"),
   asyncHandler(async (req, res) => {
     const input = createSchema.parse(req.body);
     const serialNo = await nextContactRequestSerial(prisma);

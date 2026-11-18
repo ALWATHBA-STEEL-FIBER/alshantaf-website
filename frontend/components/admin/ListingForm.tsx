@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useLanguage } from "@/lib/LanguageProvider";
+import { useAdminSession } from "@/lib/adminPermissions";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "./Toast";
 import { Spinner } from "./EmptyState";
@@ -10,7 +11,7 @@ import { LocationCascade } from "@/components/LocationCascade";
 import { DlsPricingHint } from "@/components/DlsPricingHint";
 import { RegulationGuide } from "@/components/RegulationGuide";
 import { FilePickerButton } from "@/components/FilePickerButton";
-import { ImageIcon, VideoIcon, DocumentIcon } from "@/components/icons";
+import { ImageIcon, VideoIcon, DocumentIcon, CheckIcon } from "@/components/icons";
 import type { Listing } from "@/lib/types";
 import { parseCoords, coordsToString, formatDlsArea } from "@/lib/mapCoords";
 import {
@@ -41,8 +42,9 @@ interface MediaItem {
 const inputClass = "w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold";
 const labelClass = "text-xs font-bold text-ink-soft mb-1 block";
 
-export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | null; onClose: () => void; onSaved: () => void }) {
+export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | null; onClose: () => void; onSaved: (quiet?: boolean) => void }) {
   const { t, lang } = useLanguage();
+  const { isFull } = useAdminSession();
   const { showError } = useToast();
   const [fields, setFields] = useState({
     title: listing?.title ?? "",
@@ -67,6 +69,7 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
     status: listing?.status ?? "available",
     publishStatus: listing?.publishStatus ?? "published",
     featured: listing?.featured ?? false,
+    importance: listing?.importance ?? (listing?.featured ? "titanium" : "none"),
     smsOptIn: listing?.smsOptIn ?? true,
     presenterRole: listing?.presenterRole ?? "",
     presenterName: listing?.presenterName ?? "",
@@ -81,8 +84,11 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
   const [video, setVideo] = useState<string | null>(listing?.video ?? null);
   const [documentUrl, setDocumentUrl] = useState<string | null>(listing?.document ?? null);
   const [uploading, setUploading] = useState(false);
+  const [videoProgress, setVideoProgress] = useState<{ phase: "upload" | "convert"; percent: number } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [linkedOffer, setLinkedOffer] = useState<{ id: string; listingNo: string; published: boolean } | null>(null);
   const [fetchingDls, setFetchingDls] = useState(false);
+  const [pinFetchLoading, setPinFetchLoading] = useState(false);
   const [dlsError, setDlsError] = useState("");
   const [parcelPolygon, setParcelPolygon] = useState<[number, number][][] | null>(null);
   const [adjacentRoads, setAdjacentRoads] = useState<AdjacentRoad[]>([]);
@@ -179,6 +185,7 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
 
   async function handlePinDrop(coords: { lat: number; lng: number }) {
     setDlsError("");
+    setPinFetchLoading(true);
     try {
       const [pointParcel, dlsData] = await Promise.all([
         api.dlsParcelByPoint({ latitude: coords.lat, longitude: coords.lng }),
@@ -221,6 +228,8 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
             ? "تعذر جلب بيانات الأرض من دائرة الأراضي من موقع الدبوس."
             : "Could not fetch DLS parcel data from the selected map point."
       );
+    } finally {
+      setPinFetchLoading(false);
     }
   }
 
@@ -347,13 +356,29 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
     }
   }
 
-  async function handleSingleUpload(file: File | null, set: (url: string) => void) {
+  async function handleSingleUpload(file: File | null, set: (url: string) => void, asVideo = false) {
     if (!file) return;
+    const openVideo = asVideo && isFull;
+    if (asVideo && !openVideo && file.size > 110 * 1024 * 1024) {
+      showError(lang === "ar" ? "الفيديو يجب ألا يتجاوز 110 ميجابايت." : "Video must be under 110MB.");
+      return;
+    }
     setUploading(true);
+    setVideoProgress(openVideo ? { phase: "upload", percent: 0 } : null);
     try {
-      const { url } = await api.upload(file);
+      const { url } = await api.upload(file, openVideo ? {
+        asVideo: true,
+        onProgress: (done, total, phase) => {
+          setVideoProgress({
+            phase,
+            percent: phase === "convert" ? 100 : Math.round((done / total) * 100),
+          });
+        },
+      } : undefined);
       set(url);
+      setVideoProgress(null);
     } catch (err) {
+      setVideoProgress(null);
       showError(err instanceof ApiError ? err.message : t.admin.uploadFailed);
     } finally {
       setUploading(false);
@@ -470,8 +495,15 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
       }
     }
     try {
-      if (listing) await api.updateListing(listing.id, payload);
-      else await api.createListing(payload);
+      const saved = listing ? await api.updateListing(listing.id, payload) : await api.createListing(payload);
+      if (video) {
+        setLinkedOffer({
+          id: saved.id,
+          listingNo: saved.listingNo,
+          published: saved.publishStatus === "published",
+        });
+        return;
+      }
       onSaved();
     } catch (err) {
       showError(err instanceof ApiError ? err.message : t.admin.saveFailed);
@@ -481,6 +513,44 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
   }
 
   const lf = t.admin.listingForm;
+
+  if (linkedOffer) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green text-white [&_svg]:h-5 [&_svg]:w-5">
+              <CheckIcon />
+            </span>
+            <div>
+              <p className="text-base font-bold text-green">
+                {lang === "ar" ? "تم رفع الفيديو وربطه بهذا العرض" : "Video uploaded and linked to this offer"}
+              </p>
+              <p className="text-xs text-ink-soft mt-0.5">{linkedOffer.listingNo}</p>
+            </div>
+          </div>
+          {video && (
+            <video key={video} src={video} controls playsInline preload="metadata" className="w-full aspect-video bg-black object-contain rounded-xl" />
+          )}
+          <p className="text-sm text-ink leading-relaxed">
+            {linkedOffer.published
+              ? (lang === "ar" ? "الفيديو يظهر الآن في صفحة هذا العرض." : "The video now plays on this offer page.")
+              : (lang === "ar" ? "الفيديو مربوط بهذا العرض، ويظهر في الصفحة عند النشر." : "The video is linked to this offer and appears on the page once it is published.")}
+          </p>
+          <div className="flex justify-end gap-2">
+            {linkedOffer.published && (
+              <a href={`/offers/${linkedOffer.id}`} className="h-11 px-4 rounded-full border border-line text-sm font-bold inline-flex items-center">
+                {lang === "ar" ? "صفحة العرض" : "Offer page"}
+              </a>
+            )}
+            <button type="button" onClick={() => onSaved(true)} className="h-11 px-6 rounded-full bg-green text-white text-sm font-bold">
+              {t.admin.close}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -571,7 +641,7 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
               value={fields.price}
               onChange={updateDigits("price")}
               inputMode="decimal"
-              pattern="^\\d+(\\.\\d+)?$"
+              autoComplete="off"
               placeholder={lang === "ar" ? "مثال: 60" : "e.g. 60"}
             />
             <p className="text-[11px] text-ink-soft mt-1.5">{lf.pricePerSqmNote}</p>
@@ -585,6 +655,8 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
               neighborhood={fields.neighborhood}
               onChange={applyLocationPatch}
               required={false}
+              numbered={false}
+              layout="grid"
               labels={{
                 governorate: t.owners.governorate,
                 directorate: t.owners.directorate,
@@ -695,7 +767,6 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
           <div className="sm:col-span-2">
             <label className={labelClass}>{lf.location}</label>
             <LocationInput
-              key={parcelPolygon ? "dls-locked" : "dls-editable"}
               value={fields.locationUrl}
               onChange={(v) => setFields((f) => ({ ...f, locationUrl: v }))}
               onPinDrop={handlePinDrop}
@@ -703,7 +774,10 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
               onAddressChange={(address) => setFields((f) => ({ ...f, address }))}
               polygon={parcelPolygon}
               adjacentRoads={adjacentRoads}
-              lockEditing={Boolean(parcelPolygon)}
+              lockEditing={pinFetchLoading}
+              loading={pinFetchLoading}
+              loadingLabel={t.owners.dlsMapLoading}
+              statusNote={parcelPolygon && !pinFetchLoading ? t.owners.dlsMapReadyRepick : undefined}
               parcelNumbers={parseParcelNumbers(fields.parcel)}
             />
           </div>
@@ -729,10 +803,27 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
               <option value="archived">{t.admin.tabsListings.archived}</option>
             </select>
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={fields.featured} onChange={update("featured")} className="accent-green w-4 h-4" />
-            {lf.featured}
-          </label>
+          <div className="sm:col-span-2">
+            <label className="text-xs font-bold text-ink-soft mb-1 block">{lf.importance}</label>
+            <select
+              className="w-full h-11 rounded-xl border border-line bg-white px-3 text-sm outline-none focus:border-gold"
+              value={fields.importance}
+              onChange={(e) => {
+                const importance = e.target.value as "none" | "golden" | "platinum" | "titanium";
+                setFields((prev) => ({
+                  ...prev,
+                  importance,
+                  featured: importance === "titanium",
+                }));
+              }}
+            >
+              <option value="none">{t.offers.importance.none}</option>
+              <option value="golden">{t.offers.importance.golden}</option>
+              <option value="platinum">{t.offers.importance.platinum}</option>
+              <option value="titanium">{t.offers.importance.titanium}</option>
+            </select>
+            <p className="mt-1 text-[11px] text-ink-soft leading-relaxed">{lf.importanceHint}</p>
+          </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={fields.smsOptIn} onChange={update("smsOptIn")} className="accent-green w-4 h-4" />
             {t.admin.smsOptIn}
@@ -822,11 +913,45 @@ export function ListingForm({ listing, onClose, onSaved }: { listing: Listing | 
             <FilePickerButton
               label={lf.video}
               icon={<VideoIcon className="w-4 h-4" />}
-              accept="video/*"
+              accept={isFull ? "*/*" : "video/*"}
               disabled={uploading}
-              onFiles={(files) => handleSingleUpload(files[0] ?? null, setVideo)}
+              onFiles={(files) => handleSingleUpload(files[0] ?? null, setVideo, true)}
             />
-            {video && <p className="text-[11px] text-ink-soft mt-1 truncate">{video}</p>}
+            {isFull && (
+              <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 mt-1.5 leading-relaxed">
+                {lang === "ar"
+                  ? "تنبيه: يمكن رفع أي ملف بأي حجم كفيديو. يُحوَّل إلى MP4 حتى يشتغل في صفحة العرض. التحويل قد يأخذ وقتًا، وإذا تعذر لن يُحفظ الملف."
+                  : "Caution: any file, any size, can be saved as the video. It is converted to MP4 so the offer page can play it. Conversion can take a while, and the file is not saved if conversion fails."}
+              </p>
+            )}
+            {videoProgress && (
+              <div className="mt-2">
+                <div className="mb-1 flex items-center justify-between text-[11px] font-bold text-ink-soft">
+                  <span>
+                    {videoProgress.phase === "convert"
+                      ? (lang === "ar" ? "جاري تحويل الفيديو للتشغيل" : "Converting for playback")
+                      : (lang === "ar" ? "جاري رفع الفيديو" : "Uploading video")}
+                  </span>
+                  <span>{videoProgress.percent}%</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-line">
+                  <div
+                    className={`h-full rounded-full bg-green transition-[width] duration-300 ${videoProgress.phase === "convert" ? "animate-pulse" : ""}`}
+                    style={{ width: `${videoProgress.percent}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {video && !videoProgress && (
+              <div className="mt-2 overflow-hidden rounded-xl border border-line bg-black">
+                <video key={video} src={video} controls playsInline preload="metadata" className="aspect-video w-full object-contain" />
+                <p className="bg-white px-2.5 py-2 text-[11px] leading-relaxed text-ink-soft">
+                  {lang === "ar"
+                    ? "الفيديو جاهز في هذا النموذج. يُربط بالعرض عند الحفظ."
+                    : "The video is ready on this form. It links to the offer when you save."}
+                </p>
+              </div>
+            )}
           </div>
           <div>
             <label className={labelClass}>{lf.document}</label>

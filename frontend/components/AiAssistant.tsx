@@ -210,7 +210,13 @@ export function AiAssistant() {
     void send(input);
   }
 
-  if (!enabled) return null;
+  const hideOnParcelMap =
+    pathname === "/land-check" ||
+    pathname.startsWith("/land-check/") ||
+    pathname === "/request-publish" ||
+    pathname.startsWith("/request-publish/");
+
+  if (!enabled || hideOnParcelMap) return null;
 
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id;
   const quickLabels = {
@@ -223,7 +229,7 @@ export function AiAssistant() {
 
   return (
     <div
-      className={`z-[60] flex flex-col items-end gap-3 ${
+      className={`ai-assistant-root z-[60] flex flex-col items-end gap-3 ${
         open
           ? "pointer-events-none fixed inset-0 lg:pointer-events-none lg:inset-auto lg:bottom-[max(1.5rem,env(safe-area-inset-bottom,0px))] lg:end-6"
           : "pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom,0px))] end-4 sm:bottom-[max(1.5rem,env(safe-area-inset-bottom,0px))] sm:end-6"
@@ -257,7 +263,7 @@ export function AiAssistant() {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="min-h-11 min-w-11 rounded-full p-1.5 text-white/80 hover:bg-white/10 hover:text-white"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-white/80 hover:bg-white/10 hover:text-white"
                 aria-label={t.assistant.close}
               >
                 <CloseIcon />

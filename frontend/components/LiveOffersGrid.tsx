@@ -21,13 +21,29 @@ import {
   resolveAreaQueryParam,
 } from "@/lib/areaFilters";
 import { INDUSTRIAL_ORDER } from "@/lib/regulations";
+import {
+  importanceRank,
+  isPremiumImportance,
+  listingSizeCategory,
+  OFFER_IMPORTANCE_ORDER,
+  OFFER_SIZE_ORDER,
+  type OfferSizeCategory,
+  type PremiumImportance,
+} from "@/lib/offerImportance";
 import { OfferCompareSheet } from "@/components/OfferCompareSheet";
+import { OfferImportanceBadge } from "@/components/OfferImportanceBadge";
 import type { IndustryType, Listing, PropertyStatus } from "@/lib/types";
 
 const PUBLIC_STATUSES: PropertyStatus[] = ["available", "reserved", "sold", "rented"];
 const COMPARE_MAX = 2;
 
-function syncOffersUrl(area: string, status: string, industry: string) {
+function syncOffersUrl(
+  area: string,
+  status: string,
+  industry: string,
+  importance: string,
+  size: string
+) {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
   if (area && area !== "__all__") url.searchParams.set("area", area);
@@ -36,6 +52,10 @@ function syncOffersUrl(area: string, status: string, industry: string) {
   else url.searchParams.delete("status");
   if (industry && industry !== "__all__") url.searchParams.set("industry", industry);
   else url.searchParams.delete("industry");
+  if (importance && importance !== "__all__") url.searchParams.set("importance", importance);
+  else url.searchParams.delete("importance");
+  if (size && size !== "__all__") url.searchParams.set("size", size);
+  else url.searchParams.delete("size");
   const next = `${url.pathname}${url.search}${url.hash}`;
   window.history.replaceState(window.history.state, "", next);
 }
@@ -60,6 +80,8 @@ export function LiveOffersGrid({
   const [selectedArea, setSelectedArea] = useState<string>("__all__");
   const [selectedStatus, setSelectedStatus] = useState<string>("__all__");
   const [selectedIndustry, setSelectedIndustry] = useState<string>("__all__");
+  const [selectedImportance, setSelectedImportance] = useState<string>("__all__");
+  const [selectedSize, setSelectedSize] = useState<string>("__all__");
   const [urlReady, setUrlReady] = useState(false);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -73,27 +95,39 @@ export function LiveOffersGrid({
     const area = resolveAreaQueryParam(params.get("area"));
     const status = params.get("status");
     const industry = params.get("industry");
+    const importance = params.get("importance");
+    const size = params.get("size");
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (area) setSelectedArea(area);
     if (status && (PUBLIC_STATUSES as string[]).includes(status)) setSelectedStatus(status);
     if (industry && (INDUSTRIAL_ORDER as readonly string[]).includes(industry)) setSelectedIndustry(industry);
+    if (importance && isPremiumImportance(importance)) setSelectedImportance(importance);
+    if (size && (OFFER_SIZE_ORDER as readonly string[]).includes(size)) setSelectedSize(size);
     setUrlReady(true);
   }, [hideAreaFilter]);
 
   useEffect(() => {
     if (!urlReady || hideAreaFilter) return;
-    syncOffersUrl(selectedArea, selectedStatus, selectedIndustry);
-  }, [selectedArea, selectedStatus, selectedIndustry, urlReady, hideAreaFilter]);
+    syncOffersUrl(selectedArea, selectedStatus, selectedIndustry, selectedImportance, selectedSize);
+  }, [selectedArea, selectedStatus, selectedIndustry, selectedImportance, selectedSize, urlReady, hideAreaFilter]);
 
   const filtered = listings.filter((o) => {
     if (!listingMatchesAreaSelection(o.area, selectedArea)) return false;
     if (selectedStatus !== "__all__" && o.status !== selectedStatus) return false;
     if (selectedIndustry !== "__all__" && o.industryType !== selectedIndustry) return false;
+    if (selectedImportance !== "__all__" && (o.importance ?? "none") !== selectedImportance) return false;
+    if (selectedSize !== "__all__") {
+      const cat = listingSizeCategory(o.size);
+      if (cat !== selectedSize) return false;
+    }
     return true;
   });
 
   const sorted = [...filtered].sort(
-    (a, b) => Number(b.featured) - Number(a.featured) || b.updatedAt.localeCompare(a.updatedAt)
+    (a, b) =>
+      importanceRank(b.importance) - importanceRank(a.importance) ||
+      Number(b.featured) - Number(a.featured) ||
+      b.updatedAt.localeCompare(a.updatedAt)
   );
 
   const comparePair = useMemo(() => {
@@ -185,6 +219,44 @@ export function LiveOffersGrid({
               ))}
             </select>
           </div>
+          {!hideAreaFilter && (
+            <>
+              <div>
+                <label className="text-[10px] sm:text-[11px] font-bold text-ink-soft mb-1 block">
+                  {t.offers.filterImportance}
+                </label>
+                <select
+                  className="w-full h-9 sm:h-11 rounded-lg sm:rounded-xl border border-line bg-white px-2.5 sm:px-3 text-xs sm:text-sm outline-none focus:border-gold"
+                  value={selectedImportance}
+                  onChange={(e) => setSelectedImportance(e.target.value)}
+                >
+                  <option value="__all__">{t.offers.filterAllImportance}</option>
+                  {OFFER_IMPORTANCE_ORDER.map((key: PremiumImportance) => (
+                    <option key={key} value={key}>
+                      {t.offers.importance[key]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] sm:text-[11px] font-bold text-ink-soft mb-1 block">
+                  {t.offers.filterSize}
+                </label>
+                <select
+                  className="w-full h-9 sm:h-11 rounded-lg sm:rounded-xl border border-line bg-white px-2.5 sm:px-3 text-xs sm:text-sm outline-none focus:border-gold"
+                  value={selectedSize}
+                  onChange={(e) => setSelectedSize(e.target.value)}
+                >
+                  <option value="__all__">{t.offers.filterAllSizes}</option>
+                  {OFFER_SIZE_ORDER.map((key: OfferSizeCategory) => (
+                    <option key={key} value={key}>
+                      {t.offers.sizeCategory[key]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -212,15 +284,14 @@ export function LiveOffersGrid({
             const sold = offer.status === "sold";
             const selected = compareIds.includes(offer.id);
             const compareDisabled = !selected && compareIds.length >= COMPARE_MAX;
+            const sizeCat = listingSizeCategory(offer.size);
             return (
               <article
                 key={offer.id}
-                className={`group overflow-hidden flex flex-col rounded-2xl sm:rounded-3xl border bg-white transition-all duration-300 sm:hover:-translate-y-1 sm:hover:shadow-[0_28px_50px_-28px_rgba(15,52,47,0.45)] ${
+                className={`group overflow-hidden flex flex-col rounded-2xl sm:rounded-3xl border bg-white transition-all duration-300 sm:hover:-translate-y-1 ${
                   selected
                     ? "border-green ring-2 ring-green/20"
-                    : offer.featured
-                      ? "border-gold/60"
-                      : "border-line sm:hover:border-green/25"
+                    : "border-line sm:hover:border-green/25 sm:hover:shadow-[0_28px_50px_-28px_rgba(15,52,47,0.45)]"
                 } ${sold ? "opacity-90" : ""}`}
               >
                 <div className="relative overflow-hidden h-36 sm:h-52">
@@ -247,11 +318,14 @@ export function LiveOffersGrid({
                       {statusLabel}
                     </span>
                   </div>
-                  {offer.featured && !sold && (
-                    <span className="absolute bottom-2 start-2 sm:bottom-3 sm:start-3 bg-gold text-[#152126] text-[9px] sm:text-[10px] font-bold px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-full">
-                      {t.offers.featured}
-                    </span>
-                  )}
+                  <div className="absolute bottom-2 start-2 sm:bottom-3 sm:start-3 flex flex-wrap gap-1.5 max-w-[70%]">
+                    {!sold && <OfferImportanceBadge importance={offer.importance} />}
+                    {sizeCat && (
+                      <span className="bg-white/92 backdrop-blur text-[9px] sm:text-[10px] font-bold px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-full text-ink">
+                        {t.offers.sizeCategoryShort[sizeCat]}
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => toggleCompare(offer.id)}

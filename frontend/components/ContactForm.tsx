@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { useSettings } from "@/lib/SettingsProvider";
 import { useTeam } from "@/lib/TeamProvider";
@@ -8,6 +8,7 @@ import { api, ApiError } from "@/lib/api";
 import { openWhatsapp } from "@/lib/whatsapp";
 import { PhoneIcon, WhatsappIcon } from "@/components/icons";
 import { toWesternDigits } from "@/lib/arabicDigits";
+import { BotGuard, type BotGuardHandle } from "@/components/BotGuard";
 
 const inputClass =
   "w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none transition-colors focus:border-gold focus:bg-white";
@@ -26,6 +27,7 @@ export function ContactForm() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [doneSerial, setDoneSerial] = useState<string | null>(null);
+  const botRef = useRef<BotGuardHandle>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -45,6 +47,11 @@ export function ContactForm() {
       setError(t.contact.detailsRequired);
       return;
     }
+    const bot = botRef.current?.getPayload();
+    if (!bot) {
+      setError(t.botGuard.required);
+      return;
+    }
     setError("");
     setSaving(true);
     try {
@@ -56,9 +63,11 @@ export function ContactForm() {
         industryType: industryType || undefined,
         activityType: activityType || undefined,
         details: message,
+        ...bot,
       });
       setDoneSerial(result.serialNo);
     } catch (err) {
+      botRef.current?.reset();
       setError(err instanceof ApiError ? err.message : t.contact.submitFailed);
     } finally {
       setSaving(false);
@@ -216,6 +225,7 @@ export function ContactForm() {
                   <textarea className={`${inputClass} h-28 py-2`} value={message} onChange={(e) => setMessage(e.target.value)} required />
                 </div>
               </div>
+              <BotGuard ref={botRef} action="contact" className="mt-1" />
               {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg p-3">{error}</p>}
               <button
                 type="submit"

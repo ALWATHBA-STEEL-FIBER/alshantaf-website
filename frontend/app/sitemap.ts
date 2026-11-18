@@ -26,7 +26,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     page("/opportunities", { lastModified: now, changeFrequency: "daily", priority: 0.9 }),
     page("/land-check", { lastModified: now, changeFrequency: "weekly", priority: 0.85 }),
     page("/services", { lastModified: now, changeFrequency: "weekly", priority: 0.8 }),
-    page("/jordan-lending-market", { lastModified: now, changeFrequency: "daily", priority: 0.88 }),
+    page("/jordan-land-market", { lastModified: now, changeFrequency: "daily", priority: 0.88 }),
     page("/request-publish", { lastModified: now, changeFrequency: "weekly", priority: 0.75 }),
     page("/contact", { lastModified: now, changeFrequency: "monthly", priority: 0.7 }),
     page("/privacy", { lastModified: now, changeFrequency: "yearly", priority: 0.3 }),
@@ -52,7 +52,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: `${SITE_URL}/offers/${listing.id}`,
       lastModified: listing.updatedAt ? new Date(listing.updatedAt) : now,
       changeFrequency: "daily" as const,
-      priority: listing.featured ? 0.85 : 0.7,
+      priority:
+        listing.importance === "titanium" || listing.featured
+          ? 0.9
+          : listing.importance === "platinum"
+            ? 0.82
+            : listing.importance === "golden"
+              ? 0.78
+              : 0.7,
       ...(images.length > 0 ? { images } : {}),
     };
   });

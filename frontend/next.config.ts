@@ -33,6 +33,26 @@ const nextConfig: NextConfig = {
         source: "/_next/image",
         headers: [{ key: "Cache-Control", value: "public, max-age=2592000, stale-while-revalidate=86400" }],
       },
+      {
+        source: "/ads/wal/adtour.webm",
+        headers: [
+          { key: "Content-Disposition", value: 'attachment; filename="adtour.webm"' },
+          { key: "Content-Type", value: "video/webm" },
+          { key: "Cache-Control", value: "public, max-age=86400" },
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Access-Control-Allow-Methods", value: "GET, HEAD, OPTIONS" },
+        ],
+      },
+      {
+        source: "/ads/wal/adtour.mp4",
+        headers: [
+          { key: "Content-Disposition", value: 'attachment; filename="adtour.mp4"' },
+          { key: "Content-Type", value: "video/mp4" },
+          { key: "Cache-Control", value: "public, max-age=86400" },
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Access-Control-Allow-Methods", value: "GET, HEAD, OPTIONS" },
+        ],
+      },
     ];
   },
   async rewrites() {

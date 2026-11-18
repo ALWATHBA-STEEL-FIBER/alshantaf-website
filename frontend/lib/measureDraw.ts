@@ -702,14 +702,14 @@ export function attachMeasureTool(
         return;
       }
 
-      // Leaving measure entirely — wipe everything.
+      // Leaving measure tool — keep finished threads on the map (explicit clear() wipes).
       if (next === "off") {
         mode = "off";
-        threads = [];
         resetDraft(false);
         unbindMap();
-        group.clearLayers();
+        cursorGroup.clearLayers();
         snapGroup.clearLayers();
+        redrawAll();
         if (prevDoubleClickZoom) map.doubleClickZoom.enable();
         map.getContainer().style.cursor = "";
         emit();
@@ -801,6 +801,50 @@ export function attachMeasureTool(
     },
     removeThread(id: string) {
       threads = threads.filter((t) => t.id !== id);
+      redrawAll();
+      emit();
+    },
+    /**
+     * Restore finished threads + draft from another map instance
+     * (fullscreen ↔ inline). Does not wipe on mode sync the way setMode("off") does.
+     */
+    restoreSnapshot(snap: MeasureSnapshot | null | undefined) {
+      threads = (snap?.threads ?? []).map((t) => ({
+        ...t,
+        points: t.points.map((p) => ({ ...p })),
+      }));
+      points = (snap?.points ?? []).map((p) => ({ ...p }));
+      closed = Boolean(snap?.closed);
+      lastSnapped = Boolean(snap?.lastSnapped);
+      liveSegmentM = snap?.liveSegmentM ?? null;
+      if (snap?.lineColor) lineColor = snap.lineColor;
+
+      let nextMode: MeasureMode;
+      if (snap?.mode === "area" || snap?.mode === "distance") {
+        nextMode = snap.mode;
+      } else if (snap?.mode === "off") {
+        nextMode = "off";
+      } else {
+        // No explicit mode on the snapshot — keep measuring if we already are.
+        nextMode = mode === "off" ? "distance" : mode;
+      }
+
+      if (mode === "off" && nextMode !== "off") {
+        prevDoubleClickZoom = map.doubleClickZoom.enabled();
+        bindMap();
+        map.doubleClickZoom.disable();
+        map.getContainer().style.cursor = "crosshair";
+      } else if (mode !== "off" && nextMode === "off") {
+        unbindMap();
+        if (prevDoubleClickZoom) map.doubleClickZoom.enable();
+        map.getContainer().style.cursor = "";
+        cursorGroup.clearLayers();
+      } else if (nextMode !== "off") {
+        if (!clickHandler) bindMap();
+        map.doubleClickZoom.disable();
+        map.getContainer().style.cursor = "crosshair";
+      }
+      mode = nextMode;
       redrawAll();
       emit();
     },

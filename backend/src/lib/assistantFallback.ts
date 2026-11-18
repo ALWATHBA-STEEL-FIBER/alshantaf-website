@@ -1,5 +1,5 @@
 import { listServices, searchOffersForUserText, type AssistantLang, type OfferCardPayload, type ServiceCardPayload } from "./assistantCatalog";
-import { detectArea } from "./assistantIntent";
+import { detectArea, detectNavServiceIntent, isPublishIntent } from "./assistantIntent";
 import { developerCreditReply, isDeveloperCreditQuestion } from "./devSignature";
 
 export type FallbackCard =
@@ -7,17 +7,24 @@ export type FallbackCard =
   | { type: "service"; service: ServiceCardPayload };
 
 function detectServiceId(text: string): string | null {
-  if (/تتبع|tracking|track\b/i.test(text)) return "track";
-  if (/فحص|تنظيم|land[- ]?check|regulation/i.test(text)) return "land-check";
+  const nav = detectNavServiceIntent(text);
+  if (nav) return nav;
   if (/أنشر|انشر|نشر|publish|مالك|وسيط|owner|broker/i.test(text)) return "publish";
-  if (/بوابة|my[- ]?offer|رمز الوصول|access code/i.test(text)) return "my-offer";
   if (/تواصل|اتصل|contact|واتساب|whatsapp|دعم|support/i.test(text)) return "contact";
   if (/خدم/i.test(text) || /\bservices?\b/i.test(text)) return "services";
-  if (/قيمة إدارية|دائرة الأراضي|\bdls\b/i.test(text)) return "gov-dls";
-  if (/غذاء|دواء|\bjfda\b/i.test(text)) return "gov-jfda";
-  if (/بيئة|environment|moenv/i.test(text)) return "gov-env";
   if (/فرص|عروض|أراض|ارض|أرض|industrial|offers?|opportunit/i.test(text)) return "opportunities";
   return null;
+}
+
+function publishGuide(lang: AssistantLang): { reply: string; cards: FallbackCard[] } {
+  const [service] = listServices(lang, ["publish"]);
+  return {
+    reply:
+      lang === "ar"
+        ? "لنشر أرضك أو فرصتك على الشنتف، ابدأ من طلب النشر كمالك أو وسيط. بعد الإرسال يراجع الفريق الطلب قبل اعتماده وظهوره على المنصة. البطاقة أدناه تفتح صفحة التقديم."
+        : "To post your land or opportunity on Alshantaf, start a publish request as an owner or broker. After you submit, our team reviews it before it goes live. Use the card below to open the form.",
+    cards: service ? [{ type: "service", service }] : [],
+  };
 }
 
 /** Deterministic assistant used when Groq chat is unavailable or rate-limited. */
@@ -27,6 +34,10 @@ export async function buildFallbackReply(
 ): Promise<{ reply: string; cards: FallbackCard[]; degraded: true }> {
   if (isDeveloperCreditQuestion(userText)) {
     return { reply: developerCreditReply(lang), cards: [], degraded: true };
+  }
+
+  if (isPublishIntent(userText)) {
+    return { ...publishGuide(lang), degraded: true };
   }
 
   const { offers, intent } = await searchOffersForUserText(userText, { limit: 3 });

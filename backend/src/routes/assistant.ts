@@ -4,6 +4,7 @@ import { z } from "zod";
 import { asyncHandler } from "../lib/asyncHandler";
 import {
   buildSystemPrompt,
+  extractListingNos,
   listServices,
   listingDigestForPrompt,
   searchOffers,
@@ -12,17 +13,19 @@ import {
   type ServiceCardPayload,
 } from "../lib/assistantCatalog";
 import { blockedPromptReply, buildFallbackReply } from "../lib/assistantFallback";
+import { detectNavServiceIntent, isNonBrowseServiceIntent, isPublishIntent } from "../lib/assistantIntent";
 import { developerCreditReply, isDeveloperCreditQuestion } from "../lib/devSignature";
 import { knowledgeForPrompt } from "../lib/assistantKnowledge";
 import {
-  DEFAULT_GROQ_GUARD_MODEL,
-  DEFAULT_GROQ_MODEL,
-  GroqRequestError,
-  groqChatJson,
+  AiRequestError,
+  activeChatModel,
+  activeGuardModel,
+  aiEnabled,
   guardThreshold,
+  llmChatJson,
   scorePromptRisk,
-  type GroqMessage,
-} from "../lib/groq";
+  type LlmMessage,
+} from "../lib/llm";
 
 export const assistantRouter = Router();
 
@@ -161,7 +164,7 @@ function groundReply(
   allowedListingNos: Set<string>
 ): string {
   let text = reply.trim();
-  const mentioned = [...text.matchAll(/\bLST-[A-Z0-9]+\b/gi)].map((m) => m[0].toUpperCase());
+  const mentioned = extractListingNos(text);
   for (const code of mentioned) {
     if (!allowedListingNos.has(code)) {
       text = text.replace(new RegExp(`\\b${code}\\b`, "gi"), lang === "ar" ? "أحد العروض المتاحة" : "an available offer");
@@ -187,6 +190,43 @@ function groundReply(
   return text || (lang === "ar" ? "كيف يمكنني مساعدتك؟" : "How can I help?");
 }
 
+function navServiceGuideReply(lang: "ar" | "en", serviceId: string, planReply?: string) {
+  const [service] = listServices(lang, [serviceId]);
+  const mentioningOffers =
+    typeof planReply === "string" &&
+    (/وجدت عروض|إليك .*العروض|here are (?:offers|the closest)|found (?:offers|two|three)/i.test(planReply) ||
+      looksEmptyOfOffers(planReply));
+  const fallbacks: Record<string, { ar: string; en: string }> = {
+    publish: {
+      ar: "لنشر أرضك أو فرصتك ابدأ من طلب النشر كمالك أو وسيط؛ بعد الإرسال يراجع الفريق الطلب قبل اعتماده. البطاقة تحت تفتح النموذج.",
+      en: "To list your land or opportunity, start a publish request as an owner or broker; after you submit, the team reviews it before it goes live. The card below opens the form.",
+    },
+    "land-check": {
+      ar: "تقدر تفحص المساحة والقيمة الإدارية والملاءمة الأولية من فحص الأرض — بدون نشر عرض. افتح البطاقة تحت وكمّل بيانات القطعة.",
+      en: "You can check area, administrative value, and initial zoning fit from land check — without publishing. Open the card below and enter the parcel details.",
+    },
+    track: {
+      ar: "لتتبع طلب النشر أدخل رمز التتبع اللي وصلك بعد الإرسال من صفحة التتبع. إذا الرمز مش معك، راجعي إيميلك أو تواصل معنا.",
+      en: "To track a publish request, enter the tracking code you received after submitting. If you don’t have it, check your email or contact us.",
+    },
+    "my-offer": {
+      ar: "إدارة عرضك المنشور تتم من بوابة المالك برمز الوصول الخاص فيك. البطاقة تحت تفتح البوابة.",
+      en: "Manage your published listing from the owner portal with your access code. The card below opens the portal.",
+    },
+  };
+  const fb = fallbacks[serviceId];
+  const reply =
+    typeof planReply === "string" && planReply.trim() && !mentioningOffers
+      ? planReply.trim()
+      : lang === "ar"
+        ? fb?.ar || "هذه الخطوة الأنسب لطلبك — افتح البطاقة للمتابعة."
+        : fb?.en || "This is the best next step for your request — open the card to continue.";
+  return {
+    reply,
+    cards: (service ? [{ type: "service" as const, service }] : []) as AssistantCard[],
+  };
+}
+
 async function cardsFromPlan(
   plan: Record<string, unknown>,
   lang: "ar" | "en",
@@ -196,6 +236,15 @@ async function cardsFromPlan(
   reply: string;
   cards: AssistantCard[];
 }> {
+  const planServiceId = normalizeServiceId(plan.service_id ?? plan.serviceId);
+  const navId = detectNavServiceIntent(userText) || planServiceId;
+  if (navId && isNonBrowseServiceIntent(userText)) {
+    return navServiceGuideReply(lang, navId, typeof plan.reply === "string" ? plan.reply : undefined);
+  }
+  if (planServiceId === "publish" || isPublishIntent(userText)) {
+    return navServiceGuideReply(lang, "publish", typeof plan.reply === "string" ? plan.reply : undefined);
+  }
+
   let reply =
     typeof plan.reply === "string" && plan.reply.trim()
       ? plan.reply.trim()
@@ -253,9 +302,8 @@ async function cardsFromPlan(
     }
   }
 
-  const serviceId = normalizeServiceId(plan.service_id ?? plan.serviceId);
-  if (serviceId) {
-    const [service] = listServices(lang, [serviceId]);
+  if (planServiceId) {
+    const [service] = listServices(lang, [planServiceId]);
     if (service) cards.push({ type: "service", service });
   } else if (live.intent.wantsOffers && !offers.length) {
     const [service] = listServices(lang, ["opportunities"]);
@@ -268,11 +316,16 @@ async function cardsFromPlan(
 assistantRouter.get(
   "/status",
   asyncHandler(async (_req, res) => {
+    const [model, guardModel, enabled] = await Promise.all([
+      activeChatModel(),
+      activeGuardModel(),
+      aiEnabled(),
+    ]);
     res.json({
       enabled: true,
-      model: process.env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL,
-      guardModel: process.env.GROQ_GUARD_MODEL?.trim() || DEFAULT_GROQ_GUARD_MODEL,
-      aiEnabled: Boolean(process.env.GROQ_API_KEY?.trim()),
+      model,
+      guardModel,
+      aiEnabled: enabled,
     });
   })
 );
@@ -288,10 +341,11 @@ assistantRouter.post(
       return;
     }
 
-    // 1) Prompt Guard (14.4K RPD) — block obvious jailbreaks; fail-open on guard errors.
-    if (process.env.GROQ_API_KEY?.trim()) {
+    // 1) Prompt Guard (Groq classifier when a Groq key is available) — fail-open on errors.
+    {
       const { score, skipped } = await scorePromptRisk(last.content);
-      if (!skipped && score >= guardThreshold()) {
+      const threshold = await guardThreshold();
+      if (!skipped && score >= threshold) {
         const blocked = blockedPromptReply(body.lang);
         res.json({ ...blocked, guarded: true });
         return;
@@ -304,26 +358,24 @@ assistantRouter.post(
       return;
     }
 
-    // 3) No API key → deterministic helper still works (offers/services from DB).
-    if (!process.env.GROQ_API_KEY?.trim()) {
+    // 3) No AI provider → deterministic helper still works (offers/services from DB).
+    if (!(await aiEnabled())) {
       const fallback = await buildFallbackReply(last.content, body.lang);
       res.json(fallback);
       return;
     }
 
-    // 4) AI chat — on rate limit / any failure, never surface an error to the user.
+    // 4) AI chat (OpenAI preferred, else Groq) — never surface provider errors to the user.
     try {
       const digest = await listingDigestForPrompt(body.lang);
-      const digestListingNos = new Set(
-        [...digest.matchAll(/\bLST-[A-Z0-9]+\b/gi)].map((m) => m[0].toUpperCase())
-      );
-      const knowledge = await knowledgeForPrompt(last.content);
-      const history: GroqMessage[] = [
+      const digestListingNos = new Set(extractListingNos(digest));
+      const knowledge = await knowledgeForPrompt(last.content, body.lang);
+      const history: LlmMessage[] = [
         { role: "system", content: buildSystemPrompt(body.lang, digest, body.context?.offer, knowledge) },
         ...body.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
       ];
 
-      const raw = await groqChatJson({ messages: history, temperature: 0.15 });
+      const raw = await llmChatJson({ messages: history });
       const plan = extractJsonObject(raw);
 
       if (!plan) {
@@ -339,7 +391,7 @@ assistantRouter.post(
       res.json({
         ...fallback,
         degraded: true,
-        reason: err instanceof GroqRequestError && err.rateLimited ? "rate_limit" : "ai_unavailable",
+        reason: err instanceof AiRequestError && err.rateLimited ? "rate_limit" : "ai_unavailable",
       });
     }
   })

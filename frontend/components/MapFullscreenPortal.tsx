@@ -14,7 +14,17 @@ import {
 } from "@/lib/measureDraw";
 import { MeasureToolbar } from "@/components/MeasureToolbar";
 import { MeasureThreadsOverlay } from "@/components/MeasureThreadsOverlay";
+import { DlsMapControls, type EditTool, type SurfaceView } from "@/components/DlsMapControls";
 import { downloadParcelCadDxf } from "@/lib/parcelCadExport";
+import {
+  ESRI_SAT_TILE_URL,
+  MAP_MAX_ZOOM,
+  MEASURE_MAX_ZOOM,
+  OSM_TILE_URL,
+  PARCEL_FIT_MAX_ZOOM,
+  osmTileOptions,
+  satTileOptions,
+} from "@/lib/mapTiles";
 import type { AdjacentRoad, ContextParcel, ParcelRing } from "@/components/LocationInput";
 import "leaflet/dist/leaflet.css";
 
@@ -22,11 +32,27 @@ type Basemap = "map" | "satellite";
 
 type Extents = { lengthM: number; widthM: number } | null;
 
+export type ParcelIdentityInfo = {
+  governorate?: string | null;
+  directorate?: string | null;
+  basin?: string | null;
+  neighborhood?: string | null;
+  parcel?: string | null;
+  dlsKey?: string | null;
+};
+
 type Labels = {
   basemapLabel: string;
   basemapMap: string;
   basemapSatellite: string;
   dimensionsOnMap: string;
+  identityTitle: string;
+  identityGovernorate: string;
+  identityDirectorate: string;
+  identityBasin: string;
+  identityNeighborhood: string;
+  identityParcel: string;
+  identityDlsKey: string;
   dimensionsTitle: string;
   dimensionsArea: string;
   dimensionsPerimeter: string;
@@ -64,6 +90,21 @@ type Labels = {
   useLocation: string;
   locating: string;
   locationUnavailable: string;
+  ctrlZoomIn: string;
+  ctrlZoomOut: string;
+  ctrlDraw: string;
+  ctrlMeasure: string;
+  ctrlTools: string;
+  ctrlToolsClose: string;
+  ctrlEdit: string;
+  ctrlEditLines: string;
+  ctrlEditSpace: string;
+  ctrlTopo: string;
+  ctrlTopoMap: string;
+  ctrlLocate: string;
+  ctrlHome: string;
+  ctrlLayers: string;
+  ctrlCompass: string;
 };
 
 type Props = {
@@ -76,6 +117,9 @@ type Props = {
   showDimensions: boolean;
   measureMode: MeasureMode;
   onMeasureModeChange: (m: MeasureMode) => void;
+  /** Shared architecture measurements — restored on open, synced while drawing. */
+  measureSnapshot?: MeasureSnapshot | null;
+  onMeasureSnapshotChange?: (snap: MeasureSnapshot) => void;
   edgeSnap: boolean;
   onEdgeSnapChange: (v: boolean) => void;
   lineSnap: boolean;
@@ -92,6 +136,8 @@ type Props = {
   extents: Extents;
   parcelNumber?: string | null;
   parcelNumbers?: string[] | null;
+  /** Cadastral identity shown beside dimensions in the fullscreen info strip. */
+  parcelIdentity?: ParcelIdentityInfo | null;
   adjacentRoads?: AdjacentRoad[] | null;
   contextParcels?: ContextParcel[] | null;
   showContextGrid?: boolean;
@@ -101,11 +147,12 @@ type Props = {
   labels: Labels;
   locked?: boolean;
   onPickLocation?: (coords: Coords) => void | Promise<void>;
+  surfaceView?: SurfaceView;
+  onSurfaceViewChange?: (view: SurfaceView) => void;
+  showTopo?: boolean;
 };
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
-const MAP_MAX_ZOOM = 19;
-const MEASURE_MAX_ZOOM = 22;
 
 /**
  * Independent fullscreen map: mounts a brand-new Leaflet instance in a body portal.
@@ -121,6 +168,8 @@ export function MapFullscreenPortal({
   showDimensions,
   measureMode,
   onMeasureModeChange,
+  measureSnapshot = null,
+  onMeasureSnapshotChange,
   edgeSnap,
   onEdgeSnapChange,
   lineSnap,
@@ -137,6 +186,7 @@ export function MapFullscreenPortal({
   extents,
   parcelNumber = null,
   parcelNumbers = null,
+  parcelIdentity = null,
   adjacentRoads = null,
   contextParcels = null,
   showContextGrid = true,
@@ -146,6 +196,9 @@ export function MapFullscreenPortal({
   labels: lp,
   locked = false,
   onPickLocation,
+  surfaceView = "map",
+  onSurfaceViewChange,
+  showTopo = true,
 }: Props) {
   const paneRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<import("leaflet").Map | null>(null);
@@ -156,15 +209,28 @@ export function MapFullscreenPortal({
   const markerRef = useRef<import("leaflet").Marker | null>(null);
   const roadsLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const measureToolRef = useRef<MeasureTool | null>(null);
-  const [measureSnap, setMeasureSnap] = useState<MeasureSnapshot | null>(null);
+  const [measureSnap, setMeasureSnap] = useState<MeasureSnapshot | null>(measureSnapshot ?? null);
   const basemapRef = useRef(basemap);
   basemapRef.current = basemap;
   const measureModeRef = useRef(measureMode);
   measureModeRef.current = measureMode;
+  const measureSeedRef = useRef(measureSnapshot);
+  measureSeedRef.current = measureSnapshot;
+
+  // Portal stays mounted while closed — seed local snap when opening so the
+  // threads panel has data before/while the Leaflet measure tool boots.
+  useEffect(() => {
+    if (!open) return;
+    if (measureSnapshot) setMeasureSnap(measureSnapshot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const onMeasureSnapshotChangeRef = useRef(onMeasureSnapshotChange);
+  onMeasureSnapshotChangeRef.current = onMeasureSnapshotChange;
   const lockedRef = useRef(locked);
   lockedRef.current = locked;
   const [geoStatus, setGeoStatus] = useState<"idle" | "locating" | "error">("idle");
   const [geoMessage, setGeoMessage] = useState("");
+  const [mapReady, setMapReady] = useState(false);
 
   const snapTargets = useMemo(
     () => parcelSnapTargets(polygon as [number, number][][] | null | undefined),
@@ -324,7 +390,8 @@ export function MapFullscreenPortal({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (measureModeRef.current !== "off") {
-          measureToolRef.current?.clear();
+          // Exit architecture mode without wiping finished measurements.
+          measureToolRef.current?.setMode("off");
           onMeasureModeChange("off");
           return;
         }
@@ -367,8 +434,9 @@ export function MapFullscreenPortal({
         ? ([selected.lat, selected.lng] as [number, number])
         : DEFAULT_CENTER;
       map = L.map(paneRef.current, {
-        zoomControl: true,
+        zoomControl: false,
         attributionControl: false,
+        preferCanvas: true,
         dragging: true,
         scrollWheelZoom: true,
         doubleClickZoom: false,
@@ -376,21 +444,8 @@ export function MapFullscreenPortal({
         maxZoom: measureModeRef.current !== "off" ? MEASURE_MAX_ZOOM : MAP_MAX_ZOOM,
       }).setView(start, selected ? 16 : 8);
 
-      const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap",
-        maxNativeZoom: MAP_MAX_ZOOM,
-        maxZoom: MEASURE_MAX_ZOOM,
-        crossOrigin: true,
-      });
-      const sat = L.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        {
-          attribution: "© Esri",
-          maxNativeZoom: MAP_MAX_ZOOM,
-          maxZoom: MEASURE_MAX_ZOOM,
-          crossOrigin: true,
-        }
-      );
+      const osm = L.tileLayer(OSM_TILE_URL, osmTileOptions());
+      const sat = L.tileLayer(ESRI_SAT_TILE_URL, satTileOptions());
       osmRef.current = osm;
       satRef.current = sat;
       (basemapRef.current === "satellite" ? sat : osm).addTo(map);
@@ -404,35 +459,17 @@ export function MapFullscreenPortal({
       };
       map.on("click", clickHandler);
 
-      if (polygon && polygon.length > 0) {
-        const opts: ParcelCanvasOpts = {
-          rings: polygon as [number, number][][],
-          contextParcels,
-          showContextGrid,
-          showDimensions: Boolean(
-            drawDimensions && showDimensions && measureModeRef.current === "off"
-          ),
-          perimeterM,
-          lang,
-          parcelNumber,
-          parcelNumbers,
-          parcelLabel,
-        };
-        const layer = createParcelCanvasLayer(L, opts);
-        layer.addTo(map);
-        polyRef.current = layer as unknown as import("leaflet").Polygon;
-        try {
-          map.fitBounds(layer.getBounds(), { padding: [40, 40], maxZoom: 19, animate: false });
-        } catch {
-          /* ignore */
-        }
-      } else if (selected) {
+      // Parcel outline is applied by the polygon sync effect once mapReady flips.
+      if (selected && !(polygon && polygon.length > 0)) {
         upsertMarker(L, map, selected);
       }
 
       measureToolRef.current = attachMeasureTool(L, map, {
         lang,
-        onChange: setMeasureSnap,
+        onChange: (snap) => {
+          setMeasureSnap(snap);
+          onMeasureSnapshotChangeRef.current?.(snap);
+        },
       });
       measureToolRef.current.setSnapTargets(
         parcelSnapTargets(polygon as [number, number][][] | null | undefined)
@@ -441,9 +478,17 @@ export function MapFullscreenPortal({
       measureToolRef.current.setLineSnap(lineSnap);
       measureToolRef.current.setFixedSnapM(fixedSnapM);
       measureToolRef.current.setLineColor(lineColor);
-      if (measureModeRef.current !== "off") {
+      const seed = measureSeedRef.current;
+      if (seed && (seed.threads.length > 0 || seed.points.length > 0 || seed.mode !== "off")) {
+        measureToolRef.current.restoreSnapshot({
+          ...seed,
+          mode: seed.mode !== "off" ? seed.mode : measureModeRef.current !== "off" ? measureModeRef.current : "distance",
+        });
+      } else if (measureModeRef.current !== "off") {
         measureToolRef.current.setMode(measureModeRef.current);
       }
+
+      if (!cancelled) setMapReady(true);
 
       requestAnimationFrame(() => {
         map?.invalidateSize({ animate: false });
@@ -456,6 +501,7 @@ export function MapFullscreenPortal({
 
     return () => {
       cancelled = true;
+      setMapReady(false);
       if (map && clickHandler) map.off("click", clickHandler);
       measureToolRef.current?.destroy();
       measureToolRef.current = null;
@@ -467,9 +513,8 @@ export function MapFullscreenPortal({
       roadsLayerRef.current = null;
       dimsRef.current = null;
       markerRef.current = null;
-      setMeasureSnap(null);
     };
-    // Intentionally only when open flips — polygon/selected snapshotted at open.
+    // Intentionally only when open flips — parcel rings sync via mapReady + polygonKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -487,8 +532,17 @@ export function MapFullscreenPortal({
 
   useEffect(() => {
     if (!open) return;
-    measureToolRef.current?.setMode(measureMode);
-    if (measureMode === "off") setMeasureSnap(null);
+    // Prefer restore when turning tools on so we don't wipe threads (setMode("off") used to).
+    if (measureMode === "off") {
+      measureToolRef.current?.setMode("off");
+    } else if (measureToolRef.current) {
+      const cur = measureSnap;
+      if (cur && (cur.threads.length > 0 || cur.points.length > 0)) {
+        measureToolRef.current.restoreSnapshot({ ...cur, mode: measureMode });
+      } else {
+        measureToolRef.current.setMode(measureMode);
+      }
+    }
     const map = mapRef.current;
     if (map) {
       const nextMax = measureMode !== "off" ? MEASURE_MAX_ZOOM : MAP_MAX_ZOOM;
@@ -497,6 +551,7 @@ export function MapFullscreenPortal({
         map.setZoom(MAP_MAX_ZOOM, { animate: false });
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, measureMode]);
 
   useEffect(() => {
@@ -543,24 +598,108 @@ export function MapFullscreenPortal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, measureSnap?.lineColor, measureSnap?.mode]);
 
+  // Re-pick / refetch: create or replace the parcel layer while fullscreen stays open.
+  const polygonKey = useMemo(() => {
+    if (!polygon?.length) return "";
+    return polygon
+      .map((ring) => ring.map(([lat, lng]) => `${lat.toFixed(7)},${lng.toFixed(7)}`).join("|"))
+      .join("||");
+  }, [polygon]);
+  const appliedPolygonKeyRef = useRef("");
+
   useEffect(() => {
-    if (!open) return;
-    const layer = polyRef.current as unknown as
-      | { setParcelOptions?: (o: ParcelCanvasOpts) => void }
-      | null;
-    if (!layer?.setParcelOptions || !polygon?.[0]?.length) return;
-    layer.setParcelOptions({
-      rings: polygon as [number, number][][],
-      contextParcels,
-      showContextGrid,
-      showDimensions: dimsOnCanvas,
-      perimeterM,
-      lang,
-      parcelNumber,
-      parcelNumbers,
-      parcelLabel,
+    if (!open || !mapReady) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    void import("leaflet").then((L) => {
+      const liveMap = mapRef.current;
+      if (!liveMap) return;
+
+      if (!polygon?.[0]?.length) {
+        if (polyRef.current) {
+          liveMap.removeLayer(polyRef.current);
+          polyRef.current = null;
+        }
+        appliedPolygonKeyRef.current = "";
+        measureToolRef.current?.setSnapTargets([]);
+        return;
+      }
+
+      const opts: ParcelCanvasOpts = {
+        rings: polygon as [number, number][][],
+        contextParcels,
+        showContextGrid,
+        showDimensions: dimsOnCanvas,
+        perimeterM,
+        lang,
+        parcelNumber,
+        parcelNumbers,
+        parcelLabel,
+      };
+
+      const geometryChanged = appliedPolygonKeyRef.current !== polygonKey;
+      const existing = polyRef.current as unknown as
+        | (import("leaflet").Layer & { setParcelOptions?: (o: ParcelCanvasOpts) => void })
+        | null;
+
+      if (existing?.setParcelOptions) {
+        existing.setParcelOptions(opts);
+      } else {
+        if (polyRef.current) {
+          liveMap.removeLayer(polyRef.current);
+          polyRef.current = null;
+        }
+        const layer = createParcelCanvasLayer(L, opts);
+        layer.addTo(liveMap);
+        polyRef.current = layer as unknown as import("leaflet").Polygon;
+      }
+
+      measureToolRef.current?.setSnapTargets(
+        parcelSnapTargets(polygon as [number, number][][] | null | undefined)
+      );
+
+      if (geometryChanged) {
+        appliedPolygonKeyRef.current = polygonKey;
+        try {
+          const boundsLayer = polyRef.current as unknown as {
+            getBounds?: () => import("leaflet").LatLngBounds;
+          };
+          const bounds = boundsLayer?.getBounds?.();
+          if (bounds) {
+            liveMap.fitBounds(bounds, {
+            padding: [40, 40],
+            maxZoom: PARCEL_FIT_MAX_ZOOM,
+            animate: true,
+          });
+          }
+        } catch {
+          /* ignore */
+        }
+        if (markerRef.current) {
+          liveMap.removeLayer(markerRef.current);
+          markerRef.current = null;
+        }
+      }
     });
-  }, [open, dimsOnCanvas, polygon, perimeterM, lang, parcelNumber, parcelNumbers, parcelLabel, contextParcels, showContextGrid]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    open,
+    mapReady,
+    polygonKey,
+    dimsOnCanvas,
+    perimeterM,
+    lang,
+    parcelNumber,
+    parcelNumbers,
+    parcelLabel,
+    contextParcels,
+    showContextGrid,
+  ]);
+
+  useEffect(() => {
+    if (!open) appliedPolygonKeyRef.current = "";
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -579,25 +718,37 @@ export function MapFullscreenPortal({
 
   const hasInfo =
     Boolean(areaLabel || areaSqm != null || (perimeterM != null && perimeterM > 0) || extents);
+  const identityRows: Array<{ label: string; value: string }> = [];
+  const pushIdentity = (label: string, value?: string | null) => {
+    const trimmed = (value || "").trim();
+    if (trimmed) identityRows.push({ label, value: trimmed });
+  };
+  pushIdentity(lp.identityGovernorate, parcelIdentity?.governorate);
+  pushIdentity(lp.identityDirectorate, parcelIdentity?.directorate);
+  pushIdentity(lp.identityBasin, parcelIdentity?.basin);
+  pushIdentity(lp.identityNeighborhood, parcelIdentity?.neighborhood);
+  pushIdentity(lp.identityParcel, parcelIdentity?.parcel || parcelNumber);
+  pushIdentity(lp.identityDlsKey, parcelIdentity?.dlsKey);
+  const hasIdentity = identityRows.length > 0;
 
   return createPortal(
     <div
-      className="map-fs-portal fixed inset-0 z-[10000] flex flex-col gap-2 bg-[#0a1f1c] p-2 sm:p-3 overflow-hidden"
+      className="map-fs-portal fixed inset-0 z-[10000] flex flex-col gap-1.5 bg-[#0a1f1c] p-1.5 sm:gap-2 sm:p-2 overflow-hidden"
       role="dialog"
       aria-modal="true"
       aria-label={lp.exitFullscreen}
-      style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))", paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+      style={{ paddingTop: "max(0.35rem, env(safe-area-inset-top))", paddingBottom: "max(0.35rem, env(safe-area-inset-bottom))" }}
     >
-      <div className="map-fs-portal-toolbar shrink-0 flex flex-wrap items-center justify-end gap-2 rounded-xl border border-gold/40 bg-[#0f342f] px-2 py-2">
+      <div className="map-fs-portal-toolbar shrink-0 flex flex-wrap items-center justify-end gap-1 rounded-md border border-gold/35 bg-[#0f342f] px-1.5 py-1.5 sm:gap-1.5 sm:px-2">
         <div
-          className="inline-flex rounded-full border border-gold/35 bg-[#0a1f1c] p-0.5"
+          className="inline-flex rounded-md border border-gold/35 bg-[#0a1f1c] p-0.5"
           role="group"
           aria-label={lp.basemapLabel}
         >
           <button
             type="button"
             onClick={() => onBasemapChange("map")}
-            className={`min-h-11 h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
+            className={`h-7 px-2.5 rounded-md text-[10px] font-bold transition-colors sm:h-8 sm:px-3 sm:text-[11px] ${
               basemap === "map" ? "bg-green text-white" : "text-gold/80 hover:text-gold"
             }`}
           >
@@ -606,7 +757,7 @@ export function MapFullscreenPortal({
           <button
             type="button"
             onClick={() => onBasemapChange("satellite")}
-            className={`min-h-11 h-8 px-3 rounded-full text-[11px] font-bold transition-colors ${
+            className={`h-7 px-2.5 rounded-md text-[10px] font-bold transition-colors sm:h-8 sm:px-3 sm:text-[11px] ${
               basemap === "satellite" ? "bg-green text-white" : "text-gold/80 hover:text-gold"
             }`}
           >
@@ -617,7 +768,7 @@ export function MapFullscreenPortal({
           <button
             type="button"
             onClick={() => onDrawDimensionsChange(!drawDimensions)}
-            className={`min-h-11 h-8 px-3 rounded-full text-[11px] font-bold border transition-colors ${
+            className={`h-7 px-2.5 rounded-md text-[10px] font-bold border transition-colors sm:h-8 sm:px-3 sm:text-[11px] ${
               drawDimensions
                 ? "bg-gold/15 border-gold text-gold"
                 : "border-gold/35 text-gold/80 hover:text-gold bg-[#0a1f1c]"
@@ -631,7 +782,7 @@ export function MapFullscreenPortal({
           <button
             type="button"
             onClick={onToggleContextGrid}
-            className={`min-h-11 h-8 px-3 rounded-full text-[11px] font-bold border transition-colors ${
+            className={`h-7 px-2.5 rounded-md text-[10px] font-bold border transition-colors sm:h-8 sm:px-3 sm:text-[11px] ${
               showContextGrid
                 ? "bg-gold/15 border-gold text-gold"
                 : "border-gold/35 text-gold/80 hover:text-gold bg-[#0a1f1c]"
@@ -673,7 +824,7 @@ export function MapFullscreenPortal({
             type="button"
             onClick={useCurrentLocationInFullscreen}
             disabled={geoStatus === "locating"}
-            className="min-h-11 h-8 px-3 rounded-full border border-gold/35 bg-[#0a1f1c] text-gold text-[11px] font-bold disabled:opacity-60"
+            className="h-7 px-2.5 rounded-md border border-gold/35 bg-[#0a1f1c] text-gold text-[10px] font-bold disabled:opacity-60 sm:h-8 sm:px-3 sm:text-[11px]"
             title={lp.useLocation}
           >
             {geoStatus === "locating" ? lp.locating : lp.useLocation}
@@ -686,10 +837,10 @@ export function MapFullscreenPortal({
               measureToolRef.current?.clear();
               onMeasureModeChange("off");
             }}
-            className="inline-flex items-center gap-1.5 min-h-11 px-3 rounded-full border text-[12px] font-bold border-gold bg-gold text-[#0a1f1c]"
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border text-[10px] font-bold border-gold bg-gold text-[#0a1f1c] sm:h-8 sm:gap-1.5 sm:px-3 sm:text-[11px]"
             aria-label={lp.measureExit}
           >
-            <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
             <span>{lp.measureExit}</span>
@@ -698,7 +849,7 @@ export function MapFullscreenPortal({
         <button
           type="button"
           onClick={onClose}
-          className="min-h-11 h-8 px-3 rounded-full border border-gold bg-gold text-[#0a1f1c] text-[11px] font-bold"
+          className="h-7 px-2.5 rounded-md border border-gold bg-gold text-[#0a1f1c] text-[10px] font-bold sm:h-8 sm:px-3 sm:text-[11px]"
         >
           {lp.exitFullscreen}
         </button>
@@ -739,82 +890,207 @@ export function MapFullscreenPortal({
         </div>
       ) : null}
 
-      <div className="relative min-h-0 flex-1 w-full overflow-hidden rounded-xl border border-line bg-surface-2">
+      <div className="relative min-h-0 flex-1 w-full overflow-hidden rounded-md border border-line bg-surface-2">
         <div
           ref={paneRef}
-          className="map-fs-portal-pane absolute inset-0 touch-none"
+          className="map-fs-portal-pane absolute inset-0 z-0 touch-none"
         />
-        <p className="absolute bottom-1.5 right-2 z-20 rounded bg-black/55 px-2 py-0.5 text-[10px] text-white/95">
+        <div className="absolute left-2 top-2 z-[1200] sm:left-3 sm:top-3">
+          <DlsMapControls
+            labels={{
+              zoomIn: lp.ctrlZoomIn,
+              zoomOut: lp.ctrlZoomOut,
+              tools: lp.ctrlTools,
+              toolsClose: lp.ctrlToolsClose,
+              edit: lp.ctrlEdit,
+              editLines: lp.ctrlEditLines,
+              editSpace: lp.ctrlEditSpace,
+              topo: lp.ctrlTopo,
+              topoMap: lp.ctrlTopoMap,
+              draw: lp.ctrlDraw,
+              measure: lp.ctrlMeasure,
+              locate: lp.ctrlLocate,
+              locating: lp.locating,
+              home: lp.ctrlHome,
+              layers: lp.ctrlLayers,
+              layersMap: lp.basemapMap,
+              layersSatellite: lp.basemapSatellite,
+              compass: lp.ctrlCompass,
+            }}
+            basemap={basemap}
+            editTool={
+              measureMode === "distance" ? "lines" : measureMode === "area" ? "space" : null
+            }
+            surfaceView={surfaceView}
+            locating={geoStatus === "locating"}
+            locateDisabled={locked}
+            topoDisabled={!showTopo || !onSurfaceViewChange}
+            onZoomIn={() => mapRef.current?.zoomIn()}
+            onZoomOut={() => mapRef.current?.zoomOut()}
+            onEditToolChange={(tool: EditTool | null) => {
+              if (tool === "lines") onMeasureModeChange("distance");
+              else if (tool === "space") onMeasureModeChange("area");
+              else onMeasureModeChange("off");
+            }}
+            onSurfaceViewChange={(view) => {
+              onSurfaceViewChange?.(view);
+              if (view === "topo") onClose();
+            }}
+            onLocate={useCurrentLocationInFullscreen}
+            onHome={() => {
+              const map = mapRef.current;
+              if (!map) return;
+              try {
+                const layer = polyRef.current as unknown as {
+                  getBounds?: () => import("leaflet").LatLngBounds;
+                } | null;
+                const bounds = layer?.getBounds?.();
+                if (bounds?.isValid?.()) {
+                  map.fitBounds(bounds, { padding: [40, 40], maxZoom: PARCEL_FIT_MAX_ZOOM, animate: true });
+                  return;
+                }
+              } catch {
+                /* ignore */
+              }
+              if (selected) {
+                map.setView([selected.lat, selected.lng], 16, { animate: true });
+                return;
+              }
+              map.setView(DEFAULT_CENTER, 8, { animate: true });
+            }}
+            onToggleLayers={() => onBasemapChange(basemap === "satellite" ? "map" : "satellite")}
+            onCompass={() => {
+              const map = mapRef.current;
+              if (!map) return;
+              const c = map.getCenter();
+              map.setView(c, map.getZoom(), { animate: true });
+            }}
+          />
+        </div>
+        <p className="pointer-events-none absolute bottom-1.5 right-2 z-[20] rounded bg-black/55 px-2 py-0.5 text-[10px] text-white/95">
           © OpenStreetMap · © Esri
         </p>
-        {measuring && (
-          <MeasureThreadsOverlay
-            snap={measureSnap}
-            lang={lang}
-            variant="dark"
-            labels={{
-              measureThreads: lp.measureThreads,
-              measureDistance: lp.measureDistance,
-              measureArea: lp.measureArea,
-              measureTotal: lp.measureTotal,
-              measureClear: lp.measureClear,
-              dimensionsArea: lp.dimensionsArea,
-            }}
-            onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
-          />
+        {/* Above Leaflet panes/controls (z≤1000). Show whenever threads/draft exist. */}
+        {((measureSnap?.threads.length ?? 0) > 0 ||
+          (measureSnap?.points.length ?? 0) > 0 ||
+          measuring) && (
+          <div className="map-fs-measure-overlay-layer pointer-events-none absolute inset-0 z-[1100]">
+            <MeasureThreadsOverlay
+              snap={measureSnap}
+              lang={lang}
+              variant="dark"
+              labels={{
+                measureThreads: lp.measureThreads,
+                measureDistance: lp.measureDistance,
+                measureArea: lp.measureArea,
+                measureTotal: lp.measureTotal,
+                measureClear: lp.measureClear,
+                dimensionsArea: lp.dimensionsArea,
+              }}
+              onRemoveThread={(id) => measureToolRef.current?.removeThread(id)}
+            />
+          </div>
         )}
       </div>
 
-      {hasInfo && !measuring && (
-        <div className="shrink-0 rounded-xl border border-gold/35 bg-[#0f342f] px-3 py-2 text-gold-2">
-          <p className="text-[10px] font-bold tracking-wide mb-1 text-gold">{lp.dimensionsTitle}</p>
-          <ul className="space-y-0.5 text-[11px] leading-snug">
-            {parcelNumber && (
-              <li>
-                <span className="text-gold/70">{parcelLabel}: </span>
-                <b>{parcelNumber}</b>
-              </li>
-            )}
-            {(areaLabel || areaSqm != null) && (
-              <li>
-                <span className="text-gold/70">{lp.dimensionsArea}: </span>
-                <b>{areaLabel || `${areaSqm!.toLocaleString("en-JO")} m²`}</b>
-              </li>
-            )}
-            {perimeterM != null && perimeterM > 0 && (
-              <li>
-                <span className="text-gold/70">{lp.dimensionsPerimeter}: </span>
-                <b>{formatMeters(perimeterM, lang)}</b>
-              </li>
-            )}
-            {extents && (
-              <li>
-                <span className="text-gold/70">{lp.dimensionsExtent}: </span>
-                <b>
-                  {formatMeters(extents.lengthM, lang)} × {formatMeters(extents.widthM, lang)}
-                </b>
-              </li>
-            )}
-          </ul>
-        </div>
-      )}
-      {roads.length > 0 && !measuring && (
-        <div className="shrink-0 rounded-xl border border-gold/35 bg-[#0f342f] px-3 py-2 text-gold-2">
-          <p className="text-[10px] font-bold tracking-wide mb-1 text-gold">{lp.streetInfoTitle}</p>
-          <ul className="grid gap-1 text-[11px]">
-            {roads.map((road) => (
-              <li key={road.id} className="flex flex-wrap items-center gap-1.5">
-                <b>{road.name || lp.streetUnnamed}</b>
-                {!(road.source === "dls-neighbor" && road.id.startsWith("dls-line-nearest-")) && (
-                  <span className="text-gold/70">({sideLabel(road.side)})</span>
-                )}
-                <span className="text-gold/70">
-                  {lp.streetWidthLabel}:{" "}
-                  <b>{road.widthM != null ? `${Math.round(road.widthM * 10) / 10} ${lang === "ar" ? "م" : "m"}` : lp.streetWidthUnknown}</b>
-                </span>
-              </li>
-            ))}
-          </ul>
+      {(hasIdentity || hasInfo || roads.length > 0) && !measuring && (
+        <div className="shrink-0 max-h-[32svh] overflow-y-auto overscroll-contain rounded-md border border-gold/35 bg-[#0f342f] px-2.5 py-2 text-gold-2 sm:max-h-none sm:px-3 sm:py-2.5">
+          {(hasIdentity || hasInfo) && (
+            <div
+              className={
+                hasIdentity && hasInfo
+                  ? "grid grid-cols-2 gap-x-0"
+                  : "grid grid-cols-1"
+              }
+            >
+              {/* AR RTL: first cell = right (أبعاد). EN LTR: second cell = right. */}
+              {hasInfo ? (
+                <div
+                  className={
+                    hasIdentity && hasInfo
+                      ? lang === "ar"
+                        ? "min-w-0 border-e border-gold/25 pe-4"
+                        : "min-w-0 order-2 border-s border-gold/25 ps-4"
+                      : "min-w-0"
+                  }
+                >
+                  <p className="mb-1 text-[10px] font-bold tracking-wide text-gold">{lp.dimensionsTitle}</p>
+                  <ul className="space-y-0.5 text-[11px] leading-snug">
+                    {!hasIdentity && parcelNumber ? (
+                      <li>
+                        <span className="text-gold/70">{parcelLabel}: </span>
+                        <b>{parcelNumber}</b>
+                      </li>
+                    ) : null}
+                    {(areaLabel || areaSqm != null) && (
+                      <li>
+                        <span className="text-gold/70">{lp.dimensionsArea}: </span>
+                        <b>{areaLabel || `${areaSqm!.toLocaleString("en-JO")} m²`}</b>
+                      </li>
+                    )}
+                    {perimeterM != null && perimeterM > 0 && (
+                      <li>
+                        <span className="text-gold/70">{lp.dimensionsPerimeter}: </span>
+                        <b>{formatMeters(perimeterM, lang)}</b>
+                      </li>
+                    )}
+                    {extents && (
+                      <li>
+                        <span className="text-gold/70">{lp.dimensionsExtent}: </span>
+                        <b>
+                          {formatMeters(extents.lengthM, lang)} × {formatMeters(extents.widthM, lang)}
+                        </b>
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              ) : null}
+              {hasIdentity ? (
+                <div
+                  className={
+                    hasInfo
+                      ? lang === "ar"
+                        ? "min-w-0 ps-4"
+                        : "min-w-0 order-1 pe-4"
+                      : "min-w-0"
+                  }
+                >
+                  <p className="mb-1 text-[10px] font-bold tracking-wide text-gold">{lp.identityTitle}</p>
+                  <ul className="space-y-0.5 text-[11px] leading-snug">
+                    {identityRows.map((row) => (
+                      <li key={`${row.label}-${row.value}`}>
+                        <span className="text-gold/70">{row.label}: </span>
+                        <b dir={row.label === lp.identityDlsKey ? "ltr" : undefined}>{row.value}</b>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          )}
+          {roads.length > 0 ? (
+            <div className={hasIdentity || hasInfo ? "mt-2 border-t border-gold/20 pt-2" : undefined}>
+              <p className="mb-1 text-[10px] font-bold tracking-wide text-gold">{lp.streetInfoTitle}</p>
+              <ul className="grid gap-1 text-[11px]">
+                {roads.map((road) => (
+                  <li key={road.id} className="flex flex-wrap items-center gap-1.5">
+                    <b>{road.name || lp.streetUnnamed}</b>
+                    {!(road.source === "dls-neighbor" && road.id.startsWith("dls-line-nearest-")) && (
+                      <span className="text-gold/70">({sideLabel(road.side)})</span>
+                    )}
+                    <span className="text-gold/70">
+                      {lp.streetWidthLabel}:{" "}
+                      <b>
+                        {road.widthM != null
+                          ? `${Math.round(road.widthM * 10) / 10} ${lang === "ar" ? "م" : "m"}`
+                          : lp.streetWidthUnknown}
+                      </b>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       )}
     </div>,

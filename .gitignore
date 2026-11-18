@@ -5,11 +5,12 @@ backend/uploads/*
 !backend/uploads/.gitkeep
 frontend/.next/
 frontend/node_modules/
-
-# Secrets & local artifacts (never commit)
-certbot/conf/
-backups/
-*.bak.*
-frontend.bak.*/
-.env
-.env.*
+backend/data/
+firstorder-repo/
+certbot/
+*.bak*
+marketing/feature-videos/scene-frames/
+marketing/platform-pitch/ref-frames/
+marketing/platform-pitch/shots/
+marketing/platform-pitch/shots-mobile/
+marketing/platform-pitch/shots-mobile-fit/

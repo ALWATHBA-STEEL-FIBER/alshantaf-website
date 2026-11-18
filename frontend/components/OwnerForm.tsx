@@ -16,7 +16,13 @@ import { normalizeDecimalInput, toWesternDigits } from "@/lib/arabicDigits";
 import { LocationInput, type AdjacentRoad } from "@/components/LocationInput";
 import { FilePickerButton } from "@/components/FilePickerButton";
 import { parseCoords, coordsToString, formatDlsArea } from "@/lib/mapCoords";
-import { loadDlsLocations, codesForSelection, selectionForCodes } from "@/lib/dlsLocations";
+import {
+  loadDlsLocations,
+  codesForSelection,
+  selectionForCodes,
+  neighborhoodsForBasin,
+  DLS_DEFAULT_NEIGHBORHOOD_LABEL,
+} from "@/lib/dlsLocations";
 import type { IndustryType } from "@/lib/types";
 import { isAmmanGovernorate } from "@/lib/ammanZoning";
 import {
@@ -26,12 +32,14 @@ import {
   sanitizeParcelNumberInput,
 } from "@/lib/multiParcel";
 import { fetchAndMergeParcelLocations } from "@/lib/multiParcelFetch";
+import { BotGuard, type BotGuardHandle } from "@/components/BotGuard";
+import { ParcelMapWorkspace } from "@/components/ParcelMapWorkspace";
 
 const ACTIVITY_KEYS = ["food", "pharma", "packaging", "logistics", "plastic", "wood", "metal", "stone", "blocks", "other"] as const;
 
 const inputClass =
-  "w-full h-11 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-gold";
-const labelClass = "text-xs font-bold text-ink-soft mb-1 block";
+  "w-full h-9 rounded-md border border-line bg-white px-2.5 text-[13px] outline-none focus:border-gold";
+const labelClass = "text-[11px] font-bold text-ink-soft mb-1 block";
 
 export function OwnerForm() {
   const { t, lang } = useLanguage();
@@ -68,6 +76,7 @@ export function OwnerForm() {
   const [fileError, setFileError] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const botRef = useRef<BotGuardHandle>(null);
   const [dlsHint, setDlsHint] = useState<{ value: number; currency: string; source: string; retrievedAt: string } | null>(null);
   const [dlsHintStatus, setDlsHintStatus] = useState<"idle" | "loading" | "missing" | "failed">("idle");
   const [dlsMapStatus, setDlsMapStatus] = useState<"idle" | "loading" | "ready" | "missing" | "failed">("idle");
@@ -86,6 +95,7 @@ export function OwnerForm() {
     whatsappMessage: string;
   } | null>(null);
   const regulationSectionRef = useRef<HTMLDivElement>(null);
+  const regulationHintKeyRef = useRef("");
   const [awaitingRegulationAfterPin, setAwaitingRegulationAfterPin] = useState(false);
   const [ammanAutoIndustryType, setAmmanAutoIndustryType] = useState<IndustryType | null>(null);
   const [ammanLookupStatus, setAmmanLookupStatus] = useState<"idle" | "loading" | "success" | "failed">("idle");
@@ -99,9 +109,21 @@ export function OwnerForm() {
   const update = (key: keyof typeof fields) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setFields((f) => ({ ...f, [key]: e.target.value }));
 
-  const updateDigits = (key: "phone" | "whatsapp" | "price" | "area") => (
+  const updateDigits = (key: "phone" | "whatsapp" | "area") => (
     e: React.ChangeEvent<HTMLInputElement>
   ) => setFields((f) => ({ ...f, [key]: toWesternDigits(e.target.value) }));
+
+  /** Keep asking price as a clean Western decimal while typing (no HTML pattern fights). */
+  function updatePrice(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = normalizeDecimalInput(e.target.value);
+    const cleaned = raw.replace(/[^\d.]/g, "");
+    const dot = cleaned.indexOf(".");
+    const next =
+      dot === -1
+        ? cleaned
+        : `${cleaned.slice(0, dot + 1)}${cleaned.slice(dot + 1).replace(/\./g, "")}`;
+    setFields((f) => ({ ...f, price: next }));
+  }
 
   useEffect(() => {
     const cleaned = parcelEntries
@@ -148,13 +170,7 @@ export function OwnerForm() {
     const industryType = fields.industryType;
     const timer = setTimeout(async () => {
       if (cancelled) return;
-      if (!industryType) {
-        if (awaitingRegulationAfterPin) {
-          setDlsHint(null);
-          setDlsHintStatus("idle");
-          setDlsMapStatus("ready");
-          return;
-        }
+      if (!governorate || !directorate || !village || !basin || !parcel) {
         setDlsHint(null);
         setDlsHintStatus("idle");
         setDlsMapStatus("idle");
@@ -165,7 +181,11 @@ export function OwnerForm() {
         setFields((f) => ({ ...f, area: "" }));
         return;
       }
-      if (!governorate || !directorate || !village || !basin || !neighborhood || !parcel) {
+      const dlsData = await loadDlsLocations();
+      if (cancelled) return;
+      const neighborhoodOpts = neighborhoodsForBasin(dlsData, governorate, directorate, village, basin);
+      // Wait for the user (or auto-select) when the basin actually has neighborhood rows.
+      if (neighborhoodOpts.length > 0 && !neighborhood) {
         setDlsHint(null);
         setDlsHintStatus("idle");
         setDlsMapStatus("idle");
@@ -176,6 +196,9 @@ export function OwnerForm() {
         setFields((f) => ({ ...f, area: "" }));
         return;
       }
+      const neighborhoodForLookup =
+        neighborhood ||
+        (neighborhoodOpts.length === 1 ? neighborhoodOpts[0].label : DLS_DEFAULT_NEIGHBORHOOD_LABEL);
       setDlsHint(null);
       setDlsHintStatus("loading");
       setDlsMapStatus("loading");
@@ -195,7 +218,7 @@ export function OwnerForm() {
               directorate,
               village,
               basin,
-              neighborhood,
+              neighborhood: neighborhoodForLookup,
               parcelNumber: parcelNo,
             })
           )
@@ -223,8 +246,14 @@ export function OwnerForm() {
 
       const mapPromise = (async () => {
         try {
-          const data = await loadDlsLocations();
-          const codes = codesForSelection(data, governorate, directorate, village, basin, neighborhood);
+          const codes = codesForSelection(
+            dlsData,
+            governorate,
+            directorate,
+            village,
+            basin,
+            neighborhoodForLookup
+          );
           if (!codes) {
             if (!cancelled) {
               setParcelPolygon(null);
@@ -279,6 +308,9 @@ export function OwnerForm() {
             setFields((f) => ({ ...f, area: "" }));
           }
           setDlsMapStatus("ready");
+          if (!industryType) {
+            hintRegulation([governorate, directorate, village, basin, neighborhood, parcel].join("|"));
+          }
         } catch (err) {
           if (!cancelled) {
             setParcelPolygon(null);
@@ -304,11 +336,22 @@ export function OwnerForm() {
     fields.parcel,
     fields.industryType,
     lang,
-    awaitingRegulationAfterPin,
   ]);
 
+  function hintRegulation(key: string) {
+    setAwaitingRegulationAfterPin(true);
+    if (regulationHintKeyRef.current === key) return;
+    regulationHintKeyRef.current = key;
+    window.setTimeout(() => {
+      regulationSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+  }
+
   useEffect(() => {
-    if (fields.industryType) setAwaitingRegulationAfterPin(false);
+    if (fields.industryType) {
+      setAwaitingRegulationAfterPin(false);
+      regulationHintKeyRef.current = "";
+    }
   }, [fields.industryType]);
 
   useEffect(() => {
@@ -328,7 +371,7 @@ export function OwnerForm() {
 
   const MAX_IMAGES = 10;
   const MAX_IMAGE_MB = 8;
-  const MAX_VIDEO_MB = 60;
+  const MAX_VIDEO_MB = 110;
   const MAX_DOCUMENT_MB = 15;
 
   function handleImagesChange(files: File[]) {
@@ -347,6 +390,7 @@ export function OwnerForm() {
 
   async function handlePinDrop(coords: { lat: number; lng: number }) {
     setError("");
+    setDlsMapStatus("loading");
     try {
       const [pointParcel, dlsData] = await Promise.all([
         api.dlsParcelByPointPublic({ latitude: coords.lat, longitude: coords.lng }),
@@ -358,6 +402,7 @@ export function OwnerForm() {
         sectorCode: pointParcel.sectorCode,
       });
       if (!selection) {
+        setDlsMapStatus(parcelPolygon ? "ready" : "failed");
         setError(lang === "ar" ? "تعذر مطابقة موقع الدبوس مع بيانات المناطق." : "Could not map the pin point to DLS location labels.");
         return;
       }
@@ -382,14 +427,14 @@ export function OwnerForm() {
       setAreaSqm(pointParcel.areaSqm ?? null);
       setDlsMapStatus("ready");
       if (!fields.industryType) {
-        setAwaitingRegulationAfterPin(true);
-        window.setTimeout(() => {
-          regulationSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-        }, 80);
+        hintRegulation(
+          [selection.governorate, selection.directorate, selection.village, selection.basin, selection.neighborhood, parcel].join("|")
+        );
       } else {
         setAwaitingRegulationAfterPin(false);
       }
     } catch (err) {
+      setDlsMapStatus(parcelPolygon ? "ready" : "failed");
       setError(
         err instanceof ApiError
           ? err.message
@@ -424,8 +469,43 @@ export function OwnerForm() {
     e.preventDefault();
     setError("");
 
-    if (!fields.name || !fields.phone || !fields.governorate || !fields.directorate || !fields.village || !fields.basin || !fields.neighborhood || !fields.parcel || !fields.industryType || !fields.details) {
-      setError(t.owners.requiredError);
+    const dlsData = await loadDlsLocations();
+    const neighborhoodOpts =
+      fields.governorate && fields.directorate && fields.village && fields.basin
+        ? neighborhoodsForBasin(
+            dlsData,
+            fields.governorate,
+            fields.directorate,
+            fields.village,
+            fields.basin
+          )
+        : [];
+    // Sole neighborhood may still be mid-sync from the cascade — pin it before validate/submit.
+    let neighborhood = fields.neighborhood.trim();
+    if (!neighborhood && neighborhoodOpts.length === 1) {
+      neighborhood = neighborhoodOpts[0].label;
+      setFields((f) => ({ ...f, neighborhood }));
+    } else if (!neighborhood && neighborhoodOpts.length === 0 && fields.basin) {
+      neighborhood = DLS_DEFAULT_NEIGHBORHOOD_LABEL;
+      setFields((f) => ({ ...f, neighborhood }));
+    }
+
+    const missing: string[] = [];
+    if (!fields.name.trim()) missing.push(t.owners.fullName);
+    if (!fields.phone.trim()) missing.push(t.owners.phone);
+    if (!fields.governorate) missing.push(t.owners.governorate);
+    if (!fields.directorate) missing.push(t.owners.directorate);
+    if (!fields.village) missing.push(t.owners.village);
+    if (!fields.basin) missing.push(t.owners.basin);
+    if (neighborhoodOpts.length > 0 && !neighborhood) missing.push(t.owners.neighborhood);
+    if (!fields.parcel.trim()) missing.push(t.owners.parcel);
+    if (!fields.industryType) missing.push(t.owners.industryType);
+    if (!fields.details.trim()) missing.push(t.owners.landDetails);
+    const normalizedPrice = normalizeDecimalInput(fields.price).replace(/[^\d.]/g, "");
+    const priceOk = /^\d+(\.\d+)?$/.test(normalizedPrice);
+    if (!priceOk) missing.push(t.owners.price);
+    if (missing.length) {
+      setError(`${t.owners.missingFields} ${missing.join(lang === "ar" ? "، " : ", ")}`);
       return;
     }
     const parcelNos = parseParcelNumbers(fields.parcel);
@@ -455,11 +535,6 @@ export function OwnerForm() {
       setError(t.owners.areaRequiredError);
       return;
     }
-    const normalizedPrice = normalizeDecimalInput(fields.price);
-    if (!normalizedPrice || !/^\d+(\.\d+)?$/.test(normalizedPrice)) {
-      setError(t.owners.pricePerSqmNumberError);
-      return;
-    }
     if (source === "broker" && (!fields.office || !fields.whatsapp || !fields.authExpiry || !authorized)) {
       setError(t.owners.brokerRequiredError);
       return;
@@ -469,6 +544,11 @@ export function OwnerForm() {
       return;
     }
 
+    const bot = botRef.current?.getPayload();
+    if (!bot) {
+      setError(t.botGuard.required);
+      return;
+    }
     setSubmitting(true);
     try {
       const location = parseCoords(fields.coordinates);
@@ -486,7 +566,7 @@ export function OwnerForm() {
           village: fields.village,
           basin: fields.basin,
           parcel: fields.parcel,
-          neighborhood: fields.neighborhood,
+          neighborhood: neighborhood || fields.neighborhood || DLS_DEFAULT_NEIGHBORHOOD_LABEL,
           coordinates: fields.coordinates,
           latitude: location ? String(location.lat) : undefined,
           longitude: location ? String(location.lng) : undefined,
@@ -501,7 +581,8 @@ export function OwnerForm() {
           activity: fields.activity,
           details: fields.details,
         },
-        { images, video: video ?? undefined, document: documentFile ?? undefined }
+        { images, video: video ?? undefined, document: documentFile ?? undefined },
+        bot
       );
 
       const statusLabel = submission.duplicate
@@ -545,6 +626,7 @@ export function OwnerForm() {
       setVideo(null);
       setDocumentFile(null);
     } catch (err) {
+      botRef.current?.reset();
       setError(err instanceof ApiError ? err.message : t.owners.genericError);
     } finally {
       setSubmitting(false);
@@ -678,235 +760,443 @@ export function OwnerForm() {
     );
   }
 
-  return (
-    <section id="owners" className="py-16 md:py-20">
-      <div className="mx-auto max-w-[1240px] px-4 grid lg:grid-cols-[1fr_1.3fr] gap-10">
-        <div>
-          <span className="text-gold text-xs font-bold tracking-wide">{t.owners.eyebrow}</span>
-          <h2 className="text-3xl md:text-4xl font-bold mt-2 text-balance">{t.owners.title}</h2>
-          <p className="text-ink-soft mt-3 leading-relaxed">{t.owners.subtitle}</p>
-          <div className="mt-8 grid grid-cols-3 gap-3">
-            {t.owners.steps.map((step) => (
-              <div key={step.n} className="bg-white/85 rounded-2xl border border-line p-3.5 transition-colors hover:border-gold/40">
-                <span className="w-7 h-7 rounded-full bg-green text-white text-xs flex items-center justify-center font-bold">
-                  {step.n}
-                </span>
-                <b className="block mt-2 text-sm">{step.title}</b>
-                <small className="text-ink-soft text-xs">{step.note}</small>
+  const mapStatusLabel =
+    dlsMapStatus === "loading"
+      ? t.owners.dlsMapLoading
+      : dlsMapStatus === "ready"
+        ? awaitingRegulationAfterPin && !fields.industryType
+          ? t.owners.regulationHint
+          : t.owners.dlsMapReady
+        : dlsMapStatus === "missing"
+          ? t.owners.dlsMapMissing
+          : dlsMapStatus === "failed"
+            ? t.owners.dlsMapFailed
+            : t.owners.dlsMapIdle;
+
+  const searchPanel = (
+    <div className="flex flex-col gap-3">
+      <div className="flex gap-2 rounded-full border border-line bg-white p-1">
+        <button
+          type="button"
+          onClick={() => setSource("owner")}
+          className={`h-9 flex-1 rounded-full text-sm font-bold transition-colors ${source === "owner" ? "bg-green text-white" : "text-ink-soft hover:text-ink"}`}
+        >
+          {t.owners.tabOwner}
+        </button>
+        <button
+          type="button"
+          onClick={() => setSource("broker")}
+          className={`h-9 flex-1 rounded-full text-sm font-bold transition-colors ${source === "broker" ? "bg-green text-white" : "text-ink-soft hover:text-ink"}`}
+        >
+          {t.owners.tabBroker}
+        </button>
+      </div>
+
+      {source === "broker" && (
+        <div className="grid gap-3 rounded-xl border border-line bg-white/70 p-3">
+          <div>
+            <label className={labelClass} htmlFor="owner-office">
+              {t.owners.brokerOffice}
+            </label>
+            <input id="owner-office" className={inputClass} value={fields.office} onChange={update("office")} />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="owner-whatsapp">
+              {t.owners.brokerWhatsapp}
+            </label>
+            <input
+              id="owner-whatsapp"
+              type="tel"
+              className={inputClass}
+              value={fields.whatsapp}
+              onChange={updateDigits("whatsapp")}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="owner-authExpiry">
+              {t.owners.brokerAuthExpiry}
+            </label>
+            <input
+              id="owner-authExpiry"
+              className={inputClass}
+              type="date"
+              value={fields.authExpiry}
+              onChange={update("authExpiry")}
+            />
+          </div>
+          <label className="flex items-start gap-2 text-xs text-ink-soft">
+            <input
+              type="checkbox"
+              checked={authorized}
+              onChange={(e) => setAuthorized(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-green"
+            />
+            {t.owners.brokerAuthorization}
+          </label>
+        </div>
+      )}
+
+      <div className="border-t border-line pt-3">
+        <p className="mb-2 text-xs font-bold text-green">{t.owners.landSection}</p>
+        <LocationCascade
+          governorate={fields.governorate}
+          directorate={fields.directorate}
+          village={fields.village}
+          basin={fields.basin}
+          neighborhood={fields.neighborhood}
+          onChange={(patch) => setFields((f) => ({ ...f, ...patch }))}
+          labels={{
+            governorate: t.owners.governorate,
+            directorate: t.owners.directorate,
+            village: t.owners.village,
+            basin: t.owners.basin,
+            neighborhood: t.owners.neighborhood,
+            other: t.owners.locationOther,
+          }}
+        />
+        <div className="mt-3">
+          <label className={labelClass} htmlFor="owner-parcel">
+            {t.owners.parcel}
+          </label>
+          <label className="mb-2 flex items-start gap-2 text-xs text-ink-soft">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-green"
+              checked={isMultiParcelOffer}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setIsMultiParcelOffer(checked);
+                setParcelEntries((prev) => {
+                  const cleaned = prev.map((value) => sanitizeParcelNumberInput(value)).filter(Boolean);
+                  if (!checked) return [cleaned[0] ?? ""];
+                  if (cleaned.length >= 2) return cleaned.slice(0, MAX_MULTI_PARCELS);
+                  return [cleaned[0] ?? "", ""];
+                });
+              }}
+            />
+            <span>
+              {lang === "ar"
+                ? "هذا عرض متعدد القطع (الأرقام متتالية بفارق 1)."
+                : "This is a multi-land offer (parcel numbers must be consecutive by 1)."}
+            </span>
+          </label>
+          <div className="grid gap-2">
+            {parcelEntries.map((value, idx) => (
+              <div key={`parcel-entry-${idx}`} className="flex items-center gap-2">
+                <input
+                  className={inputClass}
+                  value={value}
+                  onChange={(e) =>
+                    setParcelEntries((prev) =>
+                      prev.map((item, i) => (i === idx ? sanitizeParcelNumberInput(e.target.value) : item))
+                    )
+                  }
+                  inputMode="numeric"
+                  placeholder={
+                    isMultiParcelOffer ? `${t.owners.enterParcelN} ${idx + 1}` : t.owners.enterParcel
+                  }
+                  required={idx === 0}
+                />
+                {isMultiParcelOffer && parcelEntries.length > 2 && (
+                  <button
+                    type="button"
+                    className="h-11 rounded-xl border border-line bg-white px-3 text-xs font-bold"
+                    onClick={() => setParcelEntries((prev) => prev.filter((_, i) => i !== idx))}
+                  >
+                    {lang === "ar" ? "حذف" : "Remove"}
+                  </button>
+                )}
               </div>
             ))}
           </div>
-          <p className="mt-6 text-xs bg-white/70 border border-line rounded-2xl p-4 leading-relaxed text-ink-soft">{t.owners.duplicateNote}</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="bg-white rounded-[1.75rem] border border-line p-6 md:p-8 flex flex-col gap-4 shadow-[0_24px_50px_-36px_rgba(15,52,47,0.35)]">
-          <div className="flex gap-2 p-1 rounded-full bg-surface-2 border border-line">
-            <button
-              type="button"
-              onClick={() => setSource("owner")}
-              className={`flex-1 h-10 rounded-full text-sm font-bold transition-colors ${source === "owner" ? "bg-green text-white shadow-[0_8px_18px_-10px_rgba(15,52,47,0.8)]" : "text-ink-soft hover:text-ink"}`}
-            >
-              {t.owners.tabOwner}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSource("broker")}
-              className={`flex-1 h-10 rounded-full text-sm font-bold transition-colors ${source === "broker" ? "bg-green text-white shadow-[0_8px_18px_-10px_rgba(15,52,47,0.8)]" : "text-ink-soft hover:text-ink"}`}
-            >
-              {t.owners.tabBroker}
-            </button>
-          </div>
-
-          <p className="text-xs font-bold text-green">{t.owners.applicantSection}</p>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass} htmlFor="owner-name">{t.owners.fullName}</label>
-              <input
-                id="owner-name" className={inputClass} value={fields.name} onChange={update("name")} required />
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="owner-phone">{t.owners.phone}</label>
-              <input
-                id="owner-phone" type="tel" className={inputClass} value={fields.phone} onChange={updateDigits("phone")} placeholder="07XXXXXXXX" required />
-            </div>
-            <div className="sm:col-span-2">
-              <label className={labelClass} htmlFor="owner-email">{t.owners.email}</label>
-              <input
-                id="owner-email" type="email" dir="ltr" className={inputClass} value={fields.email} onChange={update("email")} placeholder="name@example.com" />
-              <p className="text-[11px] text-ink-soft mt-1">{t.owners.emailNote}</p>
-            </div>
-          </div>
-
-          {source === "broker" && (
-            <div className="grid sm:grid-cols-2 gap-3 bg-surface-2 rounded-xl p-3">
-              <div>
-                <label className={labelClass} htmlFor="owner-office">{t.owners.brokerOffice}</label>
-                <input
-                  id="owner-office" className={inputClass} value={fields.office} onChange={update("office")} />
-              </div>
-              <div>
-                <label className={labelClass} htmlFor="owner-whatsapp">{t.owners.brokerWhatsapp}</label>
-                <input
-                  id="owner-whatsapp" type="tel" className={inputClass} value={fields.whatsapp} onChange={updateDigits("whatsapp")} />
-              </div>
-              <div>
-                <label className={labelClass} htmlFor="owner-authExpiry">{t.owners.brokerAuthExpiry}</label>
-                <input
-                  id="owner-authExpiry" className={inputClass} type="date" value={fields.authExpiry} onChange={update("authExpiry")} />
-              </div>
-              <label className="sm:col-span-2 flex items-start gap-2 text-xs text-ink-soft">
-                <input type="checkbox" checked={authorized} onChange={(e) => setAuthorized(e.target.checked)} className="mt-0.5 accent-green w-4 h-4" />
-                {t.owners.brokerAuthorization}
-              </label>
+          {isMultiParcelOffer && (
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                className="h-9 rounded-full border border-line bg-white px-3 text-xs font-bold disabled:opacity-60"
+                disabled={parcelEntries.length >= MAX_MULTI_PARCELS}
+                onClick={() =>
+                  setParcelEntries((prev) => (prev.length >= MAX_MULTI_PARCELS ? prev : [...prev, ""]))
+                }
+              >
+                {lang === "ar" ? "+ إضافة قطعة أخرى" : "+ Add another parcel"}
+              </button>
+              <p className="text-[11px] text-ink-soft">
+                {lang === "ar"
+                  ? `يبدأ بقطعتين — حتى ${MAX_MULTI_PARCELS} قطع.`
+                  : `Starts with 2 parcels — up to ${MAX_MULTI_PARCELS}.`}
+              </p>
             </div>
           )}
+          {parcelOrderError && (
+            <p className="mt-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-600">{parcelOrderError}</p>
+          )}
+        </div>
+      </div>
 
-          <p className="text-xs font-bold text-green">{t.owners.landSection}</p>
-          <LocationCascade
-            governorate={fields.governorate}
-            directorate={fields.directorate}
-            village={fields.village}
-            basin={fields.basin}
-            neighborhood={fields.neighborhood}
-            onChange={(patch) => setFields((f) => ({ ...f, ...patch }))}
-            labels={{
-              governorate: t.owners.governorate,
-              directorate: t.owners.directorate,
-              village: t.owners.village,
-              basin: t.owners.basin,
-              neighborhood: t.owners.neighborhood,
-              other: t.owners.locationOther,
-            }}
+      <div
+        ref={regulationSectionRef}
+        className={`border-t border-line pt-3 ${
+          awaitingRegulationAfterPin && !fields.industryType
+            ? "rounded-xl border border-amber-200 bg-amber-50/80 p-3"
+            : ""
+        }`}
+      >
+        <p className="mb-2 text-xs font-bold text-green">{t.owners.regulationSection}</p>
+        {awaitingRegulationAfterPin && !fields.industryType && (
+          <p className="mb-2 rounded-lg border border-amber-300 bg-white px-2.5 py-2 text-[11px] font-bold leading-relaxed text-amber-900">
+            {t.owners.regulationHint}
+          </p>
+        )}
+        <RegulationGuide
+          scope="all"
+          value={fields.industryType}
+          onChange={(value) => {
+            setFields((f) => ({ ...f, industryType: value }));
+            if (value) setAwaitingRegulationAfterPin(false);
+          }}
+          required
+          selectDisabled={Boolean(ammanAutoIndustryType)}
+        />
+        {isAmmanGovernorate(fields.governorate) && (
+          <p
+            className={`mt-2 text-[11px] leading-relaxed ${
+              ammanLookupStatus === "failed"
+                ? "text-red-700"
+                : ammanLookupStatus === "success"
+                  ? "text-green"
+                  : "text-ink-soft"
+            }`}
+          >
+            {ammanLookupStatus === "loading" ? (lang === "ar" ? "جارٍ التحميل..." : "Loading...") : ammanLookupNote}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+
+  const detailsPanel = (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs font-bold text-green">{t.owners.detailsSection}</p>
+      <div>
+        <label className={labelClass} htmlFor="owner-area">
+          {t.owners.area}
+        </label>
+        <input
+          id="owner-area"
+          className={inputClass}
+          value={fields.area}
+          readOnly
+          placeholder={lang === "ar" ? "تُعبأ تلقائيًا من دائرة الأراضي" : "Auto-filled from DLS"}
+        />
+        {dlsMapStatus === "ready" && fields.area && (
+          <p className="mt-1.5 text-[11px] text-ink-soft">{t.owners.areaDlsNote}</p>
+        )}
+      </div>
+      <div>
+        <label className={labelClass} htmlFor="owner-price">
+          {t.owners.price}
+        </label>
+        <input
+          id="owner-price"
+          className={inputClass}
+          value={fields.price}
+          onChange={updatePrice}
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder={lang === "ar" ? "مثال: 60" : "e.g. 60"}
+        />
+        <p className="mt-1.5 text-[11px] text-ink-soft">{t.owners.pricePerSqmNote}</p>
+        {/* Official DLS $/m² hint — desktop only; mobile unified sheet omits admin pricing */}
+        <div className="hidden md:block">
+          {dlsHintStatus === "loading" && (
+            <div className="mt-2 flex items-center gap-2 rounded-xl border border-line bg-white px-3 py-2.5 text-[11px] text-ink-soft">
+              <span className="inline-block h-4 w-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin" aria-hidden />
+              <span>{t.owners.dlsHintLoading}</span>
+            </div>
+          )}
+          {dlsHintStatus === "missing" && (
+            <p className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[11px] leading-relaxed text-red-700">
+              {t.owners.dlsHintMissing}
+            </p>
+          )}
+          {dlsHintStatus === "failed" && <p className="mt-2 text-[11px] text-ink-soft">{t.owners.dlsHintFailed}</p>}
+          {dlsHint && (
+            <DlsPricingHint
+              ratePerSqm={dlsHint.value}
+              areaSqm={areaSqm}
+              sizeLabel={fields.area}
+              source={dlsHint.source}
+              retrievedAt={dlsHint.retrievedAt}
+            />
+          )}
+        </div>
+      </div>
+      <div>
+        <label className={labelClass} htmlFor="owner-activity">
+          {t.owners.activity}
+        </label>
+        <select id="owner-activity" className={inputClass} value={fields.activity} onChange={update("activity")}>
+          <option value="">{t.owners.selectActivity}</option>
+          {ACTIVITY_KEYS.map((key) => (
+            <option key={key} value={key}>
+              {t.activities[key]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className={labelClass}>{t.owners.landDetails}</label>
+        <textarea
+          className={`${inputClass} h-24 min-h-[5rem] resize-y py-2`}
+          value={fields.details}
+          onChange={update("details")}
+          placeholder={t.owners.landDetailsPlaceholder}
+          required
+        />
+      </div>
+      <div className="grid gap-3">
+        <div>
+          <label className={labelClass}>{lang === "ar" ? "الصور (حتى 10)" : "Photos (up to 10)"}</label>
+          <FilePickerButton
+            label={lang === "ar" ? "اختر الصور" : "Choose photos"}
+            icon={<ImageIcon className="w-4 h-4" />}
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            multiple
+            onFiles={handleImagesChange}
           />
-          <div>
-            <label className={labelClass} htmlFor="owner-parcel">{t.owners.parcel}</label>
-            <label className="mb-2 flex items-start gap-2 text-xs text-ink-soft">
-              <input
-                type="checkbox"
-                className="mt-0.5 accent-green w-4 h-4"
-                checked={isMultiParcelOffer}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setIsMultiParcelOffer(checked);
-                  setParcelEntries((prev) => {
-                    const cleaned = prev.map((value) => sanitizeParcelNumberInput(value)).filter(Boolean);
-                    if (!checked) return [cleaned[0] ?? ""];
-                    if (cleaned.length >= 2) return cleaned.slice(0, MAX_MULTI_PARCELS);
-                    return [cleaned[0] ?? "", ""];
-                  });
-                }}
-              />
-              <span>
-                {lang === "ar"
-                  ? "هذا عرض متعدد القطع (الأرقام متتالية بفارق 1)."
-                  : "This is a multi-land offer (parcel numbers must be consecutive by 1)."}
-              </span>
-            </label>
-            <div className="grid gap-2">
-              {parcelEntries.map((value, idx) => (
-                <div key={`parcel-entry-${idx}`} className="flex items-center gap-2">
-                  <input
-                    className={inputClass}
-                    value={value}
-                    onChange={(e) =>
-                      setParcelEntries((prev) =>
-                        prev.map((item, i) => (i === idx ? sanitizeParcelNumberInput(e.target.value) : item))
-                      )
-                    }
-                    inputMode="numeric"
-                    placeholder={lang === "ar" ? `رقم القطعة ${idx + 1}` : `Parcel #${idx + 1}`}
-                    required={idx === 0}
-                  />
-                  {isMultiParcelOffer && parcelEntries.length > 2 && (
-                    <button
-                      type="button"
-                      className="h-11 px-3 rounded-xl border border-line bg-surface-2 text-xs font-bold"
-                      onClick={() => setParcelEntries((prev) => prev.filter((_, i) => i !== idx))}
-                    >
-                      {lang === "ar" ? "حذف" : "Remove"}
-                    </button>
-                  )}
-                </div>
+          {images.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {images.map((file, i) => (
+                <span key={i} className="rounded-full bg-white px-2 py-1 text-[10px] ring-1 ring-line">
+                  {file.name}
+                </span>
               ))}
             </div>
-            {isMultiParcelOffer && (
-              <div className="mt-2 flex items-center gap-2">
-                <button
-                  type="button"
-                  className="h-9 px-3 rounded-full border border-line bg-surface-2 text-xs font-bold disabled:opacity-60"
-                  disabled={parcelEntries.length >= MAX_MULTI_PARCELS}
-                  onClick={() =>
-                    setParcelEntries((prev) =>
-                      prev.length >= MAX_MULTI_PARCELS ? prev : [...prev, ""]
-                    )
-                  }
-                >
-                  {lang === "ar" ? "+ إضافة قطعة أخرى" : "+ Add another parcel"}
-                </button>
-                <p className="text-[11px] text-ink-soft">
-                  {lang === "ar"
-                    ? `يبدأ بقطعتين — حتى ${MAX_MULTI_PARCELS} قطع.`
-                    : `Starts with 2 parcels — up to ${MAX_MULTI_PARCELS}.`}
-                </p>
-              </div>
-            )}
-            {parcelOrderError && (
-              <p className="mt-2 text-xs text-red-600 bg-red-50 rounded-lg p-2.5">{parcelOrderError}</p>
-            )}
-          </div>
+          )}
+        </div>
+        <div>
+          <label className={labelClass}>
+            {lang === "ar" ? "فيديو (اختياري، ملف واحد)" : "Video (optional, one file)"}
+          </label>
+          <FilePickerButton
+            label={lang === "ar" ? "اختر فيديو" : "Choose video"}
+            icon={<VideoIcon className="w-4 h-4" />}
+            accept="video/*,.mp4,.mov,.movie,.qt,.m4v,.3gp,.3g2,.mkv,.webm,.avi,.mpeg,.mpg,.ogv,.wmv,.flv,.hevc,.vod"
+            onFiles={handleVideoChange}
+          />
+          {video && <p className="mt-1 text-[10px] text-ink-soft">{video.name}</p>}
+        </div>
+        <div>
+          <label className={labelClass}>
+            {lang === "ar" ? "مخطط أو PDF (اختياري، ملف واحد)" : "Plan / PDF (optional, one file)"}
+          </label>
+          <FilePickerButton
+            label={lang === "ar" ? "اختر ملف PDF" : "Choose PDF"}
+            icon={<DocumentIcon className="w-4 h-4" />}
+            accept="application/pdf"
+            onFiles={handleDocumentChange}
+          />
+          {documentFile && <p className="mt-1 text-[10px] text-ink-soft">{documentFile.name}</p>}
+        </div>
+      </div>
+      {fileError && <p className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{fileError}</p>}
+      <p className="text-[11px] text-ink-soft">{t.owners.filesNote}</p>
 
-          <div ref={regulationSectionRef}>
-            <p className="text-xs font-bold text-green">{t.owners.regulationSection}</p>
-            <RegulationGuide
-              scope="all"
-              value={fields.industryType}
-              onChange={(value) => {
-                setFields((f) => ({ ...f, industryType: value }));
-                if (value) setAwaitingRegulationAfterPin(false);
-              }}
+      <div className="border-t border-line pt-3">
+        <p className="mb-2 text-xs font-bold text-green">{t.owners.applicantSection}</p>
+        <div className="grid gap-3">
+          <div>
+            <label className={labelClass} htmlFor="owner-name">
+              {t.owners.fullName}
+            </label>
+            <input id="owner-name" className={inputClass} value={fields.name} onChange={update("name")} required />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="owner-phone">
+              {t.owners.phone}
+            </label>
+            <input
+              id="owner-phone"
+              type="tel"
+              className={inputClass}
+              value={fields.phone}
+              onChange={updateDigits("phone")}
+              placeholder="07XXXXXXXX"
               required
-              selectDisabled={Boolean(ammanAutoIndustryType)}
             />
-            {isAmmanGovernorate(fields.governorate) && (
-              <p
-                className={`mt-2 text-[11px] leading-relaxed ${
-                  ammanLookupStatus === "failed"
-                    ? "text-red-700"
-                    : ammanLookupStatus === "success"
-                      ? "text-green"
-                      : "text-ink-soft"
-                }`}
-              >
-                {ammanLookupStatus === "loading"
-                  ? (lang === "ar" ? "جارٍ التحميل..." : "Loading...")
-                  : ammanLookupNote}
-              </p>
-            )}
           </div>
+          <div>
+            <label className={labelClass} htmlFor="owner-email">
+              {t.owners.email}
+            </label>
+            <input
+              id="owner-email"
+              type="email"
+              dir="ltr"
+              className={inputClass}
+              value={fields.email}
+              onChange={update("email")}
+              placeholder="name@example.com"
+            />
+            <p className="mt-1 text-[11px] text-ink-soft">{t.owners.emailNote}</p>
+          </div>
+        </div>
+      </div>
 
-          <div className="rounded-2xl border border-line bg-white/60 p-3 sm:p-4 flex flex-col gap-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold text-green">{t.owners.dlsMapSection}</p>
-                <p className="text-[11px] text-ink-soft mt-0.5 leading-relaxed">
-                  {!fields.industryType
-                    ? t.owners.dlsMapNeedRegulation
-                    : dlsMapStatus === "loading"
-                      ? t.owners.dlsMapLoading
-                      : dlsMapStatus === "ready"
-                        ? t.owners.dlsMapReady
-                        : dlsMapStatus === "missing"
-                          ? t.owners.dlsMapMissing
-                          : dlsMapStatus === "failed"
-                            ? t.owners.dlsMapFailed
-                            : t.owners.dlsMapIdle}
-                </p>
-              </div>
-              {dlsMapStatus === "loading" && (
-                <span className="inline-block w-5 h-5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin" aria-hidden />
-              )}
-            </div>
+      <div className="border-t border-line pt-3">
+        <p className="mb-2 text-xs font-bold text-green">{t.owners.reviewSection}</p>
+        <label className="flex items-start gap-2 text-xs text-ink-soft">
+          <input
+            type="checkbox"
+            checked={priceConsent}
+            onChange={(e) => setPriceConsent(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-green"
+            required
+          />
+          {t.owners.priceConsent}
+        </label>
+        {source === "broker" && (
+          <label className="mt-2 flex items-start gap-2 text-xs text-ink-soft">
+            <input
+              type="checkbox"
+              checked={marketingConsent}
+              onChange={(e) => setMarketingConsent(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-green"
+              required
+            />
+            {t.owners.marketingConsent}
+          </label>
+        )}
+      </div>
+
+      <BotGuard ref={botRef} action="submit" />
+      {error && <p className="rounded-lg bg-red-50 p-3 text-xs text-red-600">{error}</p>}
+    </div>
+  );
+
+  return (
+    <section id="owners">
+      <form onSubmit={handleSubmit} className="contents">
+        <ParcelMapWorkspace
+          title={t.owners.title}
+          subtitle={t.owners.subtitle}
+          status={
+            <span className="inline-flex max-w-[12rem] items-center gap-1.5 truncate rounded-md bg-white/10 px-2 py-0.5">
+              {dlsMapStatus === "loading" ? (
+                <span className="inline-block h-3 w-3 shrink-0 rounded-full border-2 border-white/30 border-t-gold animate-spin" aria-hidden />
+              ) : null}
+              <span className="truncate">{mapStatusLabel}</span>
+            </span>
+          }
+          tabs={[
+            { id: "search", label: lang === "ar" ? "بحث القطعة" : "Find parcel", railLabel: lang === "ar" ? "بحث" : "Find" },
+            { id: "details", label: lang === "ar" ? "العرض" : "Listing", railLabel: lang === "ar" ? "عرض" : "List" },
+          ]}
+          panels={{ search: searchPanel, details: detailsPanel }}
+          map={
             <LocationInput
+              variant="workspace"
               value={fields.coordinates}
               onChange={(v) => setFields((f) => ({ ...f, coordinates: v }))}
               onPinDrop={handlePinDrop}
@@ -914,172 +1204,43 @@ export function OwnerForm() {
               onAddressChange={(address) => setFields((f) => ({ ...f, address }))}
               polygon={parcelPolygon}
               adjacentRoads={adjacentRoads}
-              lockEditing={dlsMapStatus === "ready" || awaitingRegulationAfterPin}
+              lockEditing={dlsMapStatus === "loading"}
               loading={dlsMapStatus === "loading"}
               loadingLabel={t.owners.dlsMapLoading}
-              statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReady : undefined}
-              idleNote={!fields.industryType ? t.owners.dlsMapNeedRegulation : t.owners.dlsMapIdle}
+              statusNote={dlsMapStatus === "ready" ? t.owners.dlsMapReadyRepick : undefined}
+              idleNote={t.owners.dlsMapIdle}
+              areaLabel={fields.area}
+              areaSqm={areaSqm}
               showDimensions
-              showTopo={Boolean(fields.industryType)}
+              showTopo
+              dlsKey={dlsKey}
               parcelNumbers={parseParcelNumbers(fields.parcel)}
+              blueprint={{
+                governorate: fields.governorate,
+                directorate: fields.directorate,
+                village: fields.village,
+                basin: fields.basin,
+                neighborhood: fields.neighborhood,
+                parcel: fields.parcel,
+                notes: fields.details,
+                industryLabel: t.regulations.selectLabel,
+                industryValue: fields.industryType
+                  ? (t.offers.industry as Record<string, string>)[fields.industryType] || fields.industryType
+                  : undefined,
+              }}
             />
-          </div>
-
-          <p className="text-xs font-bold text-green">{t.owners.detailsSection}</p>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass} htmlFor="owner-area">{t.owners.area}</label>
-              <input
-                id="owner-area"
-                className={inputClass}
-                value={fields.area}
-                readOnly
-                placeholder={lang === "ar" ? "تُعبأ تلقائيًا من دائرة الأراضي" : "Auto-filled from DLS"}
-              />
-              {dlsMapStatus === "ready" && fields.area && (
-                <p className="text-[11px] text-ink-soft mt-1.5">{t.owners.areaDlsNote}</p>
-              )}
-              {dlsMapStatus === "loading" && !fields.area && (
-                <div className="mt-2 flex items-center gap-2 text-[11px] text-ink-soft">
-                  <span className="inline-block w-3.5 h-3.5 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin" aria-hidden />
-                  <span>{t.owners.dlsMapLoading}</span>
-                </div>
-              )}
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="owner-price">{t.owners.price}</label>
-              <input
-                id="owner-price"
-                className={inputClass}
-                value={fields.price}
-                onChange={updateDigits("price")}
-                inputMode="decimal"
-                pattern="^\\d+(\\.\\d+)?$"
-                placeholder={lang === "ar" ? "مثال: 60" : "e.g. 60"}
-                disabled={dlsHintStatus === "loading"}
-                aria-busy={dlsHintStatus === "loading"}
-              />
-              <p className="text-[11px] text-ink-soft mt-1.5">{t.owners.pricePerSqmNote}</p>
-              {dlsHintStatus === "loading" && (
-                <div className="mt-2 flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[11px] text-ink-soft">
-                  <span className="inline-block w-4 h-4 shrink-0 rounded-full border-2 border-green/25 border-t-green animate-spin" aria-hidden />
-                  <span>{t.owners.dlsHintLoading}</span>
-                </div>
-              )}
-              {dlsHintStatus === "missing" && (
-                <p className="text-[11px] text-red-700 mt-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 leading-relaxed">
-                  {t.owners.dlsHintMissing}
-                </p>
-              )}
-              {dlsHintStatus === "failed" && (
-                <p className="text-[11px] text-ink-soft mt-2">{t.owners.dlsHintFailed}</p>
-              )}
-              {dlsHint && (
-                <DlsPricingHint
-                  ratePerSqm={dlsHint.value}
-                  areaSqm={areaSqm}
-                  sizeLabel={fields.area}
-                  source={dlsHint.source}
-                  retrievedAt={dlsHint.retrievedAt}
-                />
-              )}
-            </div>
-            <div>
-              <label className={labelClass} htmlFor="owner-activity">{t.owners.activity}</label>
-              <select
-                id="owner-activity" className={inputClass} value={fields.activity} onChange={update("activity")}>
-                <option value="">{t.owners.selectActivity}</option>
-                {ACTIVITY_KEYS.map((key) => (
-                  <option key={key} value={key}>
-                    {t.activities[key]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className={labelClass}>{t.owners.landDetails}</label>
-            <textarea
-              className={`${inputClass} h-24 py-2`}
-              value={fields.details}
-              onChange={update("details")}
-              placeholder={t.owners.landDetailsPlaceholder}
-              required
-            />
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass}>{lang === "ar" ? "الصور (حتى 10)" : "Photos (up to 10)"}</label>
-              <FilePickerButton
-                label={lang === "ar" ? "اختر الصور" : "Choose photos"}
-                icon={<ImageIcon className="w-4 h-4" />}
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                multiple
-                onFiles={handleImagesChange}
-              />
-              {images.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {images.map((file, i) => (
-                    <span key={i} className="text-[10px] bg-surface-2 rounded-full px-2 py-1">
-                      {file.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div>
-              <label className={labelClass}>{lang === "ar" ? "فيديو (اختياري، ملف واحد)" : "Video (optional, one file)"}</label>
-              <FilePickerButton
-                label={lang === "ar" ? "اختر فيديو" : "Choose video"}
-                icon={<VideoIcon className="w-4 h-4" />}
-                accept="video/mp4,video/webm,video/quicktime"
-                onFiles={handleVideoChange}
-              />
-              {video && <p className="text-[10px] text-ink-soft mt-1">{video.name}</p>}
-            </div>
-            <div>
-              <label className={labelClass}>{lang === "ar" ? "مخطط أو PDF (اختياري، ملف واحد)" : "Plan / PDF (optional, one file)"}</label>
-              <FilePickerButton
-                label={lang === "ar" ? "اختر ملف PDF" : "Choose PDF"}
-                icon={<DocumentIcon className="w-4 h-4" />}
-                accept="application/pdf"
-                onFiles={handleDocumentChange}
-              />
-              {documentFile && <p className="text-[10px] text-ink-soft mt-1">{documentFile.name}</p>}
-            </div>
-          </div>
-          {fileError && <p className="text-xs text-red-600 bg-red-50 rounded-lg p-3">{fileError}</p>}
-          <p className="text-[11px] text-ink-soft -mt-2">{t.owners.filesNote}</p>
-
-          <p className="text-xs font-bold text-green">{t.owners.reviewSection}</p>
-          <label className="flex items-start gap-2 text-xs text-ink-soft">
-            <input type="checkbox" checked={priceConsent} onChange={(e) => setPriceConsent(e.target.checked)} className="mt-0.5 accent-green w-4 h-4" required />
-            {t.owners.priceConsent}
-          </label>
-          {source === "broker" && (
-            <label className="flex items-start gap-2 text-xs text-ink-soft">
-              <input
-                type="checkbox"
-                checked={marketingConsent}
-                onChange={(e) => setMarketingConsent(e.target.checked)}
-                className="mt-0.5 accent-green w-4 h-4"
-                required
-              />
-              {t.owners.marketingConsent}
-            </label>
-          )}
-
-          {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg p-3">{error}</p>}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="h-12 rounded-full bg-green text-white font-bold disabled:opacity-60"
-          >
-            {t.owners.submit}
-          </button>
-        </form>
-      </div>
+          }
+          footer={
+            <button
+              type="submit"
+              disabled={submitting}
+              className="h-9 w-full rounded-md bg-white text-[13px] font-extrabold text-green transition-colors hover:bg-gold disabled:opacity-60"
+            >
+              {t.owners.submit}
+            </button>
+          }
+        />
+      </form>
     </section>
   );
 }

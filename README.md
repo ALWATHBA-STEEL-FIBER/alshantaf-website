@@ -56,6 +56,10 @@ local volumes (`backend/uploads/`, and the `pgdata` Docker volume).
 - The public site's hero, live offers grid, owner/broker submission form, contact form
   and footer are ported to Next.js with the real bilingual AR/EN copy, still opening
   WhatsApp the same way, now backed by the real API.
+- **Investment partnership platform** (`/admin/invest`, `/investor`): multi-project
+  land co-investment with ownership, capital, expenses, double-entry ledger,
+  configurable settlement waterfall, hypothetical simulator, and investor portal.
+  See `docs/invest/README.md`.
 
 ### Not yet ported
 

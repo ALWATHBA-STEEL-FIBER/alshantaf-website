@@ -69,7 +69,7 @@ export function OfferCompareSheet({
           <button
             type="button"
             onClick={onClose}
-            className="min-h-11 min-w-11 rounded-full p-1.5 text-white/85 hover:bg-white/10"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-white/85 hover:bg-white/10"
             aria-label={t.offers.compareClose}
           >
             <CloseIcon />

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "../prisma";
 import { getSiteViewSeries } from "../lib/siteAnalytics";
+import { getUniqueIpStats } from "../lib/siteMonitor";
 import { requireAdmin, requirePermission } from "../middleware/auth";
 import { asyncHandler } from "../lib/asyncHandler";
 
@@ -66,6 +67,11 @@ adminDashboardRouter.get(
         day1: await getSiteViewSeries(1),
         day7: await getSiteViewSeries(7),
         day30: await getSiteViewSeries(30),
+      },
+      uniqueIps: {
+        day1: await getUniqueIpStats(1),
+        day7: await getUniqueIpStats(7),
+        day30: await getUniqueIpStats(30),
       },
     });
   })

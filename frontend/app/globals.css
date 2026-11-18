@@ -13,6 +13,14 @@
   --color-gold-2: #d9b57a;
   --color-line: rgba(20, 32, 40, 0.09);
   --header-h: 116px;
+  /* shadcn-compatible tokens for ui/* widgets (mapped to brand) */
+  --background: var(--color-bg);
+  --foreground: var(--color-ink);
+  --card: var(--color-surface);
+  --card-foreground: var(--color-ink);
+  --muted-foreground: var(--color-ink-soft);
+  --border: var(--color-line);
+  --ring: var(--color-green);
 }
 
 @theme inline {
@@ -26,6 +34,13 @@
   --color-gold: var(--color-gold);
   --color-gold-2: var(--color-gold-2);
   --color-line: var(--color-line);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
   --font-sans: var(--font-plex-arabic);
   --font-brand: var(--font-brand);
 }
@@ -74,6 +89,95 @@ body {
   border-color: rgba(200, 154, 88, 0.35) !important;
 }
 
+/* DLS-style parcel workspace: immerse map pages, hide marketing footer + chat FAB */
+body:has(.parcel-map-workspace) footer,
+body:has(.parcel-map-workspace) .ai-assistant-root {
+  display: none !important;
+}
+body:has(.parcel-map-workspace) main {
+  min-height: calc(100svh - var(--header-h));
+  /* Mobile: lock page scroll — the workspace sheet owns scrolling */
+  overflow: hidden;
+}
+@media (max-width: 767px) {
+  html:has(.parcel-map-workspace),
+  body:has(.parcel-map-workspace) {
+    overflow: hidden;
+    overscroll-behavior: none;
+    height: 100%;
+    touch-action: manipulation;
+  }
+  .parcel-map-workspace {
+    overscroll-behavior: none;
+    touch-action: none;
+  }
+  .parcel-map-workspace .parcel-panel-body {
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+}
+
+/* Compact cadastral density inside map workspace panels */
+.parcel-map-workspace .parcel-panel-body input:not([type="checkbox"]):not([type="radio"]),
+.parcel-map-workspace .parcel-panel-body select,
+.parcel-map-workspace .parcel-panel-body textarea {
+  min-height: 0;
+  height: 2.25rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  padding-inline: 0.625rem;
+}
+.parcel-map-workspace .parcel-panel-body textarea {
+  height: auto;
+  min-height: 3.25rem;
+  padding-block: 0.4rem;
+}
+@media (max-width: 767px) {
+  .parcel-map-workspace .parcel-panel-footer button,
+  .parcel-map-workspace .parcel-panel-footer a {
+    height: 2rem;
+    font-size: 0.75rem;
+  }
+}
+.parcel-map-workspace .parcel-panel-body label {
+  margin-bottom: 0.25rem;
+  font-size: 0.6875rem;
+}
+.parcel-map-workspace .parcel-panel-body .rounded-xl,
+.parcel-map-workspace .parcel-panel-body .rounded-2xl,
+.parcel-map-workspace .parcel-panel-body .rounded-full {
+  border-radius: 0.375rem;
+}
+.parcel-map-workspace .parcel-panel-body [class*="h-6"][class*="w-6"] {
+  height: 1.25rem;
+  width: 1.25rem;
+  font-size: 0.625rem;
+}
+.parcel-map-workspace .parcel-panel-footer button,
+.parcel-map-workspace .parcel-panel-footer a {
+  height: 2.25rem;
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+}
+@media (max-width: 767px) {
+  .parcel-map-workspace .parcel-panel-body {
+    font-size: 0.8125rem;
+  }
+  .parcel-map-workspace .parcel-panel-body .gap-3 {
+    gap: 0.5rem;
+  }
+  .parcel-map-workspace .parcel-panel-body .gap-4 {
+    gap: 0.625rem;
+  }
+  .parcel-map-workspace .parcel-panel-body .pt-3 {
+    padding-top: 0.5rem;
+  }
+  .parcel-map-workspace .parcel-panel-body .p-3 {
+    padding: 0.5rem;
+  }
+}
+
 /* Portal fullscreen map — fixed overlay; Leaflet boots fresh inside .map-fs-portal-pane */
 .map-fs-portal {
   position: fixed;
@@ -82,8 +186,8 @@ body {
   height: 100dvh;
   max-height: 100dvh;
   width: 100%;
-  padding-top: max(0.75rem, env(safe-area-inset-top));
-  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  padding-top: max(0.4rem, env(safe-area-inset-top));
+  padding-bottom: max(0.4rem, env(safe-area-inset-bottom));
   box-sizing: border-box;
   overflow: hidden;
   overscroll-behavior: none;
@@ -101,11 +205,17 @@ body {
   flex: 1 1 auto;
   overflow: hidden;
   touch-action: pan-x pan-y;
+  z-index: 0;
 }
 .map-fs-portal-pane .leaflet-container {
   width: 100% !important;
   height: 100% !important;
   touch-action: pan-x pan-y;
+}
+/* Measurements list must sit above Leaflet controls (z-index 1000). */
+.map-fs-portal .map-fs-measure-overlay-layer,
+.map-fs-portal .map-measure-overlay {
+  z-index: 1100;
 }
 
 /* Portal fullscreen 3D topography */
@@ -321,6 +431,15 @@ body {
   transform: translateY(1px);
 }
 
+@keyframes video-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 @keyframes hero-rise {
   from {
     opacity: 0;
@@ -397,5 +516,19 @@ body {
   .btn-hero-secondary:hover {
     transform: none;
   }
+}
+
+
+/* Accessible hide — used by draggable widget grid */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }
 

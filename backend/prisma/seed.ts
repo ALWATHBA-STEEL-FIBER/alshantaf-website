@@ -3,8 +3,6 @@ import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { INDUSTRY_TYPE_CATALOG } from "../src/lib/industryTypeCatalog";
-import { syncMarketIntelligenceSeed } from "../src/lib/marketIntelligence/sync";
-
 const prisma = new PrismaClient();
 
 async function main() {
@@ -59,13 +57,6 @@ async function main() {
     }
   } catch {
     /* bundled playbook optional in some environments */
-  }
-
-  try {
-    const market = await syncMarketIntelligenceSeed();
-    console.log(`Seeded market intelligence: ${market.metrics} metrics, ${market.sources} sources`);
-  } catch (err) {
-    console.warn("Market intelligence seed skipped:", err);
   }
 
   console.log(`Seeded admin user + industry catalog: ${email}`);

@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { prisma } from "../prisma";
+import { siteNavForPrompt } from "./assistantSiteNav";
 
 export const ASSISTANT_KNOWLEDGE_KEY = "assistantMasterKnowledge";
 export const ASSISTANT_KNOWLEDGE_MAX_CHARS = 160_000;
-const PROMPT_BUDGET_CHARS = 10_000;
-const ALWAYS_INCLUDE_CHARS = 3_200;
+const PROMPT_BUDGET_CHARS = 14_000;
+const ALWAYS_INCLUDE_CHARS = 3_600;
 
 let fileDefaultCache: string | null = null;
 let dbCache: { value: string; at: number } | null = null;
@@ -83,15 +84,29 @@ function scoreSection(section: string, query: string): number {
   for (const token of q.split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 3)) {
     if (hay.includes(token)) score += 2 + Math.min(token.length, 8);
   }
+  // Boost high-value operational sections when keywords appear.
+  if (/نشر|publish|post|track|تتبع|فحص|land-check|بوابة|my-offer|قيمة|dls|تنقل|صفحة|path|route/i.test(q)) {
+    if (/نشر|تسويق|تتبع|فحص|بوابة|موقع|صفحة|مسار|طلب/i.test(hay)) score += 12;
+  }
+  if (/قسطل|سحاب|موقر|جيزة|زرقاء|صناع/i.test(q) && /قسطل|سحاب|موقر|جيزة|زرقاء|صناع/i.test(hay)) {
+    score += 8;
+  }
   return score;
 }
 
-/** Inject identity + query-matched slices so Groq stays within context. */
-export async function knowledgeForPrompt(userText: string): Promise<string> {
+/** Inject site nav + identity + query-matched slices within context budget. */
+export async function knowledgeForPrompt(
+  userText: string,
+  lang: "ar" | "en" = "ar"
+): Promise<string> {
+  const nav = siteNavForPrompt(lang);
   const full = await getAssistantKnowledge();
-  if (!full) return "";
+  if (!full) return nav;
+
   const sections = splitSections(full);
-  if (!sections.length) return full.slice(0, PROMPT_BUDGET_CHARS);
+  if (!sections.length) {
+    return `${nav}\n\n---\n\n${full.slice(0, PROMPT_BUDGET_CHARS - nav.length - 20)}`;
+  }
 
   const head = sections[0].slice(0, ALWAYS_INCLUDE_CHARS);
   const scored = sections
@@ -100,10 +115,10 @@ export async function knowledgeForPrompt(userText: string): Promise<string> {
     .filter((row) => row.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  const picked: string[] = [head];
-  let used = head.length;
+  const picked: string[] = [nav, head];
+  let used = nav.length + head.length + 16;
   for (const row of scored) {
-    if (picked.length >= 8) break;
+    if (picked.length >= 10) break;
     if (used + row.section.length + 8 > PROMPT_BUDGET_CHARS) {
       const room = PROMPT_BUDGET_CHARS - used - 8;
       if (room > 400) {
@@ -116,8 +131,8 @@ export async function knowledgeForPrompt(userText: string): Promise<string> {
     used += row.section.length + 8;
   }
 
-  if (picked.length === 1 && sections.length > 1) {
-    for (const extra of sections.slice(1, 4)) {
+  if (picked.length <= 2 && sections.length > 1) {
+    for (const extra of sections.slice(1, 5)) {
       if (used + extra.length > PROMPT_BUDGET_CHARS) break;
       picked.push(extra);
       used += extra.length;

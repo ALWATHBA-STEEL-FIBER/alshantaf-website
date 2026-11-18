@@ -1,10 +1,12 @@
+import {
+  DEFAULT_GROQ_GUARD_MODEL,
+  DEFAULT_GROQ_MODEL,
+  getAiConfigResolved,
+} from "./aiConfig";
+
+export { DEFAULT_GROQ_GUARD_MODEL, DEFAULT_GROQ_MODEL };
+
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-
-/** Highest chat RPD among conversational Groq models for this account (~7K/day). */
-export const DEFAULT_GROQ_MODEL = "allam-2-7b";
-
-/** Prompt-injection classifier — ~14.4K RPD; returns a risk score, not chat text. */
-export const DEFAULT_GROQ_GUARD_MODEL = "meta-llama/llama-prompt-guard-2-86m";
 
 export type GroqMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -29,17 +31,15 @@ type GroqChatResponse = {
   error?: { message?: string; code?: string; type?: string };
 };
 
-function apiKey() {
-  const key = process.env.GROQ_API_KEY?.trim();
-  if (!key) throw new GroqRequestError("GROQ_API_KEY is not configured", 503, false);
-  return key;
-}
-
-async function groqPost(body: Record<string, unknown>, timeoutMs = 20_000) {
+async function groqPost(
+  apiKey: string,
+  body: Record<string, unknown>,
+  timeoutMs = 20_000
+) {
   const res = await fetch(GROQ_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey()}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -62,14 +62,14 @@ async function groqPost(body: Record<string, unknown>, timeoutMs = 20_000) {
  * Fail-open: on any API/network error returns 0 so the user still gets a reply.
  */
 export async function scorePromptRisk(userText: string): Promise<{ score: number; skipped: boolean }> {
-  const enabled = process.env.GROQ_GUARD_ENABLED !== "0";
-  if (!enabled) return { score: 0, skipped: true };
+  const cfg = await getAiConfigResolved();
+  if (!cfg.guardEnabled || !cfg.groqApiKey) return { score: 0, skipped: true };
 
   try {
-    const model = process.env.GROQ_GUARD_MODEL?.trim() || DEFAULT_GROQ_GUARD_MODEL;
     const data = await groqPost(
+      cfg.groqApiKey,
       {
-        model,
+        model: cfg.guardModel || DEFAULT_GROQ_GUARD_MODEL,
         temperature: 0,
         max_completion_tokens: 16,
         messages: [{ role: "user", content: userText.slice(0, 2000) }],
@@ -85,27 +85,29 @@ export async function scorePromptRisk(userText: string): Promise<{ score: number
   }
 }
 
-export function guardThreshold() {
-  const n = Number(process.env.GROQ_GUARD_THRESHOLD ?? "0.85");
-  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.85;
-}
-
-/** Low default keeps answers grounded; override with GROQ_TEMPERATURE if needed. */
-export function chatTemperature(override?: number) {
-  if (typeof override === "number" && Number.isFinite(override)) {
-    return Math.min(1, Math.max(0, override));
-  }
-  const fromEnv = Number(process.env.GROQ_TEMPERATURE ?? "0.15");
-  return Number.isFinite(fromEnv) ? Math.min(1, Math.max(0, fromEnv)) : 0.15;
+export async function guardThreshold() {
+  const cfg = await getAiConfigResolved();
+  return cfg.guardThreshold;
 }
 
 export async function groqChatJson(params: {
   messages: GroqMessage[];
   temperature?: number;
+  apiKey?: string;
+  model?: string;
 }) {
-  const model = process.env.GROQ_MODEL?.trim() || DEFAULT_GROQ_MODEL;
-  const temperature = chatTemperature(params.temperature);
+  const cfg = await getAiConfigResolved();
+  const apiKey = params.apiKey?.trim() || cfg.groqApiKey;
+  if (!apiKey) throw new GroqRequestError("GROQ_API_KEY is not configured", 503, false);
+
+  const model = params.model?.trim() || cfg.groqModel || DEFAULT_GROQ_MODEL;
+  const temperature =
+    typeof params.temperature === "number" && Number.isFinite(params.temperature)
+      ? Math.min(1, Math.max(0, params.temperature))
+      : cfg.groqTemperature;
+
   const data = await groqPost(
+    apiKey,
     {
       model,
       temperature,

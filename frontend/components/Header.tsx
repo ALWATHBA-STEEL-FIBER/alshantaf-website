@@ -10,11 +10,12 @@ import { MenuIcon, CloseIcon, EmailIcon, FacebookIcon } from "@/components/icons
 import { Logo } from "@/components/Logo";
 import { openSiteAssistant } from "@/lib/assistantUi";
 
-const NAV_ITEMS = ["home", "opportunities", "offers", "services", "contact"] as const;
+const NAV_ITEMS = ["home", "opportunities", "offers", "landMarket", "services", "contact"] as const;
 const NAV_HREF: Record<(typeof NAV_ITEMS)[number], string> = {
   home: "/",
   opportunities: "/opportunities",
   offers: "/offers",
+  landMarket: "/jordan-land-market",
   services: "/services",
   contact: "/contact",
 };
@@ -250,19 +251,28 @@ export function Header() {
                     setDrawerOpen(false);
                     window.setTimeout(() => openSiteAssistant(), 180);
                   }}
-                  className={`text-start py-3 min-h-12 flex items-center border-b border-line ${active ? "text-green font-bold" : "text-ink"}`}
+                  className={`flex min-h-12 items-center border-b border-line py-3 text-start transition-colors ${
+                    active ? "font-bold text-green" : "text-ink"
+                  } ${key === "offers" ? "font-bold" : ""}`}
                 >
                   {t.nav[key]}
                 </Link>
               );
             })}
+            <Link
+              href="/offers"
+              onClick={() => setDrawerOpen(false)}
+              className="mt-4 flex h-12 cursor-pointer items-center justify-center rounded-full bg-green text-sm font-bold text-white transition-colors hover:bg-green-2"
+            >
+              {t.offers.viewAllCta}
+            </Link>
             <button
               type="button"
               onClick={() => {
                 setDrawerOpen(false);
                 openSiteAssistant();
               }}
-              className="mt-3 h-12 rounded-full bg-green text-sm font-bold text-white flex items-center justify-center"
+              className="mt-2 flex h-11 cursor-pointer items-center justify-center rounded-full border border-line text-sm font-bold text-ink"
             >
               {t.assistant.open}
             </button>
@@ -270,7 +280,7 @@ export function Header() {
               href="/land-check"
               onClick={() => setDrawerOpen(false)}
               aria-current={isActivePath(pathname, "/land-check") ? "page" : undefined}
-              className={`mt-2 h-11 rounded-full border text-sm font-bold flex items-center justify-center transition-colors ${
+              className={`mt-2 flex h-11 cursor-pointer items-center justify-center rounded-full border text-sm font-bold transition-colors ${
                 isActivePath(pathname, "/land-check")
                   ? "border-green bg-green/10 text-green ring-1 ring-green/25"
                   : "border-line text-ink hover:border-gold/50"
@@ -282,7 +292,7 @@ export function Header() {
               href="/request-publish"
               onClick={() => setDrawerOpen(false)}
               aria-current={isActivePath(pathname, "/request-publish") ? "page" : undefined}
-              className={`h-11 rounded-full text-sm font-bold flex items-center justify-center transition-colors ${
+              className={`flex h-11 cursor-pointer items-center justify-center rounded-full text-sm font-bold transition-colors ${
                 isActivePath(pathname, "/request-publish")
                   ? "bg-green-2 text-white ring-2 ring-gold/50"
                   : "bg-green text-white hover:bg-green-2"

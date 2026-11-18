@@ -88,13 +88,13 @@ export function CountUpMetrics({ metrics }: { metrics?: readonly Metric[] }) {
   const items = metrics ?? t.hero.metrics;
 
   return (
-    <section className="relative -mt-10 z-10">
+    <section className="relative z-10 -mt-8 md:-mt-10">
       <div className="mx-auto max-w-[1240px] px-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-px overflow-hidden rounded-2xl border border-line bg-line shadow-[0_24px_60px_-28px_rgba(17,58,52,0.45)]">
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line shadow-[0_24px_60px_-28px_rgba(17,58,52,0.45)] md:grid-cols-4">
           {items.map((m) => (
-            <div key={`${m.value}-${m.label}`} className="bg-white px-4 py-5 md:px-6 md:py-6">
+            <div key={`${m.value}-${m.label}`} className="bg-white px-3.5 py-4 md:px-6 md:py-6">
               <CountUpValue value={m.value} />
-              <span className="mt-1 block text-xs text-ink-soft leading-snug">{m.label}</span>
+              <span className="mt-1 block text-[11px] leading-snug text-ink-soft md:text-xs">{m.label}</span>
             </div>
           ))}
         </div>

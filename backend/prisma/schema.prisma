@@ -135,6 +135,14 @@ enum PublishStatus {
   archived
 }
 
+/// Editorial ranking for public offers (admin-only). Titanium appears on the landing page.
+enum OfferImportance {
+  none
+  golden
+  platinum
+  titanium
+}
+
 enum PresenterRole {
   owner
   presenter
@@ -176,6 +184,8 @@ model Listing {
   status         PropertyStatus @default(available)
   publishStatus  PublishStatus  @default(draft)
   featured       Boolean        @default(false)
+  /// golden | platinum | titanium — admin-curated prominence (featured stays synced with titanium)
+  importance     OfferImportance @default(none)
   /// Secret code for the owner portal (/my-offer/[code]) — SMS/link access, not public.
   ownerAccessCode String?       @unique
   /// When true, milestone/status SMS may be sent to `phone`.
@@ -203,6 +213,7 @@ model Listing {
   @@index([area])
   @@index([publishStatus])
   @@index([status])
+  @@index([importance])
 }
 
 enum LandCheckStatus {
@@ -442,6 +453,7 @@ model MarketMetricRevision {
 }
 
 /// Aggregated daily site page views (analytics-consent path only).
+/// `views` is kept equal to unique device hits (one count per visitor/day/path at most).
 model SitePageViewDaily {
   id             String   @id @default(uuid())
   day            DateTime @db.Date
@@ -453,4 +465,808 @@ model SitePageViewDaily {
 
   @@unique([day, path])
   @@index([day])
+}
+
+/// One row per visitor device per UTC day — source of truth for unique-device view counts.
+model SiteVisitorDaily {
+  id        String   @id @default(uuid())
+  day       DateTime @db.Date
+  visitorId String
+  path      String   @default("/")
+  createdAt DateTime @default(now())
+
+  @@unique([day, visitorId])
+  @@index([day])
+  @@index([visitorId])
+}
+
+/// One row per browser/device (visitor cookie). Optional display name sticks for life.
+model SiteDevice {
+  id           String            @id @default(uuid())
+  visitorId    String            @unique
+  displayName  String?
+  /// Once a visitor sets their own name, it cannot be overwritten by another visitor prompt.
+  nameLocked   Boolean           @default(false)
+  namedAt      DateTime?
+  ip           String?
+  userAgent    String?
+  language     String?
+  platform     String?
+  screen       String?
+  timezone     String?
+  lastPath     String            @default("/")
+  requestCount Int               @default(0)
+  firstSeenAt  DateTime          @default(now())
+  lastSeenAt   DateTime          @default(now())
+  events       SiteDeviceEvent[]
+
+  @@index([ip])
+  @@index([lastSeenAt])
+  @@index([displayName])
+}
+
+/// Individual tracked requests / heartbeats for the monitor detail view.
+model SiteDeviceEvent {
+  id        String     @id @default(uuid())
+  deviceId  String
+  device    SiteDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  ip        String?
+  path      String
+  userAgent String?
+  createdAt DateTime   @default(now())
+
+  @@index([deviceId, createdAt])
+  @@index([ip, createdAt])
+  @@index([createdAt])
+}
+
+/// Daily unique-IP rollup for dashboard cards.
+model SiteIpDaily {
+  id      String   @id @default(uuid())
+  day     DateTime @db.Date
+  ip      String
+  hits    Int      @default(0)
+  devices Int      @default(0)
+
+  @@unique([day, ip])
+  @@index([day])
+}
+
+/// Brand-scoped customer order / receipt (Alshantaf or Steel Fiber).
+enum OrderBrand {
+  alshantaf
+  steelfiber
+}
+
+enum OrderKind {
+  payments
+  installments
+  one_time
+  service
+}
+
+enum OrderStatus {
+  open
+  closed
+  void
+}
+
+enum OrderInstallmentStatus {
+  due
+  paid
+  skipped
+}
+
+model CustomerOrder {
+  id             String        @id @default(uuid())
+  serialNo       String        @unique
+  brand          OrderBrand
+  kind           OrderKind
+  status         OrderStatus   @default(open)
+  customerName   String
+  customerPhone  String?
+  title          String
+  notes          String?
+  currency       String        @default("JOD")
+  /// Snapshot total in major units (JOD). Recalculated from lines / installments / payments.
+  totalAmount    Decimal       @default(0) @db.Decimal(14, 3)
+  paidAmount     Decimal       @default(0) @db.Decimal(14, 3)
+  createdByEmail String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  lines          OrderLine[]
+  payments       OrderPayment[]
+  installments   OrderInstallment[]
+  accessTokens   OrderAccessToken[]
+
+  @@index([brand, createdAt])
+  @@index([brand, status])
+  @@index([customerPhone])
+  @@map("orders")
+}
+
+model OrderLine {
+  id          String        @id @default(uuid())
+  orderId     String
+  order       CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal       @default(1) @db.Decimal(14, 3)
+  unitAmount  Decimal       @default(0) @db.Decimal(14, 3)
+  amount      Decimal       @default(0) @db.Decimal(14, 3)
+  sortOrder   Int           @default(0)
+
+  @@index([orderId])
+}
+
+model OrderPayment {
+  id        String        @id @default(uuid())
+  orderId   String
+  order     CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount    Decimal       @db.Decimal(14, 3)
+  paidAt    DateTime      @default(now())
+  method    String?
+  note      String?
+  markedBy  String
+
+  @@index([orderId])
+  @@index([paidAt])
+}
+
+model OrderInstallment {
+  id        String                 @id @default(uuid())
+  orderId   String
+  order     CustomerOrder          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dueDate   DateTime               @db.Date
+  amount    Decimal                @db.Decimal(14, 3)
+  status    OrderInstallmentStatus @default(due)
+  paidAt    DateTime?
+  note      String?
+  sortOrder Int                    @default(0)
+
+  @@index([orderId])
+  @@index([dueDate])
+}
+
+model OrderAccessToken {
+  id          String        @id @default(uuid())
+  orderId     String
+  order       CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// SHA-256 hex of the raw public token (raw token never stored).
+  tokenHash   String        @unique
+  /// First chars of raw token for admin recognition (e.g. "a1b2c3…").
+  tokenPrefix String
+  createdAt   DateTime      @default(now())
+  revokedAt   DateTime?
+
+  @@index([orderId])
+}
+
+/// Site engineer account for the Arabic /site daily-counts portal.
+model SiteEngineer {
+  id           String               @id @default(uuid())
+  email        String               @unique
+  passwordHash String
+  name         String
+  phone        String?
+  /// ENGINEER = field engineer; COORDINATOR = pays / owns project expenses (منسق).
+  role         String               @default("ENGINEER")
+  active       Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  projects     SiteProjectEngineer[]
+  records      SiteDailyRecord[]
+  /// Projects this person leads as main coordinator (المنسق).
+  coordinatedProjects SiteProject[] @relation("SiteProjectCoordinator")
+  expenses     SiteExpense[]
+}
+
+model SiteProject {
+  id              String               @id @default(uuid())
+  name            String
+  code            String?
+  notes           String?
+  active          Boolean              @default(true)
+  /// Relative path under SITE_WORK_DATA_DIR for the project workbook.
+  excelFilename   String?
+  /// Google Drive file id when Drive backup is configured.
+  driveFileId     String?
+  /// Highest week number seen/created in the workbook.
+  weekCounter     Int                  @default(0)
+  /// Main coordinator engineer responsible for this project's expenses.
+  coordinatorId   String?
+  coordinator     SiteEngineer?        @relation("SiteProjectCoordinator", fields: [coordinatorId], references: [id], onDelete: SetNull)
+  /// Optional planned budget (JOD) to compare against spend.
+  budget          Decimal?             @db.Decimal(14, 3)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  expenses        SiteExpense[]
+  engineers       SiteProjectEngineer[]
+  workers         SiteProjectWorker[]
+  records         SiteDailyRecord[]
+  payouts         SiteWorkerWeekPayout[]
+
+  @@index([coordinatorId])
+}
+
+model SiteWorker {
+  id           String             @id @default(uuid())
+  name         String
+  /// Legal / settlement full name when different from short display name.
+  fullName     String?
+  employeeCode String?
+  notes        String?
+  /// Flat daily wage for a worked day (Jordanian dinars).
+  dailyPay     Decimal            @default(0) @db.Decimal(10, 3)
+  /// Pay per overtime / extra hour.
+  extraHourPay Decimal            @default(0) @db.Decimal(10, 3)
+  active       Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  projects     SiteProjectWorker[]
+  records      SiteDailyRecord[]
+  payouts      SiteWorkerWeekPayout[]
+}
+
+model SiteProjectEngineer {
+  projectId  String
+  engineerId String
+  project    SiteProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  engineer   SiteEngineer @relation(fields: [engineerId], references: [id], onDelete: Cascade)
+  assignedAt DateTime     @default(now())
+
+  @@id([projectId, engineerId])
+  @@index([engineerId])
+}
+
+model SiteProjectWorker {
+  projectId   String
+  workerId    String
+  project     SiteProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  worker      SiteWorker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  /// Short name shown in Excel name cell (الإسم).
+  displayName String?
+  jobTitle    String?
+  hourlyRate  Decimal     @default(0) @db.Decimal(8, 3)
+  sortOrder   Int         @default(0)
+  assignedAt  DateTime    @default(now())
+
+  @@id([projectId, workerId])
+  @@index([workerId])
+}
+
+/// One attendance / hours row per worker per project per calendar day.
+model SiteDailyRecord {
+  id           String       @id @default(uuid())
+  projectId    String
+  workerId     String
+  engineerId   String
+  workDate     DateTime     @db.Date
+  regularHours Decimal      @default(0) @db.Decimal(6, 2)
+  extraHours   Decimal      @default(0) @db.Decimal(6, 2)
+  otherWorks   String?
+  notes        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  project      SiteProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  worker       SiteWorker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  engineer     SiteEngineer @relation(fields: [engineerId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, workerId, workDate])
+  @@index([workDate])
+  @@index([engineerId])
+  @@index([workerId])
+}
+
+/// Weekly paycheck for a worker on a project (admin marks paid).
+model SiteWorkerWeekPayout {
+  id              String      @id @default(uuid())
+  workerId        String
+  projectId       String
+  weekStart       DateTime    @db.Date
+  daysWorked      Int         @default(0)
+  totalExtraHours Decimal     @default(0) @db.Decimal(8, 2)
+  dailyPay        Decimal     @default(0) @db.Decimal(10, 3)
+  extraHourPay    Decimal     @default(0) @db.Decimal(10, 3)
+  amount          Decimal     @default(0) @db.Decimal(12, 3)
+  paid            Boolean     @default(false)
+  paidAt          DateTime?
+  paidBy          String?
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  worker          SiteWorker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  project         SiteProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, projectId, weekStart])
+  @@index([projectId, weekStart])
+  @@index([workerId, paid])
+}
+
+/// Expense entered by a site engineer: either tied to a project or a general company expense.
+model SiteExpense {
+  id            String       @id @default(uuid())
+  /// "PROJECT" or "COMPANY"
+  scope         String       @default("PROJECT")
+  projectId     String?
+  engineerId    String
+  category      String
+  description   String
+  amount        Decimal      @db.Decimal(12, 3)
+  expenseDate   DateTime     @db.Date
+  vendor        String?
+  /// cash | transfer | cheque | card | credit
+  paymentMethod String?
+  invoiceNo     String?
+  /// Stored filename under SITE_WORK_DATA_DIR/receipts (private; served via auth route).
+  receiptFile   String?
+  receiptMime   String?
+  notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  project       SiteProject? @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  engineer      SiteEngineer @relation(fields: [engineerId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, expenseDate])
+  @@index([engineerId, expenseDate])
+  @@index([scope, expenseDate])
+  @@index([expenseDate])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Investment partnership management (land co-investment)
+// ─────────────────────────────────────────────────────────────
+
+enum InvProjectStatus {
+  draft
+  fundraising
+  capital_collection
+  acquisition_pending
+  acquired
+  active_management
+  listed_for_sale
+  sale_pending
+  sold
+  settlement_pending
+  settled
+  closed
+  cancelled
+}
+
+enum InvApprovalStatus {
+  draft
+  pending
+  approved
+  rejected
+  reversed
+}
+
+enum InvContributionKind {
+  initial
+  additional
+  capital_call
+  adjustment
+  withdrawal
+}
+
+enum InvExpenseStatus {
+  pending
+  approved
+  rejected
+  reimbursed
+  written_off
+}
+
+enum InvCommissionBasis {
+  investor_net_profit
+  distributable_profit
+  sale_value
+  fixed
+  hybrid
+}
+
+enum InvJournalStatus {
+  draft
+  posted
+  reversed
+}
+
+enum InvSettlementStatus {
+  draft
+  pending_approval
+  approved
+  posted
+  paid
+  cancelled
+}
+
+enum InvDocumentKind {
+  land_deed
+  purchase_agreement
+  sale_agreement
+  investor_contract
+  receipt
+  legal
+  expense_invoice
+  bank_transfer
+  property_photo
+  valuation
+  statement
+  other
+}
+
+model InvOrganization {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  baseCurrency String   @default("JOD") @db.VarChar(3)
+  timezone     String   @default("Asia/Amman")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  investors InvInvestor[]
+  projects  InvProject[]
+  accounts  InvLedgerAccount[]
+}
+
+model InvInvestor {
+  id              String    @id @default(uuid())
+  organizationId  String
+  organization    InvOrganization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  legalName       String
+  displayName     String?
+  email           String?
+  phone           String?
+  /// Encrypted-at-rest payload (AES-GCM); never returned in list APIs.
+  nationalIdEnc   String?
+  address         String?
+  /// Encrypted bank details JSON.
+  bankDetailsEnc  String?
+  verificationStatus String @default("unverified")
+  notes           String?
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  memberships   InvMembership[]
+  contributions InvContribution[]
+  expensesPaid  InvExpense[]      @relation("ExpensePayer")
+  portalUser    InvPortalUser?
+  documents     InvDocument[]
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([legalName])
+}
+
+/// Investor-facing login (separate from admin User).
+model InvPortalUser {
+  id           String      @id @default(uuid())
+  investorId   String      @unique
+  investor     InvInvestor @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  email        String      @unique
+  passwordHash String
+  active       Boolean     @default(true)
+  locale       String      @default("ar")
+  lastLoginAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model InvProject {
+  id               String           @id @default(uuid())
+  organizationId   String
+  organization     InvOrganization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name             String
+  referenceNo      String
+  description      String?
+  country          String           @default("JO")
+  city             String?
+  area             String?
+  landLocation     String?
+  plotParcelNo     String?
+  landAreaSqm      Decimal?         @db.Decimal(18, 3)
+  purchasePrice    Decimal?         @db.Decimal(18, 3)
+  targetSalePrice  Decimal?         @db.Decimal(18, 3)
+  purchaseDate     DateTime?        @db.Date
+  expectedSaleDate DateTime?        @db.Date
+  actualSalePrice  Decimal?         @db.Decimal(18, 3)
+  actualSaleDate   DateTime?        @db.Date
+  currency         String           @default("JOD") @db.VarChar(3)
+  currencyScale    Int              @default(3)
+  status           InvProjectStatus @default(draft)
+  /// Coordinator admin user id (User.id) when known.
+  coordinatorUserId String?
+  /// Membership marked isCoordinator mirrors operational coordinator partner.
+  waterfallSteps   Json?
+  /// Default commission rule JSON (CommissionRuleInput shape).
+  commissionRule   Json?
+  coordinatorParticipatesInProfit Boolean @default(true)
+  agreementNotes   String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  closedAt         DateTime?
+
+  memberships      InvMembership[]
+  contributions    InvContribution[]
+  expenses         InvExpense[]
+  statusHistory    InvProjectStatusEvent[]
+  documents        InvDocument[]
+  journals         InvJournal[]
+  settlements      InvSettlement[]
+  commissionRules  InvCommissionRule[]
+  transactions     InvTransaction[]
+
+  @@unique([organizationId, referenceNo])
+  @@index([organizationId, status])
+  @@index([status])
+}
+
+model InvProjectStatusEvent {
+  id         String           @id @default(uuid())
+  projectId  String
+  project    InvProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromStatus InvProjectStatus?
+  toStatus   InvProjectStatus
+  note       String?
+  actorId    String?
+  actorEmail String?
+  createdAt  DateTime         @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+model InvMembership {
+  id                String      @id @default(uuid())
+  projectId         String
+  project           InvProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  investorId        String
+  investor          InvInvestor @relation(fields: [investorId], references: [id], onDelete: Restrict)
+  isCoordinator     Boolean     @default(false)
+  /// Explicit ownership override (0–100). Null → derived from equity capital.
+  ownershipPercent  Decimal?    @db.Decimal(12, 8)
+  roleLabel         String?
+  /// Optional per-investor commission override JSON.
+  commissionOverride Json?
+  joinedAt          DateTime    @default(now())
+  leftAt            DateTime?
+  active            Boolean     @default(true)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@unique([projectId, investorId])
+  @@index([investorId])
+}
+
+model InvContribution {
+  id             String               @id @default(uuid())
+  projectId      String
+  project        InvProject           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  investorId     String
+  investor       InvInvestor          @relation(fields: [investorId], references: [id], onDelete: Restrict)
+  kind           InvContributionKind  @default(initial)
+  amount         Decimal              @db.Decimal(18, 3)
+  currency       String               @db.VarChar(3)
+  contributedAt  DateTime             @db.Date
+  description    String?
+  /// Counts toward ownership equity pool.
+  countsAsEquity Boolean              @default(true)
+  approvalStatus InvApprovalStatus    @default(approved)
+  approvedBy     String?
+  approvedAt     DateTime?
+  journalId      String?
+  createdBy      String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([projectId, contributedAt])
+  @@index([investorId])
+}
+
+model InvExpense {
+  id               String           @id @default(uuid())
+  projectId        String
+  project          InvProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  payerInvestorId  String?
+  payerInvestor    InvInvestor?     @relation("ExpensePayer", fields: [payerInvestorId], references: [id], onDelete: SetNull)
+  /// When coordinator/admin paid from company funds without an investor profile.
+  paidByCoordinator Boolean         @default(false)
+  title            String
+  category         String?
+  description      String?
+  amount           Decimal          @db.Decimal(18, 3)
+  currency         String           @db.VarChar(3)
+  expenseDate      DateTime         @db.Date
+  status           InvExpenseStatus @default(pending)
+  reimbursementDue Decimal          @db.Decimal(18, 3) @default(0)
+  reimbursementPaid Decimal         @db.Decimal(18, 3) @default(0)
+  approvedBy       String?
+  approvedAt       DateTime?
+  rejectedReason   String?
+  createdBy        String?
+  /// Maker id — cannot equal approvedBy (maker-checker).
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  journalId        String?
+  documents        InvDocument[]
+
+  @@index([projectId, status])
+  @@index([payerInvestorId])
+}
+
+model InvCommissionRule {
+  id        String             @id @default(uuid())
+  projectId String
+  project   InvProject         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  basis     InvCommissionBasis
+  percent   Decimal?           @db.Decimal(8, 4)
+  fixedAmount Decimal?         @db.Decimal(18, 3)
+  perInvestorJson Json?
+  chargeOnCoordinatorProfit Boolean @default(true)
+  active    Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@index([projectId, active])
+}
+
+model InvLedgerAccount {
+  id             String          @id @default(uuid())
+  organizationId String
+  organization   InvOrganization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  code           String
+  name           String
+  accountType    String
+  currency       String          @default("JOD") @db.VarChar(3)
+  active         Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+
+  lines InvJournalLine[]
+
+  @@unique([organizationId, code])
+}
+
+model InvJournal {
+  id              String           @id @default(uuid())
+  projectId       String?
+  project         InvProject?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  organizationId  String
+  status          InvJournalStatus @default(draft)
+  memo            String?
+  valueDate       DateTime         @db.Date
+  postedAt        DateTime?
+  postedBy        String?
+  /// Links to reversed original when this is a reversing journal.
+  reversesJournalId String?
+  reversesJournal   InvJournal?  @relation("JournalReversal", fields: [reversesJournalId], references: [id])
+  reversedBy        InvJournal[] @relation("JournalReversal")
+  idempotencyKey  String?
+  createdBy       String?
+  createdAt       DateTime         @default(now())
+  lines           InvJournalLine[]
+  transactions    InvTransaction[]
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([projectId, status])
+}
+
+model InvJournalLine {
+  id          String           @id @default(uuid())
+  journalId   String
+  journal     InvJournal       @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  accountId   String
+  account     InvLedgerAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  partnerId   String?
+  debit       Decimal          @db.Decimal(18, 3) @default(0)
+  credit      Decimal          @db.Decimal(18, 3) @default(0)
+  currency    String           @db.VarChar(3)
+  memo        String?
+  lineNo      Int
+
+  @@index([journalId])
+  @@index([accountId])
+}
+
+/// Operational transaction register (every money movement has a row).
+model InvTransaction {
+  id              String            @id @default(uuid())
+  projectId       String
+  project         InvProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  partnerId       String?
+  type            String
+  amount          Decimal           @db.Decimal(18, 3)
+  currency        String            @db.VarChar(3)
+  transactionDate DateTime          @db.Date
+  description     String?
+  approvalStatus  InvApprovalStatus @default(pending)
+  createdBy       String?
+  journalId       String?
+  journal         InvJournal?       @relation(fields: [journalId], references: [id], onDelete: SetNull)
+  metadata        Json?
+  createdAt       DateTime          @default(now())
+
+  @@index([projectId, transactionDate])
+  @@index([partnerId])
+}
+
+model InvSettlement {
+  id              String              @id @default(uuid())
+  projectId       String
+  project         InvProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status          InvSettlementStatus @default(draft)
+  saleProceeds    Decimal             @db.Decimal(18, 3)
+  closingCosts    Decimal             @db.Decimal(18, 3) @default(0)
+  unpaidLiabilities Decimal           @db.Decimal(18, 3) @default(0)
+  currency        String              @db.VarChar(3)
+  resultJson      Json?
+  hypothetical    Boolean             @default(false)
+  approvedBy      String?
+  approvedAt      DateTime?
+  postedBy        String?
+  postedAt        DateTime?
+  createdBy       String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  lines           InvSettlementLine[]
+
+  @@index([projectId, status])
+}
+
+model InvSettlementLine {
+  id                   String        @id @default(uuid())
+  settlementId         String
+  settlement           InvSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  partnerId            String
+  label                String
+  isCoordinator        Boolean       @default(false)
+  capitalReturned      Decimal       @db.Decimal(18, 3) @default(0)
+  expenseReimbursement Decimal       @db.Decimal(18, 3) @default(0)
+  profitShare          Decimal       @db.Decimal(18, 3) @default(0)
+  commissionEarned     Decimal       @db.Decimal(18, 3) @default(0)
+  totalPayout          Decimal       @db.Decimal(18, 3) @default(0)
+  paidAmount           Decimal       @db.Decimal(18, 3) @default(0)
+  paidAt               DateTime?
+
+  @@index([settlementId])
+  @@index([partnerId])
+}
+
+model InvDocument {
+  id          String          @id @default(uuid())
+  projectId   String?
+  project     InvProject?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  investorId  String?
+  investor    InvInvestor?    @relation(fields: [investorId], references: [id], onDelete: Cascade)
+  expenseId   String?
+  expense     InvExpense?     @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  kind        InvDocumentKind @default(other)
+  name        String
+  storageKey  String
+  mimeType    String?
+  sizeBytes   Int?
+  uploadedBy  String?
+  createdAt   DateTime        @default(now())
+
+  @@index([projectId])
+  @@index([investorId])
+}
+
+model InvAuditEvent {
+  id            String   @id @default(uuid())
+  organizationId String?
+  actorId       String?
+  actorEmail    String?
+  action        String
+  entityType    String
+  entityId      String?
+  previousState Json?
+  newState      Json?
+  reason        String?
+  correlationId String?
+  ip            String?
+  createdAt     DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([action])
 }

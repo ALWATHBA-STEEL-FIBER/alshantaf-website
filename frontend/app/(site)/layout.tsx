@@ -7,7 +7,13 @@ import { Footer } from "@/components/Footer";
 import { DeferredSiteChrome } from "@/components/DeferredSiteChrome";
 
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
-  const [settings, team] = await Promise.all([getPublicSettingsServer(), getTeamServer()]);
+  let settings = null;
+  let team: Awaited<ReturnType<typeof getTeamServer>> = [];
+  try {
+    [settings, team] = await Promise.all([getPublicSettingsServer(), getTeamServer()]);
+  } catch {
+    // Backend blip must not take down the whole site shell.
+  }
 
   return (
     <SettingsProvider settings={settings}>

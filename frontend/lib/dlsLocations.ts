@@ -64,6 +64,9 @@ function sortByEmbeddedNumber<T extends DlsOption>(items: T[]): T[] {
 // labels from scrape noise are dropped.
 const JUNK_NEIGHBORHOOD_LABELS = new Set([""]);
 
+/** Official DLS placeholder when a basin has no block-level neighborhood rows. */
+export const DLS_DEFAULT_NEIGHBORHOOD_LABEL = "جدول الأحياء";
+
 export function basinsForVillage(
   data: DlsData,
   governorateLabel: string,
@@ -99,10 +102,25 @@ export function codesForSelection(
 ): { villageCode: string; basinCode: string; sectorCode: string } | null {
   const village = villagesForDirectorate(data, governorateLabel, directorateLabel).find((v) => v.label === villageLabel);
   const basin = village?.basins.find((b) => b.label === basinLabel);
-  const neighborhood = basin?.neighborhoods.find((n) => n.label === neighborhoodLabel);
-  if (!village?.value || !basin?.value || neighborhood?.value === undefined || neighborhood?.value === "") {
-    return null;
+  if (!village?.value || !basin?.value) return null;
+  const usableNeighborhoods = neighborhoodsForBasin(
+    data,
+    governorateLabel,
+    directorateLabel,
+    villageLabel,
+    basinLabel
+  );
+  // Some basins have no neighborhood rows in the DLS cascade. Official queries
+  // still accept sector 0 (same as the "جدول الأحياء" placeholder).
+  if (usableNeighborhoods.length === 0) {
+    return {
+      villageCode: village.value,
+      basinCode: basin.value,
+      sectorCode: "0",
+    };
   }
+  const neighborhood = usableNeighborhoods.find((n) => n.label === neighborhoodLabel);
+  if (neighborhood?.value === undefined || neighborhood?.value === "") return null;
   return {
     villageCode: village.value,
     basinCode: basin.value,

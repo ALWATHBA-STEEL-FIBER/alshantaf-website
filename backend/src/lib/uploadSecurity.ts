@@ -12,15 +12,34 @@ export type UploadKind = "image" | "video" | "document";
 
 export const LIMITS = {
   image: 8 * 1024 * 1024,
-  video: 60 * 1024 * 1024,
+  video: 110 * 1024 * 1024,
   document: 15 * 1024 * 1024,
 };
 
-const ALLOWED_EXT: Record<UploadKind, Set<string>> = {
+/** Phone and desktop containers: iPhone MOV/QT, Android 3GP/MP4, plus the rest we store. */
+export const VIDEO_EXTENSIONS = new Set([
+  "mp4", "m4v", "mov", "movie", "qt",
+  "3gp", "3g2", "3gpp",
+  "webm", "mkv", "avi",
+  "mpeg", "mpg", "mpe", "m2v",
+  "ogv", "ogg",
+  "wmv", "asf",
+  "flv", "f4v",
+  "ts", "m2ts", "mts",
+  "hevc", "h265", "vod",
+]);
+
+const ALLOWED_EXT: Record<Exclude<UploadKind, "video">, Set<string>> = {
   image: new Set(["jpg", "png", "webp", "gif"]),
-  video: new Set(["mp4", "webm", "mov", "3gp"]),
   document: new Set(["pdf"]),
 };
+
+export function isDeclaredVideo(mime: string, filename: string): boolean {
+  const type = (mime || "").toLowerCase().split(";")[0].trim();
+  if (type.startsWith("video/")) return true;
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  return VIDEO_EXTENSIONS.has(ext);
+}
 
 export class UploadValidationError extends Error {}
 
@@ -56,11 +75,29 @@ export async function validateAndStore(
   uploadDir: string
 ): Promise<{ filename: string; mime: string }> {
   if (buffer.length > LIMITS[kind]) {
-    throw new UploadValidationError(`File exceeds the maximum size for a ${kind}`);
+    const maxMb = Math.round(LIMITS[kind] / (1024 * 1024));
+    console.warn("[upload] rejected size", { kind, bytes: buffer.length, maxMb });
+    throw new UploadValidationError(`File exceeds the ${maxMb}MB limit for a ${kind}`);
   }
 
   const detected = await detect(buffer);
-  if (!detected || !ALLOWED_EXT[kind].has(detected.ext)) {
+  if (kind === "video") {
+    const videoLike = Boolean(
+      detected && (detected.mime.startsWith("video/") || VIDEO_EXTENSIONS.has(detected.ext))
+    );
+    if (!videoLike) {
+      console.warn("[upload] rejected video", {
+        bytes: buffer.length,
+        ext: detected?.ext ?? null,
+        mime: detected?.mime ?? null,
+      });
+      throw new UploadValidationError("File content does not match a video format");
+    }
+  } else if (!detected || !ALLOWED_EXT[kind].has(detected.ext)) {
+    console.warn("[upload] rejected file", { kind, bytes: buffer.length, ext: detected?.ext ?? null, mime: detected?.mime ?? null });
+    throw new UploadValidationError(`File content does not match an allowed ${kind} type`);
+  }
+  if (!detected) {
     throw new UploadValidationError(`File content does not match an allowed ${kind} type`);
   }
 
@@ -98,6 +135,48 @@ export async function validateAndStore(
   return { filename, mime: detected.mime };
 }
 
+/** Full-admin uploads: any container in, H.264/AAC MP4 out so the offer page can play it. */
+export async function transcodeToPlayableMp4(
+  inputPath: string,
+  uploadDir: string
+): Promise<{ filename: string; mime: string }> {
+  const id = crypto.randomUUID();
+  const filename = `${id}.mp4`;
+  const tmpOut = path.join(uploadDir, filename);
+  try {
+    await execFileAsync(
+      "ffmpeg",
+      [
+        "-y",
+        "-i", inputPath,
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-vf", "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease",
+        "-c:a", "aac",
+        "-b:a", "160k",
+        "-movflags", "+faststart",
+        tmpOut,
+      ],
+      { timeout: 10 * 60_000 }
+    );
+    const stat = await fs.stat(tmpOut);
+    if (stat.size < 512) throw new Error("empty transcode");
+    return { filename, mime: "video/mp4" };
+  } catch (err) {
+    await fs.unlink(tmpOut).catch(() => undefined);
+    console.warn("[upload] admin video transcode failed", err instanceof Error ? err.message : err);
+    throw new UploadValidationError(
+      "Could not convert this file into a playable MP4. The offer page needs a video ffmpeg can read."
+    );
+  } finally {
+    await fs.unlink(inputPath).catch(() => undefined);
+  }
+}
+
 /** Re-encodes a video to a size-capped, quality-preserving H.264/AAC mp4 via ffmpeg.
  * Returns null (never throws) on any failure so the caller can fall back to the
  * original file — a slow or missing ffmpeg must never block a submission. */
@@ -111,22 +190,24 @@ async function compressVideo(
   const tmpOut = path.join(uploadDir, filename);
   try {
     await fs.writeFile(tmpIn, buffer);
-    await execFileAsync(
-      "ffmpeg",
-      [
-        "-y",
-        "-i", tmpIn,
-        "-vf", "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "26",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-movflags", "+faststart",
-        tmpOut,
-      ],
-      { timeout: 120_000 }
-    );
+    // Full re-encode of a phone video blows the edge timeout. Large files are
+    // only remuxed (faststart) so the upload can finish; small ones are transcoded.
+    const large = buffer.length > 20 * 1024 * 1024;
+    const args = large
+      ? ["-y", "-i", tmpIn, "-c", "copy", "-movflags", "+faststart", tmpOut]
+      : [
+          "-y",
+          "-i", tmpIn,
+          "-vf", "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease",
+          "-c:v", "libx264",
+          "-preset", "veryfast",
+          "-crf", "26",
+          "-c:a", "aac",
+          "-b:a", "128k",
+          "-movflags", "+faststart",
+          tmpOut,
+        ];
+    await execFileAsync("ffmpeg", args, { timeout: large ? 45_000 : 75_000 });
     return { filename, mime: "video/mp4" };
   } catch {
     await fs.unlink(tmpOut).catch(() => undefined);

@@ -212,10 +212,14 @@ export function MeasureToolbar({
       <button
         type="button"
         onClick={onEnter}
-        className={`inline-flex items-center gap-2 min-h-11 px-3.5 rounded-full border text-[12px] font-bold transition-colors ${btnIdle}`}
+        className={`inline-flex items-center gap-1.5 border font-bold transition-colors ${
+          compact
+            ? "h-7 px-2.5 rounded-md text-[10px] sm:h-8 sm:px-3 sm:text-[11px]"
+            : "min-h-11 px-3.5 rounded-md text-[12px]"
+        } ${btnIdle}`}
         aria-label={lp.measureEnter}
       >
-        <IconRuler className="w-[18px] h-[18px] shrink-0" />
+        <IconRuler className={`${compact ? "w-3.5 h-3.5" : "w-[18px] h-[18px]"} shrink-0`} />
         <span>{lp.measureEnter}</span>
       </button>
     );

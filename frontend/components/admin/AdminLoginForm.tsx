@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { api, ApiError } from "@/lib/api";
 import { ShieldIcon } from "@/components/icons";
+import { BotGuard, type BotGuardHandle } from "@/components/BotGuard";
 
 export function AdminLoginForm() {
   const { t } = useLanguage();
@@ -15,6 +16,7 @@ export function AdminLoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
+  const botRef = useRef<BotGuardHandle>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -37,14 +39,20 @@ export function AdminLoginForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const bot = botRef.current?.getPayload();
+    if (!bot) {
+      setError(t.botGuard.required);
+      return;
+    }
     setError("");
     setLoading(true);
     try {
-      await api.login(email, password);
+      await api.login(email, password, bot);
       const next = searchParams.get("next");
       router.push(next && next.startsWith("/admin") ? next : "/admin");
       router.refresh();
     } catch (err) {
+      botRef.current?.reset();
       setError(err instanceof ApiError ? t.admin.loginError : t.admin.networkError);
     } finally {
       setLoading(false);
@@ -101,6 +109,7 @@ export function AdminLoginForm() {
             autoComplete="current-password"
           />
         </div>
+        <BotGuard ref={botRef} action="login" />
         {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg p-3">{error}</p>}
         <button type="submit" disabled={loading} className="h-11 rounded-full bg-green text-white font-bold disabled:opacity-60 hover:bg-green-2 transition-colors">
           {loading ? t.admin.loading : t.admin.login}

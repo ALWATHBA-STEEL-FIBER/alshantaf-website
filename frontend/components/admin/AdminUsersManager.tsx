@@ -107,9 +107,13 @@ export function AdminUsersManager() {
         contact: t.admin.sidebar.contact,
         landChecks: t.admin.sidebar.landChecks,
         media: t.admin.sidebar.media,
+        monitor: t.admin.sidebar.monitor,
         security: t.admin.sidebar.security,
         users: t.admin.sidebar.admins,
         settings: t.admin.sidebar.settings,
+        orders: t.admin.sidebar.orders,
+        siteWork: t.admin.sidebar.siteWork,
+        invest: t.admin.sidebar.invest,
       }) satisfies Record<AdminFeature, string>,
     [t]
   );

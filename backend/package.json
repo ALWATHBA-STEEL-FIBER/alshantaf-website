@@ -13,16 +13,23 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "seed:invest-demo": "tsx src/invest/scripts/seedDemo.ts",
+    "test": "vitest run",
+    "test:invest": "vitest run src/invest",
+    "import:site-work": "tsx src/scripts/importSiteWorkExcel.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
+    "decimal.js": "^10.6.0",
+    "exceljs": "^4.4.0",
     "express": "^4.21.0",
     "express-rate-limit": "^8.7.0",
     "file-type": "^22.1.0",
+    "googleapis": "^134.0.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.1",
@@ -43,7 +50,8 @@
     "@types/nodemailer": "^8.0.1",
     "prisma": "^5.20.0",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.9"
   },
   "allowScripts": {
     "@prisma/client@5.22.0": true,

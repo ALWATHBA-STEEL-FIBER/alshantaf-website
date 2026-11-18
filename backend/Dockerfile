@@ -12,6 +12,7 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 RUN mkdir -p dist/knowledge && cp src/knowledge/*.txt dist/knowledge/
+RUN mkdir -p dist/lib/landMarket/data && cp -r src/lib/landMarket/data/. dist/lib/landMarket/data/
 
 RUN mkdir -p uploads
 

@@ -40,8 +40,6 @@ adminMediaRouter.get(
     const [files, used] = await Promise.all([fs.readdir(UPLOAD_DIR).catch(() => [] as string[]), usedUrls()]);
     const items = await Promise.all(
       files
-        // The -sm/-md tiers are derived srcset variants of a -lg upload, not
-        // independent files — list only the -lg (or a pre-migration bare filename).
         .filter((f) => f !== ".gitkeep" && !/-(sm|md)\.webp$/.test(f))
         .map(async (filename) => {
           const stat = await fs.stat(path.join(UPLOAD_DIR, filename)).catch(() => null);

@@ -1,63 +1,72 @@
 import { Router } from "express";
-import { z } from "zod";
 import { asyncHandler } from "../lib/asyncHandler";
-import {
-  getMarketCatalog,
-  getMarketSeries,
-  getMarketSnapshot,
-  getMetricDto,
-} from "../lib/marketIntelligence/service";
-import { checkMarketSources, syncMarketIntelligenceSeed } from "../lib/marketIntelligence/sync";
-import { requireAdmin, requirePermission } from "../middleware/auth";
+import { getLandMarketSnapshot } from "../lib/landMarket/service";
 
 export const marketIntelligenceRouter = Router();
+
+async function safeSnapshot() {
+  try {
+    return await getLandMarketSnapshot();
+  } catch (err) {
+    console.error("[land-market] snapshot failed:", err);
+    const now = new Date().toISOString();
+    return {
+      kind: "land_parcels" as const,
+      updatedAt: now,
+      generatedAt: now,
+      national: null,
+      ase: null,
+      dlsRates: { kpis: [], byArea: [] },
+      platform: {
+        offerCount: 0,
+        updatedAt: now,
+        kpis: [],
+        charts: { byArea: [], byStatus: [], byDeal: [], listingsByMonth: [] },
+      },
+      sources: [],
+      offerCount: 0,
+      kpis: [],
+      charts: {
+        byArea: [],
+        byStatus: [],
+        byDeal: [],
+        byIndustry: [],
+        priceByArea: [],
+        listingsByMonth: [],
+        latestByType: [],
+        landsTrend: [],
+        industrialTrend: [],
+        generalTrend: [],
+        residentialTrend: [],
+        landsResidentialTrend: [],
+        landsCommercialTrend: [],
+        commercialTrend: [],
+        nonResidentialTrend: [],
+        landsYearly: [],
+        industrialYearly: [],
+        generalYearly: [],
+        byGovernorate: [],
+        govQoqChange: [],
+        qoqByType: [],
+        landsBreakdown: [],
+      },
+    };
+  }
+}
 
 marketIntelligenceRouter.get(
   "/snapshot",
   asyncHandler(async (_req, res) => {
-    // Ensure seed exists on first hit (idempotent).
-    const count = await import("../prisma").then((m) => m.prisma.marketMetric.count());
-    if (count === 0) await syncMarketIntelligenceSeed();
-    res.json(await getMarketSnapshot());
+    res.json(await safeSnapshot());
   })
 );
 
+/** Alias kept for older clients. */
 marketIntelligenceRouter.get(
-  "/catalog",
+  "/land",
   asyncHandler(async (_req, res) => {
-    res.json(await getMarketCatalog());
-  })
-);
-
-marketIntelligenceRouter.get(
-  "/series/:metricKey",
-  asyncHandler(async (req, res) => {
-    const metricKey = z.string().min(1).max(80).parse(req.params.metricKey);
-    const range = z
-      .enum(["1m", "3m", "6m", "1y", "3y", "5y", "max"])
-      .catch("3y")
-      .parse(req.query.range);
-    res.json(await getMarketSeries(metricKey, range));
-  })
-);
-
-marketIntelligenceRouter.get(
-  "/metrics/:metricKey",
-  asyncHandler(async (req, res) => {
-    const metricKey = z.string().min(1).max(80).parse(req.params.metricKey);
-    res.json(await getMetricDto(metricKey));
+    res.json(await safeSnapshot());
   })
 );
 
 export const adminMarketIntelligenceRouter = Router();
-adminMarketIntelligenceRouter.use(requireAdmin);
-adminMarketIntelligenceRouter.use(requirePermission("settings"));
-
-adminMarketIntelligenceRouter.post(
-  "/sync",
-  asyncHandler(async (_req, res) => {
-    const seeded = await syncMarketIntelligenceSeed();
-    const health = await checkMarketSources();
-    res.json({ ok: true, seeded, health });
-  })
-);

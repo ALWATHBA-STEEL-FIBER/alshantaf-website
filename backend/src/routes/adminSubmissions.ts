@@ -1,22 +1,19 @@
 import { Router } from "express";
-import path from "node:path";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { requireAdmin, requirePermission } from "../middleware/auth";
 import { nextListingNo } from "../lib/listingNo";
 import { nextOwnerAccessCode } from "../lib/ownerAccess";
 import { notifyListingOwner, smsPublished } from "../lib/listingNotify";
-import { deleteUploadedFiles } from "../lib/uploadSecurity";
 import { audit } from "../lib/audit";
 import { asyncHandler } from "../lib/asyncHandler";
 import { INDUSTRY_TYPES, type IndustryTypeKey } from "../lib/industryTypes";
-import { westernDigitsString } from "../lib/arabicDigits";
+import { toWesternDigits, westernDigitsString } from "../lib/arabicDigits";
+import { assertValidMultiParcel, canonicalParcelList } from "../lib/multiParcel";
 
 export const adminSubmissionsRouter = Router();
 adminSubmissionsRouter.use(requireAdmin);
 adminSubmissionsRouter.use(requirePermission("submissions"));
-
-const UPLOAD_DIR = path.resolve(__dirname, "../../uploads");
 
 const listSchema = z.object({
   status: z.string().optional(),
@@ -81,43 +78,10 @@ adminSubmissionsRouter.patch(
   })
 );
 
-adminSubmissionsRouter.delete(
-  "/:id",
-  asyncHandler(async (req, res) => {
-    const existing = await prisma.submission.findUnique({ where: { id: req.params.id } });
-    if (!existing) {
-      res.status(404).json({ error: "Submission not found" });
-      return;
-    }
-    if (existing.status !== "rejected") {
-      res.status(409).json({ error: "Only rejected submissions can be permanently deleted" });
-      return;
-    }
-
-    await prisma.submission.delete({ where: { id: existing.id } });
-    await deleteUploadedFiles([...existing.images, existing.video, existing.document], UPLOAD_DIR);
-    await audit({
-      actorEmail: req.session!.email,
-      action: "submission.delete",
-      targetType: "submission",
-      targetId: existing.id,
-      metadata: {
-        serialNo: existing.serialNo,
-        trackingCode: existing.trackingCode,
-        applicant: existing.applicant,
-        village: existing.village,
-        parcel: existing.parcel,
-        status: existing.status,
-      },
-      ip: req.ip,
-    });
-    res.status(204).end();
-  })
-);
-
 const industryLabelToKey: Record<string, IndustryTypeKey> = Object.fromEntries(
   INDUSTRY_TYPES.map((key) => [key, key])
 ) as Record<string, IndustryTypeKey>;
+const PRICE_PER_SQM_RE = /^\d+(\.\d+)?$/;
 
 const approveSchema = z.object({
   publish: z.boolean().default(true),
@@ -135,7 +99,6 @@ const approveSchema = z.object({
       price: westernDigitsString(z.string().max(80).optional()),
       description: z.string().min(1).max(1800).optional(),
       phone: westernDigitsString(z.string().max(40).optional()),
-      size: westernDigitsString(z.string().max(80).optional()),
       village: z.string().max(120).optional(),
       basin: z.string().max(120).optional(),
       neighborhood: z.string().max(120).optional(),
@@ -165,6 +128,17 @@ adminSubmissionsRouter.post(
     const images = input.imageUrls.filter((url) => allowed.has(url));
 
     const edits = input.edits ?? {};
+    const parcelCandidate = edits.parcel?.trim() || submission.parcel;
+    const parcelValidation = assertValidMultiParcel(parcelCandidate);
+    if (!parcelValidation.ok) {
+      res.status(400).json({ error: parcelValidation.error });
+      return;
+    }
+    const normalizedParcel = canonicalParcelList(parcelCandidate) ?? parcelCandidate;
+    if (input.includePrice && edits.price && !PRICE_PER_SQM_RE.test(toWesternDigits(edits.price.trim()))) {
+      res.status(400).json({ error: "Price must be a number per square meter (m²)." });
+      return;
+    }
     const village = edits.village?.trim() || submission.village;
     const area = village || "منطقة أخرى";
     const listingNo = await nextListingNo(prisma, area);
@@ -194,7 +168,7 @@ adminSubmissionsRouter.post(
         propertyType: "أرض صناعية",
         industryType,
         dealType: "sale",
-        size: edits.size?.trim() || submission.area,
+        size: submission.area,
         price: input.includePrice ? edits.price?.trim() || submission.price : null,
         governorate: submission.governorate,
         directorate: submission.directorate,
@@ -203,7 +177,7 @@ adminSubmissionsRouter.post(
           ? edits.neighborhood?.trim() || submission.neighborhood
           : null,
         basin: input.includeParcel ? edits.basin?.trim() || submission.basin : null,
-        parcel: input.includeParcel ? edits.parcel?.trim() || submission.parcel : null,
+        parcel: input.includeParcel ? normalizedParcel : null,
         locationUrl: input.includeParcel ? submission.coordinates : null,
         latitude: input.includeParcel ? structuredSubmission.latitude : null,
         longitude: input.includeParcel ? structuredSubmission.longitude : null,
@@ -216,6 +190,7 @@ adminSubmissionsRouter.post(
         status: "available",
         publishStatus: input.publish ? "published" : "draft",
         featured: false,
+        importance: "none",
         ownerAccessCode,
         smsOptIn: true,
         presenterRole: submission.source === "broker" ? "broker" : "owner",

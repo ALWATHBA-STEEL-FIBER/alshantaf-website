@@ -5,9 +5,7 @@ import { IntentGate } from "@/components/journey/IntentGate";
 import { FeaturedOffersSection } from "@/components/FeaturedOffersSection";
 import { WhyAlshantaf } from "@/components/journey/WhyAlshantaf";
 import { AdvisorCta } from "@/components/AdvisorCta";
-import { LendingMarketSnapshot } from "@/components/market/LendingMarketSnapshot";
 import { getPublicListingsServer } from "@/lib/api";
-import { fetchMarketSnapshotServer } from "@/lib/marketIntelligence";
 
 const AreasGuide = dynamic(() => import("@/components/AreasGuide").then((m) => m.AreasGuide), {
   loading: () => <div className="py-16 md:py-20 bg-surface-2 min-h-[320px]" aria-hidden />,
@@ -18,10 +16,12 @@ const GovToolsHome = dynamic(() => import("@/components/journey/DecisionToolsHom
 });
 
 export default async function HomePage() {
-  const [listings, marketSnapshot] = await Promise.all([
-    getPublicListingsServer(),
-    fetchMarketSnapshotServer(),
-  ]);
+  let listings: Awaited<ReturnType<typeof getPublicListingsServer>> = [];
+  try {
+    listings = await getPublicListingsServer();
+  } catch {
+    listings = [];
+  }
 
   return (
     <>
@@ -59,7 +59,6 @@ export default async function HomePage() {
       />
       <Hero />
       <CountUpMetrics />
-      <LendingMarketSnapshot snapshot={marketSnapshot} />
       <IntentGate />
       <FeaturedOffersSection listings={listings} />
       <AreasGuide />

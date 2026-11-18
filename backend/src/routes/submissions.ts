@@ -5,7 +5,7 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { listingKey } from "../lib/listingNo";
-import { validateAndStore, UploadValidationError } from "../lib/uploadSecurity";
+import { validateAndStore, UploadValidationError, isDeclaredVideo } from "../lib/uploadSecurity";
 import { getSettings } from "../lib/settings";
 import { asyncHandler } from "../lib/asyncHandler";
 import { nextSubmissionSerial, nextTrackingCode } from "../lib/submissionCode";
@@ -25,6 +25,7 @@ import { lookupAmmanZoning, AmmanZoningLookupError } from "../lib/ammanZoning";
 import { normalizeDecimalInput, toWesternDigits, westernDigitsString } from "../lib/arabicDigits";
 import { assertValidMultiParcel, canonicalParcelList } from "../lib/multiParcel";
 import { syncIndustryTypeCatalogOnce } from "../lib/industryTypeCatalog";
+import { requireBotGuard } from "../middleware/botGuard";
 
 export const submissionsRouter = Router();
 const PRICE_PER_SQM_RE = /^\d+(\.\d+)?$/;
@@ -256,20 +257,20 @@ submissionsRouter.get(
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 60 * 1024 * 1024, files: 12 },
+  limits: { fileSize: 110 * 1024 * 1024, files: 12 },
   fileFilter: (_req, file, cb) => {
-    const allowed = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "image/gif",
-      "video/mp4",
-      "video/webm",
-      "video/quicktime",
-      "application/pdf",
-    ];
-    if (!allowed.includes(file.mimetype)) {
-      cb(new Error(`Unsupported file type: ${file.mimetype}`));
+    const images = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+    const videoField = file.fieldname === "video";
+    const allowed = videoField
+      ? isDeclaredVideo(file.mimetype, file.originalname)
+      : images.has(file.mimetype) || file.mimetype === "application/pdf";
+    if (!allowed) {
+      console.warn("[upload] rejected submission file", {
+        field: file.fieldname,
+        mime: file.mimetype,
+        name: file.originalname,
+      });
+      cb(new Error(`Unsupported file type: ${file.mimetype || file.originalname}`));
       return;
     }
     cb(null, true);
@@ -323,6 +324,7 @@ submissionsRouter.post(
     { name: "video", maxCount: 1 },
     { name: "document", maxCount: 1 },
   ]),
+  requireBotGuard("submit"),
   asyncHandler(async (req, res) => {
     const settings = await getSettings();
     if (settings.submissionsEnabled !== "true") {

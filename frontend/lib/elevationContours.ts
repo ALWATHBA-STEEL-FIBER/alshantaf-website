@@ -166,24 +166,13 @@ export function elevRangeInsidePoly(
   sampleEnu: (col: number, row: number) => { x: number; y: number },
   ring: Array<{ x: number; y: number }>
 ): { min: number; max: number } {
-  return elevRangeInsideAnyPoly(elev, cols, rows, sampleEnu, [ring]);
-}
-
-/** Min/max elevation for DEM samples inside any of the given rings (multi-parcel). */
-export function elevRangeInsideAnyPoly(
-  elev: Float32Array,
-  cols: number,
-  rows: number,
-  sampleEnu: (col: number, row: number) => { x: number; y: number },
-  rings: Array<Array<{ x: number; y: number }>>
-): { min: number; max: number } {
   let min = Infinity;
   let max = -Infinity;
   let count = 0;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const p = sampleEnu(c, r);
-      if (!pointInAnyPoly(p.x, p.y, rings)) continue;
+      if (!pointInPoly(p.x, p.y, ring)) continue;
       const v = elev[r * cols + c]!;
       if (v < min) min = v;
       if (v > max) max = v;
@@ -206,18 +195,6 @@ export function pointInPoly(x: number, y: number, ring: Array<{ x: number; y: nu
     if (intersect) inside = !inside;
   }
   return inside;
-}
-
-/** True if the point lies inside any ring (adjacent multi-parcel outlines). */
-export function pointInAnyPoly(
-  x: number,
-  y: number,
-  rings: Array<Array<{ x: number; y: number }>>
-): boolean {
-  for (const ring of rings) {
-    if (ring.length >= 3 && pointInPoly(x, y, ring)) return true;
-  }
-  return false;
 }
 
 /** Bilinear sample of a height field (grid index space). */

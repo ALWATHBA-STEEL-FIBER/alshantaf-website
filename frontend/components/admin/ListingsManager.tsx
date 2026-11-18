@@ -132,6 +132,18 @@ export function ListingsManager() {
                   <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[listing.publishStatus]}`} />
                   {t.admin.tabsListings[listing.publishStatus]}
                 </span>
+                {(listing.importance === "golden" ||
+                  listing.importance === "platinum" ||
+                  listing.importance === "titanium" ||
+                  listing.featured) && (
+                  <span className="absolute top-2 end-2 bg-black/70 text-white rounded-full px-2 py-1 text-[10px] font-bold">
+                    {t.offers.importance[
+                      listing.importance === "none" || !listing.importance
+                        ? "titanium"
+                        : listing.importance
+                    ]}
+                  </span>
+                )}
               </div>
               <div className="p-4 flex flex-col gap-2 flex-1">
                 <div className="flex justify-between items-center text-[11px] text-ink-soft">
@@ -182,15 +194,24 @@ export function ListingsManager() {
                       runAction(
                         listing.id,
                         "feature",
-                        listing.featured ? `${listing.listingNo} — ${t.admin.unfeature}` : `${listing.listingNo} — ${t.admin.feature}`,
-                        () => api.toggleFeature(listing.id, !listing.featured)
+                        listing.importance === "titanium" || listing.featured
+                          ? `${listing.listingNo} — ${t.offers.importance.none}`
+                          : `${listing.listingNo} — ${t.offers.importance.titanium}`,
+                        () =>
+                          api.toggleFeature(
+                            listing.id,
+                            !(listing.importance === "titanium" || listing.featured)
+                          )
                       )
                     }
                     disabled={rowBusy(listing.id)}
                     className="h-9 rounded-lg bg-surface-2 text-xs font-bold disabled:opacity-50 flex items-center justify-center gap-1.5"
+                    title={t.admin.listingForm.importanceHint}
                   >
                     {isBusy(listing.id, "feature") && <Spinner className="w-3.5 h-3.5" />}
-                    {listing.featured ? t.admin.unfeature : t.admin.feature}
+                    {listing.importance === "titanium" || listing.featured
+                      ? t.offers.importance.titanium
+                      : t.offers.importance.none}
                   </button>
                   <button
                     type="button"
@@ -213,11 +234,11 @@ export function ListingsManager() {
         <ListingForm
           listing={editing === "new" ? null : editing}
           onClose={() => setEditing(null)}
-          onSaved={() => {
+          onSaved={(quiet) => {
             const wasNew = editing === "new";
             setEditing(null);
             load();
-            showSuccess(wasNew ? t.admin.listingCreated : t.admin.listingUpdated);
+            if (!quiet) showSuccess(wasNew ? t.admin.listingCreated : t.admin.listingUpdated);
           }}
         />
       )}

@@ -49,6 +49,12 @@ type Props = {
   onSettledChange?: () => void;
   /** When true, omit outer card chrome (parent section already provides it). */
   embedded?: boolean;
+  /**
+   * Fill the parent map stage edge-to-edge — no nested card, no inner
+   * fullscreen chrome, canvas uses the full surface. Used when topography
+   * replaces the 2D map in place.
+   */
+  fillSurface?: boolean;
   adjacentRoads?: AdjacentRoad[] | null;
 };
 
@@ -162,6 +168,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
     onReadyChange,
     onSettledChange,
     embedded = false,
+    fillSurface = false,
     adjacentRoads = null,
   },
   ref
@@ -408,7 +415,11 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       scene.background = new THREE.Color(0x071816);
 
       const w = mount.clientWidth || 840;
-      const h = Math.max(280, Math.round(w * 0.48));
+      const fillH = mount.clientHeight;
+      const h =
+        fillSurface || fullscreenRef.current
+          ? Math.max(280, fillH || Math.round(w * 0.72))
+          : Math.max(280, Math.round(w * 0.48));
       const camera = new THREE.PerspectiveCamera(38, w / h, 0.5, model.span * 20);
       const camDist = model.span * 1.85;
       camera.position.set(-camDist * 0.75, relief * exag * 1.35 + model.span * 0.35, camDist * 0.85);
@@ -423,8 +434,10 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.setSize(w, h, false);
       renderer.domElement.style.width = "100%";
-      renderer.domElement.style.height = fullscreenRef.current ? "100%" : "auto";
+      renderer.domElement.style.height =
+        fillSurface || fullscreenRef.current ? "100%" : "auto";
       renderer.domElement.style.display = "block";
+      renderer.domElement.style.touchAction = "none";
       mount.replaceChildren(renderer.domElement);
       bundleRef.current = { THREE, scene, camera, renderer };
 
@@ -624,13 +637,14 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       const onResize = () => {
         if (!renderer || !mountRef.current) return;
         const nw = mountRef.current.clientWidth || w;
-        const fs = fullscreenRef.current;
+        const fs = fullscreenRef.current || fillSurface;
         const nh = fs
-          ? Math.max(320, mountRef.current.clientHeight || Math.round(window.innerHeight * 0.85))
+          ? Math.max(280, mountRef.current.clientHeight || Math.round(window.innerHeight * 0.85))
           : Math.max(280, Math.round(nw * 0.48));
         camera.aspect = nw / Math.max(1, nh);
         camera.updateProjectionMatrix();
         renderer.setSize(nw, nh, false);
+        renderer.domElement.style.height = fs ? "100%" : "auto";
       };
       window.addEventListener("resize", onResize);
       // Size after portal/layout paint
@@ -665,7 +679,7 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       if (renderer?.domElement.parentElement === mount) mount.removeChild(renderer.domElement);
       mount.replaceChildren();
     };
-  }, [model, lang, fullscreen]);
+  }, [model, lang, fullscreen, fillSurface]);
 
   // Body scroll lock + Escape while portal fullscreen is open
   useEffect(() => {
@@ -800,6 +814,64 @@ export const ParcelSideView = forwardRef<ParcelSideViewHandle, Props>(function P
       )}
     </div>
   );
+
+  /** Edge-to-edge map-stage surface — one plane, floating chips, no nested frames. */
+  if (fillSurface) {
+    return (
+      <div className="absolute inset-0 overflow-hidden bg-[#071816]" role="region" aria-label={title}>
+        <div ref={mountRef} className="parcel-side-mount absolute inset-0 h-full w-full" />
+        {(status === "loading" || status === "idle") && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#071816]/85 text-xs font-bold text-gold-2">
+            {loadingLabel}
+          </div>
+        )}
+        {status === "failed" && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#071816]/90 px-6 text-center text-xs font-bold text-gold/80">
+            {schematicNote}
+          </div>
+        )}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-start justify-between gap-2 bg-gradient-to-b from-[#071816]/90 via-[#071816]/35 to-transparent px-3 pb-8 pt-2.5">
+          <div className="min-w-0 max-w-[min(100%,22rem)]">
+            {elevHint ? (
+              <p className="text-[11px] font-bold tabular-nums text-gold">
+                <span className="font-semibold text-gold/70">
+                  {lang === "ar" ? "المناسيب: " : "Elevations: "}
+                </span>
+                {elevHint}
+              </p>
+            ) : null}
+            {model.extents ? (
+              <p className="mt-0.5 text-[10px] tabular-nums text-gold-2/90">
+                {lengthLabel} {formatMeters(model.extents.lengthM, lang)} · {widthLabel}{" "}
+                {formatMeters(model.extents.widthM, lang)}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <div className="absolute inset-x-0 bottom-0 z-20 flex flex-wrap items-end justify-between gap-2 bg-gradient-to-t from-[#071816]/95 via-[#071816]/45 to-transparent px-3 pb-2.5 pt-10">
+          <p className="max-w-[16rem] text-[9px] leading-snug text-gold-2/65">{disclaimer}</p>
+          <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
+            <a
+              href={earthHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-7 items-center rounded-md bg-gold px-2.5 text-[10px] font-bold text-green"
+            >
+              {googleEarthCta}
+            </a>
+            <a
+              href={mapsHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-7 items-center rounded-md border border-gold/45 bg-[#0a1f1c]/90 px-2.5 text-[10px] font-bold text-gold"
+            >
+              {googleMapsCta}
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const body = (
     <>
