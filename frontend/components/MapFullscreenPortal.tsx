@@ -756,25 +756,46 @@ export function MapFullscreenPortal({
       const bounds = map.getBounds().pad(0.15);
       const key = `${zoom.toFixed(1)}|${bounds.getWest().toFixed(4)},${bounds.getSouth().toFixed(4)},${bounds.getEast().toFixed(4)},${bounds.getNorth().toFixed(4)}`;
       if (key === lastKey) return;
-      void fetchDlsParcelsByBboxClient({
-        west: bounds.getWest(),
-        south: bounds.getSouth(),
-        east: bounds.getEast(),
-        north: bounds.getNorth(),
-        maxAllowableOffset: parcelSimplifyOffsetForZoom(zoom),
-        resultRecordCount: DLS_PARCEL_GRID_MAX,
-        subjectDlsKey: parcelIdentity?.dlsKey ?? null,
-        subjectParcelNo: parcelNumber,
-        signal,
-      })
-        .then((parcels) => {
+      void (async () => {
+        const apply = (parcels: ContextParcel[]) => {
           if (cancelled || signal.aborted) return;
           setViewportParcels(parcels);
           lastKey = key;
-        })
-        .catch(() => {
+        };
+        try {
+          apply(
+            await fetchDlsParcelsByBboxClient({
+              west: bounds.getWest(),
+              south: bounds.getSouth(),
+              east: bounds.getEast(),
+              north: bounds.getNorth(),
+              maxAllowableOffset: parcelSimplifyOffsetForZoom(zoom),
+              resultRecordCount: DLS_PARCEL_GRID_MAX,
+              subjectDlsKey: parcelIdentity?.dlsKey ?? null,
+              subjectParcelNo: parcelNumber,
+              signal,
+            })
+          );
+          return;
+        } catch {
+          /* server proxy if browser→DLS is blocked (CSP / network) */
+        }
+        if (cancelled || signal.aborted) return;
+        const center = map.getCenter();
+        try {
+          const res = await fetch("/api/submissions/dls-context-by-point", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            signal,
+            body: JSON.stringify({ latitude: center.lat, longitude: center.lng }),
+          });
+          if (!res.ok) return;
+          const body = (await res.json()) as { parcels?: ContextParcel[] };
+          apply(Array.isArray(body.parcels) ? body.parcels : []);
+        } catch {
           /* keep previous */
-        });
+        }
+      })();
     };
 
     const schedule = () => {

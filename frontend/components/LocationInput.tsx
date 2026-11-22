@@ -910,49 +910,68 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       if (key === lastKey) return;
 
       void (async () => {
-        try {
-          const parcels = await fetchDlsParcelsByBboxClient({
-            west: bounds.getWest(),
-            south: bounds.getSouth(),
-            east: bounds.getEast(),
-            north: bounds.getNorth(),
-            maxAllowableOffset: parcelSimplifyOffsetForZoom(zoom),
-            resultRecordCount: DLS_PARCEL_GRID_MAX,
-            subjectDlsKey: dlsKey,
-            subjectParcelNo: blueprint?.parcel ?? null,
-            signal,
-          });
+        const apply = (parcels: ContextParcel[]) => {
           if (signal.aborted || cancelled) return;
           setContextParcels(parcels);
           lastKey = key;
+        };
+        try {
+          apply(
+            await fetchDlsParcelsByBboxClient({
+              west: bounds.getWest(),
+              south: bounds.getSouth(),
+              east: bounds.getEast(),
+              north: bounds.getNorth(),
+              maxAllowableOffset: parcelSimplifyOffsetForZoom(zoom),
+              resultRecordCount: DLS_PARCEL_GRID_MAX,
+              subjectDlsKey: dlsKey,
+              subjectParcelNo: blueprint?.parcel ?? null,
+              signal,
+            })
+          );
+          return;
         } catch {
-          if (signal.aborted || cancelled) return;
-          // Fallback: ring around pin/subject if viewport query fails.
-          const fallbackFromRing = polygon?.[0]?.length
-            ? (() => {
-                const ring = polygon[0]!;
-                const sum = ring.reduce(
-                  (acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }),
-                  { lat: 0, lng: 0 }
-                );
-                return { lat: sum.lat / ring.length, lng: sum.lng / ring.length };
-              })()
-            : null;
-          const coords = selected ?? parseCoords(value) ?? fallbackFromRing;
-          if (!coords) return;
-          try {
-            const parcels = await fetchDlsContextByPointClient({
+          /* try point / server fallbacks below */
+        }
+        if (signal.aborted || cancelled) return;
+        // Fallback: ring around pin/subject if viewport query fails (CSP / DLS).
+        const fallbackFromRing = polygon?.[0]?.length
+          ? (() => {
+              const ring = polygon[0]!;
+              const sum = ring.reduce(
+                (acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }),
+                { lat: 0, lng: 0 }
+              );
+              return { lat: sum.lat / ring.length, lng: sum.lng / ring.length };
+            })()
+          : null;
+        const coords = selected ?? parseCoords(value) ?? fallbackFromRing;
+        if (!coords) return;
+        try {
+          apply(
+            await fetchDlsContextByPointClient({
               latitude: coords.lat,
               longitude: coords.lng,
               signal,
-            });
-            if (!cancelled && !signal.aborted) {
-              setContextParcels(parcels);
-              lastKey = key;
-            }
-          } catch {
-            /* keep previous grid */
-          }
+            })
+          );
+          return;
+        } catch {
+          /* server proxy last resort */
+        }
+        if (signal.aborted || cancelled) return;
+        try {
+          const res = await fetch("/api/submissions/dls-context-by-point", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            signal,
+            body: JSON.stringify({ latitude: coords.lat, longitude: coords.lng }),
+          });
+          if (!res.ok) return;
+          const body = (await res.json()) as { parcels?: ContextParcel[] };
+          apply(Array.isArray(body.parcels) ? body.parcels : []);
+        } catch {
+          /* keep previous grid */
         }
       })();
     };
