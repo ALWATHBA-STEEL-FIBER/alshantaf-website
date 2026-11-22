@@ -16,6 +16,8 @@ export const ADMIN_FEATURES = [
   "orders",
   "siteWork",
   "invest",
+  /** Admin investment AI assistant (create/update projects by chat & voice). */
+  "investAi",
 ] as const;
 
 export type AdminFeature = (typeof ADMIN_FEATURES)[number];

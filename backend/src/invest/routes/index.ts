@@ -15,6 +15,8 @@ import * as investors from "../services/investorService";
 import * as capital from "../services/capitalExpenseService";
 import * as settlement from "../services/settlementService";
 import * as dash from "../services/dashboardPortal";
+import { investAgentRouter } from "../agent/routes";
+import { openBuffer } from "../agent/secure";
 import { prisma } from "../../prisma";
 import path from "node:path";
 import fs from "node:fs";
@@ -385,6 +387,22 @@ admin.get(
       res.status(404).json({ error: "File missing" });
       return;
     }
+    if (abs.endsWith(".enc")) {
+      // Files uploaded through the assistant are encrypted at rest.
+      let plain: Buffer;
+      try {
+        plain = openBuffer(await fs.promises.readFile(abs));
+      } catch {
+        res.status(500).json({ error: "تعذّر فك تشفير الملف" });
+        return;
+      }
+      res.setHeader("Content-Type", doc.mimeType || "application/octet-stream");
+      res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(doc.name)}`);
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.send(plain);
+      return;
+    }
     res.download(abs, doc.name);
   })
 );
@@ -482,6 +500,7 @@ investRouter.get(
 );
 
 // Admin routes last — requireAdmin must not wrap portal endpoints above.
+admin.use("/agent", investAgentRouter);
 investRouter.use(admin);
 
 // Keep bcrypt import used (portal password set via investor create)

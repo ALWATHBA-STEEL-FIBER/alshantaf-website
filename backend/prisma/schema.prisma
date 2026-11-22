@@ -1306,3 +1306,52 @@ model InvAuditEvent {
   @@index([createdAt])
   @@index([action])
 }
+
+// ─────────────────────────────────────────────────────────────
+// Admin investment assistant (separate from the public website assistant:
+// own conversations, own memory, never shared with the site chat).
+// ─────────────────────────────────────────────────────────────
+
+model InvAgentConversation {
+  id        String            @id @default(uuid())
+  /// Admin User.id that owns the conversation.
+  userId    String
+  title     String            @default("محادثة جديدة")
+  /// Project the chat was opened from (context), if any.
+  projectId String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  messages  InvAgentMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model InvAgentMessage {
+  id             String               @id @default(uuid())
+  conversationId String
+  conversation   InvAgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// user | assistant | tool
+  role           String
+  content        String               @default("")
+  /// Assistant tool calls (OpenAI format) for replaying the conversation.
+  toolCalls      Json?
+  toolCallId     String?
+  /// Files the admin attached: [{ documentId, name, mime }]
+  attachments    Json?
+  /// What the assistant changed this turn, for the UI: [{ label, href }]
+  actions        Json?
+  createdAt      DateTime             @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+/// Long-lived notes the assistant keeps about how this admin works (per admin user).
+model InvAgentMemory {
+  id        String   @id @default(uuid())
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}

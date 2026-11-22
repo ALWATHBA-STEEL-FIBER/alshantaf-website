@@ -114,6 +114,7 @@ export function AdminUsersManager() {
         orders: t.admin.sidebar.orders,
         siteWork: t.admin.sidebar.siteWork,
         invest: t.admin.sidebar.invest,
+        investAi: t.admin.sidebar.investAi,
       }) satisfies Record<AdminFeature, string>,
     [t]
   );

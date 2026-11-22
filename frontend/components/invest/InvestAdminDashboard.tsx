@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useAdminSession } from "@/lib/adminPermissions";
 import { useLanguage } from "@/lib/LanguageProvider";
 import { investApi, type InvestDashboard, type InvestProjectSummary } from "@/lib/investApi";
 import { ApiError } from "@/lib/api";
@@ -15,6 +16,7 @@ function L(ar: string, en: string, lang: string) {
 
 export function InvestAdminDashboard() {
   const { lang } = useLanguage();
+  const canAi = useAdminSession().has("investAi");
   const [data, setData] = useState<InvestDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -60,6 +62,14 @@ export function InvestAdminDashboard() {
         >
           + {L("مشروع جديد", "New project", lang)}
         </Link>
+        {canAi ? (
+        <Link
+          href="/admin/invest/assistant"
+          className="h-10 px-4 rounded-xl bg-ink text-white text-sm font-bold inline-flex items-center"
+        >
+          {L("مساعد الاستثمار (صوت ونص)", "Investment assistant (voice & text)", lang)}
+        </Link>
+        ) : null}
         <Link
           href="/admin/invest/projects"
           className="h-10 px-4 rounded-xl bg-green text-white text-sm font-bold inline-flex items-center"

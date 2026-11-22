@@ -74,3 +74,21 @@ Backup: [BACKUP-AND-RECOVERY.md](./BACKUP-AND-RECOVERY.md).
 - **Settlement** — the payer is still reimbursed off the top. For non-ownership splits the engine moves profit: each partner gets back their ownership share of the expense and is charged their agreed share (`expenseBurden` / `expenseSplitAdjustment`). The coordinator cut is taken on the adjusted profit.
 - **Costs & value tab** — total cost (land + expenses), cost per m², cost by category, per-partner division (land share, expense share, cost share, what they paid, balance), and the latest valuation assumption (`estimatedValue` + date + source) with what each stake is worth today.
 - **Contract tab** — contract no./date/price, seller, deed and registry, broker, deposit, and the payment schedule to the seller (due / paid dates, overdue highlighted). Stored as `InvProject.contractDetails` JSON.
+
+## v4 — Admin investment assistant (AI, voice + text)
+
+Page: **Admin → شراكات الاستثمار → مساعد الاستثمار** (`/admin/invest/assistant`). Every project page also has "اسأل المساعد عن هذا المشروع", which opens the chat with that project as context.
+
+- **Flow:** the admin describes a project by text or voice. The assistant asks only for what's missing, shows a summary, and creates the project after the admin confirms. The admin is the default coordinator. Later it records expenses and bills, payments, initial payments, contract details, valuation, and per-partner coordinator cuts. It answers questions (balances, who paid what, "what does everyone get if we sell at X" via a non-writing simulation).
+- **Coordinator cut:** a % of each partner's net profit. There is a project default, which can be overridden per partner (e.g. 50% from selected partners). The coordinator does not need to invest (initial payment 0).
+- **Tools:** all writes go through the same services as the UI (validation, double-entry journals, audit log). The assistant can't delete anything.
+- **Voice:** recorded in the browser and transcribed server-side (OpenAI `gpt-4o-transcribe`, fallback `whisper-1`; Groq `whisper-large-v3-turbo`). The text goes into the box for review. Replies can be read aloud (browser speech).
+- **Bills:** attach a photo or PDF. The model reads amount, date, vendor and invoice no. from images, records the expense, and links the file (`attach_document`).
+- **Isolation:** own tables (`InvAgentConversation`, `InvAgentMessage`, `InvAgentMemory`), own prompt, own routes (`/api/invest/agent/*`). Nothing is shared with the public website assistant.
+- **Memory:**
+  - Per-admin notes (`remember` / `forget`, editable in "ذاكرة المساعد").
+  - Per-project memory files: `<projectId>.json` and `.txt`, plus a portfolio index and assistant notes per project (`note_project`). They are rebuilt from live data on each turn, and the index goes into every prompt. Admins can download them decrypted.
+- **Security:**
+  - Requires `invest` plus the new `investAi` permission (full admins have it).
+  - At rest, AES-256-GCM (key `INVEST_AGENT_SECRET`) encrypts message content, tool calls, actions, titles, memory notes, the project memory files (`<data>/invest-docs/agent-knowledge/*.enc`, mode 600) and uploaded bills (`*.enc`; plaintext copies are removed). Bills are decrypted only by the admin download route.
+  - Rate limits: 20 messages per minute and 20 recordings per minute per admin.

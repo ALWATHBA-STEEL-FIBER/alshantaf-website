@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useAdminSession } from "@/lib/adminPermissions";
 import { ApiError } from "@/lib/api";
 import {
   crmApi,
@@ -51,7 +53,13 @@ type TabId = "overview" | "partners" | "capital" | "expenses" | "costs" | "contr
 
 export function InvestProjectWorkspace({ projectId }: { projectId: string }) {
   const { t } = useT();
-  const [tab, setTab] = useState<TabId>("overview");
+  const canAi = useAdminSession().has("investAi");
+  const tabParam = useSearchParams().get("tab");
+  const [tab, setTab] = useState<TabId>(() =>
+    (["overview", "partners", "capital", "expenses", "costs", "contract", "payout", "details"] as string[]).includes(tabParam ?? "")
+      ? (tabParam as TabId)
+      : "overview"
+  );
   const [p, setP] = useState<ProjectFull | null>(null);
   const [error, setError] = useState("");
   const [flash, setFlash] = useState("");
@@ -113,6 +121,14 @@ export function InvestProjectWorkspace({ projectId }: { projectId: string }) {
         <div className="flex flex-wrap items-center gap-2 mt-1">
           <h1 className="text-2xl font-extrabold text-green">{p.name}</h1>
           <StatusPill status={p.status} />
+          {canAi ? (
+          <Link
+            href={`/admin/invest/assistant?projectId=${p.id}`}
+            className="ms-auto h-9 px-3 rounded-xl bg-ink text-white text-xs font-bold inline-flex items-center"
+          >
+            {t("اسأل المساعد عن هذا المشروع", "Ask the assistant about this project")}
+          </Link>
+          ) : null}
         </div>
         <div className="text-xs text-ink-soft mt-1">
           {[p.code, p.location, p.plotParcelNo, p.landAreaSqm ? `${fmt(p.landAreaSqm)} م²` : null].filter(Boolean).join(" · ")}
