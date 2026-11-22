@@ -31,10 +31,10 @@ export const DLS_LOD = {
   /** Basins bridge into the parcel grid. */
   basinsMinZoom: 12.5,
   basinsMaxZoom: 14.75,
-  /** Parcel cadastral grid. */
-  parcelsMinZoom: 14,
-  /** Debounce after pan/zoom settles — slower = kinder to weak devices. */
-  debounceMs: 550,
+  /** Parcel cadastral grid — start a touch earlier so browse-without-pick works. */
+  parcelsMinZoom: 13.5,
+  /** Debounce after pan/zoom settles — short enough to feel live, still kind to phones. */
+  debounceMs: 280,
 } as const;
 
 export function lodLevelForZoom(zoom: number): DlsLodLevel {

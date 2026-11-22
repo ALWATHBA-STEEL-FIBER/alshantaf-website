@@ -46,6 +46,7 @@ import {
   MAP_MAX_ZOOM,
   MEASURE_MAX_ZOOM,
   OSM_TILE_URL,
+  PARCEL_FIT_MAX_ZOOM,
   parcelFitBoundsOptions,
   osmTileOptions,
   satTileOptions,
@@ -524,7 +525,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         doubleClickZoom: !locked,
         boxZoom: !locked,
         maxZoom: MAP_MAX_ZOOM,
-      }).setView(start, selected ? 16 : 8);
+      }).setView(start, selected ? PARCEL_FIT_MAX_ZOOM : 8);
 
       leafletRef.current = L;
       const osm = L.tileLayer(OSM_TILE_URL, osmTileOptions());
@@ -981,11 +982,13 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       timer = setTimeout(() => {
         timer = null;
         load();
-      }, 380);
+      }, 180);
     };
 
     map.on("moveend", schedule);
     map.on("zoomend", schedule);
+    // Refresh while zooming so the grid tracks the viewport, not only after settle.
+    map.on("zoom", schedule);
     schedule();
 
     return () => {
@@ -994,6 +997,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       abort.abort();
       map.off("moveend", schedule);
       map.off("zoomend", schedule);
+      map.off("zoom", schedule);
     };
   }, [
     showMap,
@@ -1002,53 +1006,89 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     mapReady,
     dlsKey,
     blueprint?.parcel,
-    polygonKey,
     selected,
     value,
     polygon,
   ]);
 
+  const appliedPolygonKeyRef = useRef("");
+
+  // Mount / replace parcel overlay. fitBounds only when the *subject* ring changes —
+  // never when the neighbor grid refreshes (that used to yank the view back).
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     void import("leaflet").then((L) => {
       const map = mapRef.current;
       if (!map) return;
 
-      if (polygonRef.current) {
-        map.removeLayer(polygonRef.current);
-        polygonRef.current = null;
+      const hasSubject = Boolean(polygon && polygon.length > 0 && polygonKey);
+      const hasContext = showContextGridEffective && contextParcels.length > 0;
+      if (!hasSubject && !hasContext) {
+        if (polygonRef.current) {
+          map.removeLayer(polygonRef.current);
+          polygonRef.current = null;
+        }
+        appliedPolygonKeyRef.current = "";
+        if (selected) {
+          placeMarker(L, map, selected.lat, selected.lng, !locked);
+        } else if (markerRef.current) {
+          map.removeLayer(markerRef.current);
+          markerRef.current = null;
+        }
+        return;
       }
 
-      if (polygon && polygon.length > 0 && polygonKey) {
-        const canRepick = !locked && measureModeRef.current === "off";
-        const opts: ParcelCanvasOpts = {
-          rings: polygon as [number, number][][],
-          contextParcels,
-          showContextGrid: showContextGridEffective,
-          showDimensions: Boolean(
-            drawDimensions && showDimensions && measureModeRef.current === "off"
-          ),
-          perimeterM,
-          lang,
-          parcelNumber: blueprint?.parcel?.trim() || null,
-          parcelNumbers: parcelNumbers && parcelNumbers.length ? parcelNumbers : null,
-          parcelLabel: lp.blueprintParcel,
-          contextInteractive: canRepick && showContextGridEffective,
-          onContextParcelClick: canRepick
-            ? (coords) => {
-                if (lockedRef.current || measureModeRef.current !== "off") return;
-                placeMarker(L, map, coords.lat, coords.lng, true);
-                commit(coords);
-                void onPinDropRef.current?.(coords);
-              }
-            : undefined,
-        };
+      const canRepick = !locked && measureModeRef.current === "off" && showContextGridEffective;
+      const opts: ParcelCanvasOpts = {
+        rings: (hasSubject ? polygon : []) as [number, number][][],
+        contextParcels,
+        showContextGrid: showContextGridEffective,
+        showDimensions: Boolean(
+          hasSubject && drawDimensions && showDimensions && measureModeRef.current === "off"
+        ),
+        perimeterM,
+        lang,
+        parcelNumber: blueprint?.parcel?.trim() || null,
+        parcelNumbers: parcelNumbers && parcelNumbers.length ? parcelNumbers : null,
+        parcelLabel: lp.blueprintParcel,
+        contextInteractive: canRepick,
+        onContextParcelClick: canRepick
+          ? (coords) => {
+              if (lockedRef.current || measureModeRef.current !== "off") return;
+              placeMarker(L, map, coords.lat, coords.lng, true);
+              commit(coords);
+              void onPinDropRef.current?.(coords);
+            }
+          : undefined,
+      };
+
+      const geometryChanged = hasSubject && appliedPolygonKeyRef.current !== polygonKey;
+      const existing = polygonRef.current as
+        | (import("leaflet").Layer & { setParcelOptions?: (o: ParcelCanvasOpts) => void })
+        | null;
+
+      if (existing?.setParcelOptions) {
+        existing.setParcelOptions(opts);
+      } else {
+        if (polygonRef.current) {
+          map.removeLayer(polygonRef.current);
+          polygonRef.current = null;
+        }
         const layer = createParcelCanvasLayer(L, opts);
         layer.addTo(map);
         polygonRef.current = layer;
+      }
 
+      if (geometryChanged) {
+        appliedPolygonKeyRef.current = polygonKey;
         try {
-          map.fitBounds(layer.getBounds(), parcelFitBoundsOptions(false));
+          const boundsLayer = polygonRef.current as unknown as {
+            getBounds?: () => import("leaflet").LatLngBounds;
+          };
+          const bounds = boundsLayer?.getBounds?.();
+          if (bounds?.isValid?.()) {
+            map.fitBounds(bounds, parcelFitBoundsOptions(false));
+          }
         } catch {
           /* ignore */
         }
@@ -1056,32 +1096,27 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           map.removeLayer(markerRef.current);
           markerRef.current = null;
         }
-        return;
-      }
-
-      if (selected) {
+      } else if (!hasSubject && selected) {
         placeMarker(L, map, selected.lat, selected.lng, !locked);
-        map.setView([selected.lat, selected.lng], Math.max(map.getZoom(), 15));
-      } else if (markerRef.current) {
-        map.removeLayer(markerRef.current);
-        markerRef.current = null;
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, polygonKey, locked, mapReady, contextParcels, showContextGridEffective]);
 
-  // Keep annotations in sync when only labels/toggle change (do not remount / fitBounds).
+  // Keep dimensions / labels in sync without remounting.
   useEffect(() => {
     const layer = polygonRef.current as
       | (import("leaflet").Layer & { setParcelOptions?: (o: ParcelCanvasOpts) => void })
       | null;
-    if (!layer?.setParcelOptions || !polygon?.[0]?.length) return;
+    if (!layer?.setParcelOptions) return;
+    const hasSubject = Boolean(polygon?.[0]?.length);
+    if (!hasSubject && !(showContextGridEffective && contextParcels.length)) return;
     const canRepick = !locked && !measuring && showContextGridEffective;
     layer.setParcelOptions({
-      rings: polygon as [number, number][][],
+      rings: (hasSubject ? polygon : []) as [number, number][][],
       contextParcels,
       showContextGrid: showContextGridEffective,
-      showDimensions: dimsOnCanvas,
+      showDimensions: hasSubject && dimsOnCanvas,
       perimeterM,
       lang,
       parcelNumber: blueprint?.parcel?.trim() || null,
@@ -1202,7 +1237,13 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
         commit(coords);
         const map = mapRef.current;
-        if (map) map.setView([coords.lat, coords.lng], Math.max(map.getZoom(), 16), { animate: true });
+        if (map) {
+          map.setView(
+            [coords.lat, coords.lng],
+            Math.max(map.getZoom(), PARCEL_FIT_MAX_ZOOM),
+            { animate: true }
+          );
+        }
       },
       () => {
         setStatus("error");
@@ -1233,7 +1274,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       /* ignore */
     }
     if (selected) {
-      map.setView([selected.lat, selected.lng], 16, { animate: true });
+      map.setView([selected.lat, selected.lng], PARCEL_FIT_MAX_ZOOM, { animate: true });
       return;
     }
     map.setView(DEFAULT_CENTER, 8, { animate: true });

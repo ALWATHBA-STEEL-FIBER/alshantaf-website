@@ -640,7 +640,10 @@ export function MapFullscreenPortal({
       const liveMap = mapRef.current;
       if (!liveMap) return;
 
-      if (!polygon?.[0]?.length) {
+      const hasSubject = Boolean(polygon?.[0]?.length);
+      const ctxList = effectiveContextParcels ?? [];
+      const hasContext = showContextGridEffective && ctxList.length > 0;
+      if (!hasSubject && !hasContext) {
         if (polyRef.current) {
           liveMap.removeLayer(polyRef.current);
           polyRef.current = null;
@@ -653,10 +656,10 @@ export function MapFullscreenPortal({
       const canRepick =
         !lockedRef.current && measureModeRef.current === "off" && showContextGridEffective;
       const opts: ParcelCanvasOpts = {
-        rings: polygon as [number, number][][],
-        contextParcels: effectiveContextParcels,
+        rings: (hasSubject ? polygon : []) as [number, number][][],
+        contextParcels: ctxList,
         showContextGrid: showContextGridEffective,
-        showDimensions: dimsOnCanvas,
+        showDimensions: hasSubject && dimsOnCanvas,
         perimeterM,
         lang,
         parcelNumber,
@@ -672,7 +675,7 @@ export function MapFullscreenPortal({
           : undefined,
       };
 
-      const geometryChanged = appliedPolygonKeyRef.current !== polygonKey;
+      const geometryChanged = hasSubject && appliedPolygonKeyRef.current !== polygonKey;
       const existing = polyRef.current as unknown as
         | (import("leaflet").Layer & { setParcelOptions?: (o: ParcelCanvasOpts) => void })
         | null;
@@ -690,7 +693,7 @@ export function MapFullscreenPortal({
       }
 
       measureToolRef.current?.setSnapTargets(
-        parcelSnapTargets(polygon as [number, number][][] | null | undefined)
+        parcelSnapTargets(hasSubject ? (polygon as [number, number][][] | null | undefined) : null)
       );
 
       if (geometryChanged) {
@@ -803,11 +806,12 @@ export function MapFullscreenPortal({
       timer = setTimeout(() => {
         timer = null;
         load();
-      }, 380);
+      }, 180);
     };
 
     map.on("moveend", schedule);
     map.on("zoomend", schedule);
+    map.on("zoom", schedule);
     schedule();
     return () => {
       cancelled = true;
@@ -815,6 +819,7 @@ export function MapFullscreenPortal({
       abort.abort();
       map.off("moveend", schedule);
       map.off("zoomend", schedule);
+      map.off("zoom", schedule);
     };
   }, [
     open,

@@ -288,11 +288,32 @@ export async function lookupDlsParcelByPoint(params: {
 }
 
 function normalizeParcelNo(value: unknown): string | null {
-  const raw = typeof value === "string" ? value.trim() : "";
-  if (!raw) return null;
+  let raw = "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    raw = String(Math.trunc(value));
+  } else if (typeof value === "string") {
+    raw = value.trim();
+  } else {
+    return null;
+  }
+  if (!raw || raw === "0" || /^0+$/.test(raw)) return null;
   const n = Number(raw);
   if (Number.isFinite(n) && n > 0) return String(Math.trunc(n));
   return raw;
+}
+
+function parcelNoFromAttrs(attrs: Record<string, unknown> | undefined): string | null {
+  const fromId = normalizeParcelNo(attrs?.PARCEL_ID);
+  if (fromId) return fromId;
+  const keyRaw = attrs?.DLS_KEY;
+  const key =
+    typeof keyRaw === "number" && Number.isFinite(keyRaw)
+      ? String(Math.trunc(keyRaw))
+      : typeof keyRaw === "string"
+        ? keyRaw.trim()
+        : "";
+  if (key.length >= 5) return normalizeParcelNo(key.slice(-5));
+  return null;
 }
 
 function ringsFromFeature(feature: DlsFeature): [number, number][][] {
@@ -506,7 +527,7 @@ export async function lookupDlsParcelContextByPoint(params: {
         .filter((ring) => ring.length >= 3);
       if (!rings.length) continue;
       const dlsKey = (row.attributes?.DLS_KEY || "").trim() || null;
-      const parcelNo = normalizeParcelNo(row.attributes?.PARCEL_ID);
+      const parcelNo = parcelNoFromAttrs(row.attributes as Record<string, unknown> | undefined);
       const isSubject = Boolean(dlsKey && subject.dlsKey && dlsKey === subject.dlsKey);
       list.push({ dlsKey, parcelNo, rings, isSubject });
     }

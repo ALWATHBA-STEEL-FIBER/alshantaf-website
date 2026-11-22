@@ -130,9 +130,15 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
     },
 
     getBounds(this: ParcelLayerInst) {
-      const all = this.options.rings.flat();
-      if (!all.length) return L.latLngBounds([0, 0], [0, 0]);
-      return L.latLngBounds(all.map(([lat, lng]) => [lat, lng] as [number, number]));
+      const subject = this.options.rings.flat();
+      if (subject.length) {
+        return L.latLngBounds(subject.map(([lat, lng]) => [lat, lng] as [number, number]));
+      }
+      const ctx = (this.options.contextParcels ?? []).flatMap((p) => p.rings ?? []).flat();
+      if (ctx.length) {
+        return L.latLngBounds(ctx.map(([lat, lng]) => [lat, lng] as [number, number]));
+      }
+      return L.latLngBounds([0, 0], [0, 0]);
     },
   });
 
@@ -157,22 +163,25 @@ function geometryKey(opts: ParcelCanvasOpts): string {
 }
 
 function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
+  if (!layer._polys || !layer._corners) return;
   const rings = layer.options.rings.filter((ring) => ring.length > 0);
-  if (!rings.length || !layer._polys || !layer._corners) return;
+  const drawContext = layer.options.showContextGrid !== false;
+  const hasContext =
+    drawContext &&
+    (layer.options.contextParcels ?? []).some((p) =>
+      (p.rings ?? []).some((ring) => ring.length >= 3)
+    );
+  // Allow a cadastral grid with no subject selected (browse-before-pick).
+  if (!rings.length && !hasContext) return;
 
   const nextKey = geometryKey(layer.options);
-  // Always refresh click wiring when callback identity may change, but skip
-  // full rebuild when rings/context are unchanged and we already drew once.
-  const forceRebuild = layer._geomKey !== nextKey;
-  if (!forceRebuild && layer._polys.getLayers().length > 0) {
-    // Re-bind click callback on existing context polys if needed — simplest is rebuild
-    // only when geometry changes; click handler is read from layer.options at click time.
+  // Rebuild only when rings/context change — not on every pan (clicks stay reliable).
+  if (layer._geomKey === nextKey && layer._polys.getLayers().length > 0) {
     return;
   }
   layer._geomKey = nextKey;
 
   layer._polys.clearLayers();
-  const drawContext = layer.options.showContextGrid !== false;
   const contextInteractive =
     layer.options.contextInteractive !== false && typeof layer.options.onContextParcelClick === "function";
   const context = (layer.options.contextParcels ?? []).flatMap((parcel) =>
@@ -233,6 +242,7 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
   }
 
   layer._corners.clearLayers();
+  if (!rings.length) return;
   const hard = new Set<string>();
   for (const ring of rings) {
     for (const c of ringCornerPoints(ring)) {
@@ -267,7 +277,10 @@ function paintLabels(
   opts: ParcelCanvasOpts
 ) {
   const rings = opts.rings.filter((ring) => ring.length > 0);
-  if (!rings.length) return;
+  const hasContextLabels =
+    opts.showContextGrid !== false &&
+    (opts.contextParcels ?? []).some((p) => Boolean(p.parcelNo) && !p.isSubject);
+  if (!rings.length && !hasContextLabels) return;
 
   const size = map.getSize();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -284,7 +297,7 @@ function paintLabels(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, size.x, size.y);
 
-  if (opts.showDimensions) {
+  if (opts.showDimensions && rings.length) {
     for (const ring of rings) {
       const edges = ringEdgeDimensions(ring);
       const sum = edges.reduce((s, e) => s + e.lengthM, 0);
@@ -356,6 +369,7 @@ function paintLabels(
       const center = ringInteriorCentroid(ring);
       if (!center) continue;
       const c = map.latLngToContainerPoint([center.lat, center.lng]);
+      if (c.x < -48 || c.y < -48 || c.x > size.x + 48 || c.y > size.y + 48) continue;
       ctx.save();
       ctx.translate(c.x, c.y);
       ctx.font = '700 12px system-ui, "IBM Plex Sans Arabic", sans-serif';
@@ -369,7 +383,7 @@ function paintLabels(
       ctx.restore();
     }
   }
-  if (!numbers.length && opts.parcelLabel) {
+  if (!numbers.length && opts.parcelLabel && rings[0]?.length) {
     const center = ringInteriorCentroid(rings[0]);
     if (center) {
       const c = map.latLngToContainerPoint([center.lat, center.lng]);

@@ -15,16 +15,16 @@ export const SAT_MAX_NATIVE_ZOOM = 18;
 export const OSM_MAX_NATIVE_ZOOM = 19;
 
 /**
- * DLS parcel view: pull back enough that the wide neighbor grid (not just
- * the subject lot) reads on screen — roughly mid-teens zoom / ~100–200m.
+ * DLS parcel view: stay pulled back so a wide cadastral fabric fills the
+ * map — roughly mid-teens zoom (~200–400 m across), not a tight lot crop.
  */
-export const PARCEL_FIT_MAX_ZOOM = 16;
+export const PARCEL_FIT_MAX_ZOOM = 15;
 
 /**
- * Screen margin (y, x) when fitBounds-ing a parcel. Large padding keeps a
- * DLS-like ring of surrounding cadastral cells in frame.
+ * Screen margin (y, x) when fitBounds-ing a parcel. Generous padding keeps
+ * surrounding cadastral cells in frame like maps.dls.gov.jo.
  */
-export const PARCEL_FIT_PADDING: [number, number] = [140, 140];
+export const PARCEL_FIT_PADDING: [number, number] = [220, 260];
 
 /** Shared Leaflet fitBounds options for a selected cadastral parcel. */
 export function parcelFitBoundsOptions(animate = true) {
