@@ -89,26 +89,45 @@ let governoratesCache: { at: number; features: DlsAdminFeature[] } | null = null
 const GOVERNORATES_CACHE_MS = 6 * 60 * 60 * 1000;
 
 async function getDlsMapToken(signal: AbortSignal): Promise<string> {
+  const issued = await issueDlsMapToken(signal);
+  return issued.token;
+}
+
+/**
+ * Mint / reuse the public DLS web-map token for browser ArcGIS queries.
+ * Token endpoint has no CORS — browsers fetch this via our API, then talk
+ * to maps.dls.gov.jo MapServer directly (ArcGIS allows our Origin).
+ */
+export async function issueDlsMapToken(signal?: AbortSignal): Promise<{ token: string; expiresAt: number }> {
   const now = Date.now();
-  if (mapTokenCache && mapTokenCache.expiresAt - 60_000 > now) return mapTokenCache.token;
-  const res = await fetch(MAP_TOKEN_URL, {
-    signal,
-    headers: {
-      Accept: "application/json",
-      Referer: SOURCE_URL,
-      "X-Random-Key": Math.random().toString(36).slice(2, 12),
-    },
-  });
-  if (!res.ok) {
-    throw new DlsParcelLocationError("DLS map token request failed");
+  if (mapTokenCache && mapTokenCache.expiresAt - 60_000 > now) {
+    return { token: mapTokenCache.token, expiresAt: mapTokenCache.expiresAt };
   }
-  const body = (await res.json()) as { token?: string; expires?: number };
-  if (!body.token) throw new DlsParcelLocationError("DLS map token missing");
-  mapTokenCache = {
-    token: body.token,
-    expiresAt: typeof body.expires === "number" && body.expires > now ? body.expires : now + 30 * 60_000,
-  };
-  return body.token;
+  const controller = signal ? null : new AbortController();
+  const activeSignal = signal ?? controller!.signal;
+  const timer = controller ? setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS) : null;
+  try {
+    const res = await fetch(MAP_TOKEN_URL, {
+      signal: activeSignal,
+      headers: {
+        Accept: "application/json",
+        Referer: SOURCE_URL,
+        "X-Random-Key": Math.random().toString(36).slice(2, 12),
+      },
+    });
+    if (!res.ok) {
+      throw new DlsParcelLocationError("DLS map token request failed");
+    }
+    const body = (await res.json()) as { token?: string; expires?: number };
+    if (!body.token) throw new DlsParcelLocationError("DLS map token missing");
+    mapTokenCache = {
+      token: body.token,
+      expiresAt: typeof body.expires === "number" && body.expires > now ? body.expires : now + 30 * 60_000,
+    };
+    return { token: mapTokenCache.token, expiresAt: mapTokenCache.expiresAt };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 type DlsFeature = {

@@ -51,6 +51,7 @@ import {
   satTileOptions,
 } from "@/lib/mapTiles";
 import { attachDlsLodController, DLS_LOD } from "@/lib/dlsMapLod";
+import { fetchDlsContextByPointClient } from "@/lib/dlsClientMap";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
@@ -886,6 +887,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     }
     let cancelled = false;
     // Delay parcel-grid fetch slightly so admin LOD can settle first on weak devices.
+    const abort = new AbortController();
     const delay = window.setTimeout(() => {
       async function loadContextGrid() {
         const fallbackFromRing = polygon?.[0]?.length
@@ -901,9 +903,22 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           return;
         }
         try {
+          // Device → DLS first; server proxy only as fallback.
+          try {
+            const parcels = await fetchDlsContextByPointClient({
+              latitude: coords.lat,
+              longitude: coords.lng,
+              signal: abort.signal,
+            });
+            if (!cancelled) setContextParcels(parcels);
+            return;
+          } catch {
+            if (abort.signal.aborted || cancelled) return;
+          }
           const res = await fetch("/api/submissions/dls-context-by-point", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            signal: abort.signal,
             body: JSON.stringify({ latitude: coords.lat, longitude: coords.lng }),
           });
           if (!res.ok) throw new Error("grid-failed");
@@ -917,6 +932,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
     }, DLS_LOD.debounceMs);
     return () => {
       cancelled = true;
+      abort.abort();
       window.clearTimeout(delay);
     };
   }, [polygonKey, selected, value, showMap, showContextGrid, parcelGridAllowed]);

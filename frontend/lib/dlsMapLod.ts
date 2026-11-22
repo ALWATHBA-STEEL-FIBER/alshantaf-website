@@ -10,15 +10,14 @@
  * Loads are debounced and geometry is simplified so phones can keep up.
  */
 
+import {
+  fetchDlsAdminByBboxClient,
+  type DlsAdminFeature,
+} from "@/lib/dlsClientMap";
+
 export type DlsLodLevel = "country" | "governorates" | "villages" | "basins" | "parcels";
 
-export type DlsAdminFeature = {
-  id: string;
-  layer: "governorates" | "directorates" | "basins";
-  nameAr: string | null;
-  nameEn: string | null;
-  rings: [number, number][][];
-};
+export type { DlsAdminFeature };
 
 /** Zoom thresholds aligned with DLS MapServer min/maxScale behaviour. */
 export const DLS_LOD = {
@@ -199,11 +198,10 @@ export function attachDlsLodController(opts: AttachOpts): LodController {
     const signal = abort.signal;
 
     try {
-      const res = await fetch("/api/submissions/dls-admin-by-bbox", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal,
-        body: JSON.stringify({
+      // Prefer device → DLS ArcGIS; fall back to our server proxy if needed.
+      let features: DlsAdminFeature[] = [];
+      try {
+        features = await fetchDlsAdminByBboxClient({
           layer: adminLayer,
           west: bounds.getWest(),
           south: bounds.getSouth(),
@@ -211,12 +209,29 @@ export function attachDlsLodController(opts: AttachOpts): LodController {
           north: bounds.getNorth(),
           maxAllowableOffset: maxOffsetForZoom(zoom),
           resultRecordCount: recordLimitForLayer(adminLayer),
-        }),
-      });
-      if (!res.ok) throw new Error(`admin-${res.status}`);
-      const body = (await res.json()) as { features?: DlsAdminFeature[] };
+          signal,
+        });
+      } catch (clientErr) {
+        if (signal.aborted || destroyed) return;
+        const res = await fetch("/api/submissions/dls-admin-by-bbox", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal,
+          body: JSON.stringify({
+            layer: adminLayer,
+            west: bounds.getWest(),
+            south: bounds.getSouth(),
+            east: bounds.getEast(),
+            north: bounds.getNorth(),
+            maxAllowableOffset: maxOffsetForZoom(zoom),
+            resultRecordCount: recordLimitForLayer(adminLayer),
+          }),
+        });
+        if (!res.ok) throw clientErr;
+        const body = (await res.json()) as { features?: DlsAdminFeature[] };
+        features = Array.isArray(body.features) ? body.features : [];
+      }
       if (signal.aborted || destroyed) return;
-      const features = Array.isArray(body.features) ? body.features : [];
       paint(level, features);
       lastKey = key;
     } catch (err) {

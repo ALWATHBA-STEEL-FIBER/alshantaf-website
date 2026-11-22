@@ -16,6 +16,7 @@ import { trackingEmail } from "../lib/emailTemplates";
 import { locationFieldsSchema, legacyCoordinates } from "../lib/location";
 import { lookupDlsAdministrativeValue, DlsLookupError } from "../lib/dlsAdministrativeValue";
 import {
+  issueDlsMapToken,
   lookupDlsAdminByBbox,
   lookupDlsParcelByPoint,
   lookupDlsParcelContextByPoint,
@@ -232,6 +233,25 @@ submissionsRouter.post(
         resultRecordCount: input.resultRecordCount,
       });
       res.json({ layer: input.layer, features });
+    } catch (err) {
+      if (err instanceof DlsParcelLocationError) {
+        res.status(502).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+  })
+);
+
+/** Thin token proxy — ArcGIS queries run on the user device; gettoken has no CORS. */
+submissionsRouter.get(
+  "/dls-map-token",
+  dlsLocationLimiter,
+  asyncHandler(async (_req, res) => {
+    try {
+      const issued = await issueDlsMapToken();
+      res.setHeader("Cache-Control", "private, max-age=60");
+      res.json(issued);
     } catch (err) {
       if (err instanceof DlsParcelLocationError) {
         res.status(502).json({ error: err.message });
