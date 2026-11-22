@@ -326,21 +326,26 @@ function parcelNoFromAttrs(attrs: Record<string, unknown> | undefined): string |
  * Hard ceiling per request — denser than this tanks phones and hammers DLS.
  * Prefer zoom-scaled limits via parcelRecordLimitForZoom().
  */
-export const DLS_PARCEL_GRID_MAX = 1200;
+export const DLS_PARCEL_GRID_MAX = 1000;
 
+/**
+ * Keep shared cadastral edges crisp. Heavy maxAllowableOffset makes every
+ * neighbor simplify independently → ghost double borders between lots.
+ */
 export function parcelSimplifyOffsetForZoom(zoom: number): number {
-  if (zoom < 14) return 0.00055;
-  if (zoom < 14.5) return 0.00038;
-  if (zoom < 15.5) return 0.00022;
-  if (zoom < 16.5) return 0.00012;
-  return 0.00006;
+  if (zoom < 14) return 0.00028;
+  if (zoom < 14.5) return 0.00012;
+  if (zoom < 15.25) return 0.00004;
+  // Full-resolution rings once you're in typical parcel inspection zoom.
+  return 0;
 }
 
 export function parcelRecordLimitForZoom(zoom: number): number {
-  if (zoom < 14) return 400;
-  if (zoom < 15) return 700;
-  if (zoom < 16) return 900;
-  if (zoom < 17) return 1100;
+  // Closer zoom → full-res rings → keep counts modest for phones.
+  if (zoom < 14) return 350;
+  if (zoom < 15) return 550;
+  if (zoom < 16) return 700;
+  if (zoom < 17) return 850;
   return DLS_PARCEL_GRID_MAX;
 }
 
@@ -371,7 +376,7 @@ export async function fetchDlsParcelsByBboxClient(params: {
     return tagSubject(cached, params.subjectDlsKey, params.subjectParcelNo);
   }
 
-  const fetchBox = padBBox(view, 0.35);
+  const fetchBox = padBBox(view, 0.22);
   const offset =
     typeof params.maxAllowableOffset === "number" && Number.isFinite(params.maxAllowableOffset)
       ? Math.max(0, params.maxAllowableOffset)
@@ -386,39 +391,46 @@ export async function fetchDlsParcelsByBboxClient(params: {
     )
   );
 
-  const gateKey = `parcels|${fetchBox.west.toFixed(3)}|${fetchBox.south.toFixed(3)}|${fetchBox.east.toFixed(3)}|${fetchBox.north.toFixed(3)}|${limit}`;
-  const rows = await queryFeatures(
-    PARCEL_LAYER_URL,
-    {
-      where: "1=1",
-      outFields: "DLS_KEY,PARCEL_ID",
-      returnGeometry: true,
-      geometry: JSON.stringify({
-        xmin: fetchBox.west,
-        ymin: fetchBox.south,
-        xmax: fetchBox.east,
-        ymax: fetchBox.north,
-        spatialReference: { wkid: 4326 },
-      }),
-      geometryType: "esriGeometryEnvelope",
-      inSR: 4326,
-      spatialRel: "esriSpatialRelIntersects",
-      outSR: 4326,
-      maxAllowableOffset: offset,
-      resultRecordCount: limit,
-      f: "json",
-    },
-    signal,
-    gateKey
-  );
+  const gateKey = `parcels|${fetchBox.west.toFixed(3)}|${fetchBox.south.toFixed(3)}|${fetchBox.east.toFixed(3)}|${fetchBox.north.toFixed(3)}|${limit}|${offset}`;
+  const query: Record<string, string | number | boolean> = {
+    where: "1=1",
+    outFields: "DLS_KEY,PARCEL_ID",
+    returnGeometry: true,
+    geometry: JSON.stringify({
+      xmin: fetchBox.west,
+      ymin: fetchBox.south,
+      xmax: fetchBox.east,
+      ymax: fetchBox.north,
+      spatialReference: { wkid: 4326 },
+    }),
+    geometryType: "esriGeometryEnvelope",
+    inSR: 4326,
+    spatialRel: "esriSpatialRelIntersects",
+    outSR: 4326,
+    resultRecordCount: limit,
+    f: "json",
+  };
+  // Omit offset entirely at 0 — ArcGIS independent-simplify is what ghosted borders.
+  if (offset > 0) query.maxAllowableOffset = offset;
+
+  const rows = await queryFeatures(PARCEL_LAYER_URL, query, signal, gateKey);
 
   const list: DlsContextParcel[] = [];
+  const seen = new Set<string>();
   for (const row of rows) {
     const rings = ringsFromFeature(row);
     if (!rings.length) continue;
     const dlsKey = strAttr(row.attributes, "DLS_KEY");
     const parcelNo = parcelNoFromAttrs(row.attributes);
-    list.push({ dlsKey, parcelNo, rings, isSubject: false });
+    const id =
+      dlsKey ||
+      (parcelNo
+        ? `n:${parcelNo}:${rings[0]![0]![0]!.toFixed(5)},${rings[0]![0]![1]!.toFixed(5)}`
+        : `g:${rings[0]![0]![0]!.toFixed(5)},${rings[0]![0]![1]!.toFixed(5)}`);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    // Outer ring only for the grid — hole rings drawn separately looked like ghosts.
+    list.push({ dlsKey, parcelNo, rings: [rings[0]!], isSubject: false });
   }
   setCachedParcels(fetchBox, zoom, list);
   return tagSubject(list, params.subjectDlsKey, params.subjectParcelNo);

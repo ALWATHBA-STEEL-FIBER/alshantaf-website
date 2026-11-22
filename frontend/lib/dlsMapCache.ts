@@ -31,12 +31,8 @@ let active = 0;
 const waiters: Array<() => void> = [];
 
 function zoomBand(zoom: number): number {
-  // Coarse bands so tiny zoom wobble reuses the same payload.
-  if (zoom < 14) return 13;
-  if (zoom < 15) return 14;
-  if (zoom < 16) return 15;
-  if (zoom < 17) return 16;
-  return 17;
+  // Half-zoom bands so closer views don't reuse over-simplified rings.
+  return Math.round(zoom * 2) / 2;
 }
 
 export function dlsZoomBand(zoom: number): number {
@@ -44,7 +40,7 @@ export function dlsZoomBand(zoom: number): number {
 }
 
 /** Expand viewport so small pans hit cache instead of re-querying DLS. */
-export function padBBox(b: BBox, ratio = 0.35): BBox {
+export function padBBox(b: BBox, ratio = 0.22): BBox {
   const w = Math.max(1e-6, b.east - b.west);
   const h = Math.max(1e-6, b.north - b.south);
   return {

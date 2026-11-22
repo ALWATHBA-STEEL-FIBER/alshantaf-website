@@ -43,12 +43,22 @@ type ParcelLayerInst = import("leaflet").Layer & {
   _canvas?: HTMLCanvasElement;
   _polys?: import("leaflet").LayerGroup;
   _corners?: import("leaflet").LayerGroup;
+  _svg?: import("leaflet").SVG;
   _onRedraw?: () => void;
   _raf?: number;
   _geomKey?: string;
   setParcelOptions: (o: ParcelCanvasOpts) => void;
   getBounds: () => import("leaflet").LatLngBounds;
 };
+
+/** SVG avoids Canvas-renderer ghost strokes when the grid rebuilds (preferCanvas maps). */
+function parcelSvgRenderer(L: LeafletNS, map: LeafletMap): import("leaflet").SVG {
+  const keyed = map as LeafletMap & { _alshantafParcelSvg?: import("leaflet").SVG };
+  if (!keyed._alshantafParcelSvg) {
+    keyed._alshantafParcelSvg = L.svg({ padding: 0.6 });
+  }
+  return keyed._alshantafParcelSvg;
+}
 
 /**
  * DLS-accurate parcel overlay:
@@ -145,16 +155,20 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
   return new (ParcelOverlay as unknown as new (o: ParcelCanvasOpts) => ParcelLayerInst)(opts);
 }
 
+function ringFingerprint(ring: [number, number][]): string {
+  if (!ring.length) return "";
+  const a = ring[0]!;
+  const b = ring[Math.floor(ring.length / 2)]!;
+  const c = ring[ring.length - 1]!;
+  return `${ring.length}:${a[0].toFixed(5)},${a[1].toFixed(5)}:${b[0].toFixed(5)},${b[1].toFixed(5)}:${c[0].toFixed(5)},${c[1].toFixed(5)}`;
+}
+
 function geometryKey(opts: ParcelCanvasOpts): string {
-  const rings = (opts.rings ?? [])
-    .map((ring) => ring.map(([a, b]) => `${a.toFixed(6)},${b.toFixed(6)}`).join(";"))
-    .join("|");
+  const rings = (opts.rings ?? []).map(ringFingerprint).join("|");
   const ctx = (opts.contextParcels ?? [])
     .map((p) => {
-      const pr = (p.rings ?? [])
-        .map((ring) => ring.map(([a, b]) => `${a.toFixed(6)},${b.toFixed(6)}`).join(";"))
-        .join("/");
-      return `${p.parcelNo ?? ""}:${p.isSubject ? 1 : 0}:${pr}`;
+      const outer = p.rings?.[0];
+      return `${p.parcelNo ?? ""}:${p.isSubject ? 1 : 0}:${outer ? ringFingerprint(outer) : ""}`;
     })
     .join("||");
   const clickable =
@@ -163,7 +177,7 @@ function geometryKey(opts: ParcelCanvasOpts): string {
 }
 
 function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
-  if (!layer._polys || !layer._corners) return;
+  if (!layer._polys || !layer._corners || !layer._map) return;
   const rings = layer.options.rings.filter((ring) => ring.length > 0);
   const drawContext = layer.options.showContextGrid !== false;
   const hasContext =
@@ -181,42 +195,45 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
   }
   layer._geomKey = nextKey;
 
+  const svg = parcelSvgRenderer(L, layer._map);
   layer._polys.clearLayers();
+  layer._corners.clearLayers();
+
   const contextInteractive =
     layer.options.contextInteractive !== false && typeof layer.options.onContextParcelClick === "function";
-  const context = (layer.options.contextParcels ?? []).flatMap((parcel) =>
-    (parcel.rings ?? [])
-      .filter((ring) => ring.length >= 3)
-      .map((ring) => ({
-        ring,
-        isSubject: Boolean(parcel.isSubject),
-        parcelNo: parcel.parcelNo ?? null,
-      }))
-  );
+  const contextParcels = layer.options.contextParcels ?? [];
   if (drawContext) {
     // Cap drawn neighbors so dense cadastral areas stay smooth on phones.
     const MAX_CONTEXT_POLYS = 700;
     let drawn = 0;
-    for (const item of context) {
-      if (item.isSubject) continue;
+    const seen = new Set<string>();
+    for (const parcel of contextParcels) {
+      if (parcel.isSubject) continue;
+      const outer = parcel.rings?.[0];
+      if (!outer || outer.length < 3) continue;
+      const id = `${parcel.parcelNo ?? ""}:${ringFingerprint(outer)}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
       if (drawn >= MAX_CONTEXT_POLYS) break;
       drawn += 1;
       const poly = L.polygon(
-        item.ring.map(([lat, lng]) => L.latLng(lat, lng)),
+        outer.map(([lat, lng]) => L.latLng(lat, lng)),
         {
           color: DLS_PARCEL_RED,
-          weight: 1.35,
-          opacity: 0.88,
+          weight: 1.5,
+          opacity: 0.95,
           fillColor: DLS_PARCEL_RED,
-          fillOpacity: contextInteractive ? 0.008 : 0,
-          lineJoin: "miter",
-          lineCap: "square",
+          fillOpacity: contextInteractive ? 0.01 : 0,
+          lineJoin: "round",
+          lineCap: "round",
           interactive: contextInteractive,
           className: "parcel-dls-context",
           bubblingMouseEvents: true,
+          renderer: svg,
         }
       );
       if (contextInteractive) {
+        const parcelNo = parcel.parcelNo ?? null;
         poly.on("click", (e: import("leaflet").LeafletMouseEvent) => {
           L.DomEvent.stopPropagation(e);
           const cb = layer.options.onContextParcelClick;
@@ -224,29 +241,30 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
           cb({
             lat: e.latlng.lat,
             lng: e.latlng.lng,
-            parcelNo: item.parcelNo,
+            parcelNo,
           });
         });
       }
       poly.addTo(layer._polys);
     }
   }
-  for (const ring of rings) {
-    // Selected parcel: thicker DLS red edge + light fill (stands out vs neighbor grid).
-    L.polygon(ring.map(([lat, lng]) => L.latLng(lat, lng)), {
+  if (rings.length) {
+    // Subject: one polygon (outer + holes) so edges aren't stroked twice.
+    const latLngs = rings.map((ring) => ring.map(([lat, lng]) => L.latLng(lat, lng)));
+    L.polygon(latLngs as import("leaflet").LatLngExpression[][], {
       color: DLS_PARCEL_RED,
-      weight: 3.75,
+      weight: 3.5,
       opacity: 1,
       fillColor: DLS_PARCEL_RED,
       fillOpacity: 0.12,
-      lineJoin: "miter",
-      lineCap: "square",
+      lineJoin: "round",
+      lineCap: "round",
       interactive: false,
       className: "parcel-dls-outline",
+      renderer: svg,
     }).addTo(layer._polys);
   }
 
-  layer._corners.clearLayers();
   if (!rings.length) return;
   const hard = new Set<string>();
   for (const ring of rings) {
@@ -269,6 +287,7 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
         fillOpacity: 1,
         opacity: 1,
         interactive: false,
+        renderer: svg,
       }).addTo(layer._corners);
     }
   }
