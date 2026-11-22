@@ -628,6 +628,7 @@ export function MapFullscreenPortal({
         return;
       }
 
+      const canRepick = !lockedRef.current && measureModeRef.current === "off";
       const opts: ParcelCanvasOpts = {
         rings: polygon as [number, number][][],
         contextParcels,
@@ -638,6 +639,14 @@ export function MapFullscreenPortal({
         parcelNumber,
         parcelNumbers,
         parcelLabel,
+        contextInteractive: canRepick,
+        onContextParcelClick: canRepick
+          ? (coords) => {
+              if (lockedRef.current || measureModeRef.current !== "off") return;
+              upsertMarker(L, liveMap, coords);
+              void onPickLocation?.(coords);
+            }
+          : undefined,
       };
 
       const geometryChanged = appliedPolygonKeyRef.current !== polygonKey;
@@ -693,6 +702,8 @@ export function MapFullscreenPortal({
     parcelLabel,
     contextParcels,
     showContextGrid,
+    locked,
+    measuring,
   ]);
 
   useEffect(() => {

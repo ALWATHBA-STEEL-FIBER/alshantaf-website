@@ -251,8 +251,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
                 else ctx.lineTo(p.x, p.y);
               });
               ctx.closePath();
-              ctx.strokeStyle = "#5f6f70";
-              ctx.lineWidth = 2.1;
+              ctx.strokeStyle = "#e31c1c";
+              ctx.lineWidth = 1.6;
               ctx.stroke();
             }
           }
@@ -265,10 +265,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           else ctx.lineTo(p.x, p.y);
         });
         ctx.closePath();
-        ctx.fillStyle = "rgba(200,154,88,0.22)";
+        ctx.fillStyle = "rgba(227,28,28,0.12)";
         ctx.fill();
-        ctx.strokeStyle = "#e8c98a";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#e31c1c";
+        ctx.lineWidth = 3.75;
         ctx.stroke();
 
         if (parcelNumbers?.length) {
@@ -286,7 +286,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             ctx.lineWidth = 3.5;
             ctx.strokeStyle = "rgba(255,255,255,0.95)";
             ctx.strokeText(parcelNo, c.x, c.y);
-            ctx.fillStyle = "#0f342f";
+            ctx.fillStyle = "#111111";
             ctx.fillText(parcelNo, c.x, c.y);
           }
         } else {
@@ -301,7 +301,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               ctx.lineWidth = 3.5;
               ctx.strokeStyle = "rgba(255,255,255,0.95)";
               ctx.strokeText(parcelNo, c.x, c.y);
-              ctx.fillStyle = "#0f342f";
+              ctx.fillStyle = "#111111";
               ctx.fillText(parcelNo, c.x, c.y);
             }
           }
@@ -315,13 +315,13 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             const center = ringInteriorCentroid(ctxRing);
             if (!center) continue;
             const c = map.latLngToContainerPoint([center.lat, center.lng]);
-            ctx.font = '900 13px system-ui, "IBM Plex Sans Arabic", sans-serif';
+            ctx.font = '700 12px system-ui, "IBM Plex Sans Arabic", sans-serif';
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.lineWidth = 3.5;
-            ctx.strokeStyle = "rgba(255,255,255,0.96)";
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "rgba(255,255,255,0.95)";
             ctx.strokeText(parcel.parcelNo, c.x, c.y);
-            ctx.fillStyle = "#3f4f50";
+            ctx.fillStyle = "#111111";
             ctx.fillText(parcel.parcelNo, c.x, c.y);
           }
         }
@@ -353,23 +353,15 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           }
         }
 
-        // Corner glow on snapshot
+        // Corner markers on snapshot (DLS-style red vertices)
         for (const [lat, lng] of ring) {
           const p = map.latLngToContainerPoint([lat, lng]);
-          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 10);
-          g.addColorStop(0, "rgba(200,160,100,0.95)");
-          g.addColorStop(0.45, "rgba(200,160,100,0.45)");
-          g.addColorStop(1, "rgba(200,160,100,0)");
-          ctx.fillStyle = g;
+          ctx.fillStyle = "#e31c1c";
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, 3.25, 0, Math.PI * 2);
           ctx.fill();
-          ctx.fillStyle = "#caa064";
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = "#f5e6c8";
-          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 1.25;
           ctx.stroke();
         }
       }
@@ -920,6 +912,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       }
 
       if (polygon && polygon.length > 0 && polygonKey) {
+        const canRepick = !locked && measureModeRef.current === "off";
         const opts: ParcelCanvasOpts = {
           rings: polygon as [number, number][][],
           contextParcels,
@@ -932,6 +925,15 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           parcelNumber: blueprint?.parcel?.trim() || null,
           parcelNumbers: parcelNumbers && parcelNumbers.length ? parcelNumbers : null,
           parcelLabel: lp.blueprintParcel,
+          contextInteractive: canRepick,
+          onContextParcelClick: canRepick
+            ? (coords) => {
+                if (lockedRef.current || measureModeRef.current !== "off") return;
+                placeMarker(L, map, coords.lat, coords.lng, true);
+                commit(coords);
+                void onPinDropRef.current?.(coords);
+              }
+            : undefined,
         };
         const layer = createParcelCanvasLayer(L, opts);
         layer.addTo(map);
@@ -966,6 +968,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       | (import("leaflet").Layer & { setParcelOptions?: (o: ParcelCanvasOpts) => void })
       | null;
     if (!layer?.setParcelOptions || !polygon?.[0]?.length) return;
+    const canRepick = !locked && !measuring;
     layer.setParcelOptions({
       rings: polygon as [number, number][][],
       contextParcels,
@@ -976,8 +979,20 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       parcelNumber: blueprint?.parcel?.trim() || null,
       parcelNumbers: parcelNumbers && parcelNumbers.length ? parcelNumbers : null,
       parcelLabel: lp.blueprintParcel,
+      contextInteractive: canRepick,
+      onContextParcelClick: canRepick
+        ? (coords) => {
+            if (lockedRef.current || measureModeRef.current !== "off") return;
+            const map = mapRef.current;
+            const L = leafletRef.current;
+            if (!map || !L) return;
+            placeMarker(L, map, coords.lat, coords.lng, true);
+            commit(coords);
+            void onPinDropRef.current?.(coords);
+          }
+        : undefined,
     });
-  }, [dimsOnCanvas, perimeterM, lang, blueprint?.parcel, parcelNumbers, polygon, lp.blueprintParcel, contextParcels, showContextGrid]);
+  }, [dimsOnCanvas, perimeterM, lang, blueprint?.parcel, parcelNumbers, polygon, lp.blueprintParcel, contextParcels, showContextGrid, locked, measuring]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;

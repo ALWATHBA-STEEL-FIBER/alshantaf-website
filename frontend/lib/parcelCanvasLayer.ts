@@ -7,6 +7,10 @@ import {
   ringInteriorCentroid,
 } from "@/lib/mapCoords";
 
+/** DLS cadastral red — matches maps.dls.gov.jo parcel grid. */
+export const DLS_PARCEL_RED = "#e31c1c";
+export const DLS_PARCEL_RED_SOFT = "rgba(227, 28, 28, 0.14)";
+
 export type ParcelCanvasOpts = {
   rings: [number, number][][];
   contextParcels?: Array<{
@@ -21,6 +25,13 @@ export type ParcelCanvasOpts = {
   parcelNumber?: string | null;
   parcelNumbers?: string[] | null;
   parcelLabel?: string;
+  /**
+   * Click a neighboring cadastral cell to switch selection (DLS-style).
+   * Subject outline stays non-interactive so map pin-drop still works.
+   */
+  onContextParcelClick?: (coords: { lat: number; lng: number; parcelNo?: string | null }) => void;
+  /** When false, neighbor cells are drawn but not clickable. */
+  contextInteractive?: boolean;
 };
 
 type LeafletMap = import("leaflet").Map;
@@ -34,15 +45,16 @@ type ParcelLayerInst = import("leaflet").Layer & {
   _corners?: import("leaflet").LayerGroup;
   _onRedraw?: () => void;
   _raf?: number;
+  _geomKey?: string;
   setParcelOptions: (o: ParcelCanvasOpts) => void;
   getBounds: () => import("leaflet").LatLngBounds;
 };
 
 /**
  * DLS-accurate parcel overlay:
- * - Native Leaflet polygon + corner markers track the map projection through zoom/pan.
- * - A viewport canvas draws length chips + parcel number in fixed screen pixels.
- * - No CSS zoom-scale on the geometry (that was drifting the outline off the land).
+ * - Native Leaflet polygons + corner markers track the map projection through zoom/pan.
+ * - A viewport canvas draws length chips + parcel numbers in fixed screen pixels.
+ * - Geometry is rebuilt only when rings/options change (not on every pan) so clicks stay reliable.
  */
 export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): ParcelLayerInst {
   const ParcelOverlay = L.Layer.extend({
@@ -78,13 +90,12 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
         this._raf = requestAnimationFrame(() => {
           this._raf = undefined;
           if (!this._map || !this._canvas) return;
-          syncGeometry(L, this);
+          // Labels only on pan/zoom — rebuilding polygons every frame ate clicks.
           paintLabels(L, this._map, this._canvas, this.options);
         });
       };
 
       map.on("move viewreset resize", this._onRedraw);
-      // Instant zoom (no animation) still needs a mid-zoom redraw
       map.on("zoom", this._onRedraw);
 
       syncGeometry(L, this);
@@ -128,50 +139,94 @@ export function createParcelCanvasLayer(L: LeafletNS, opts: ParcelCanvasOpts): P
   return new (ParcelOverlay as unknown as new (o: ParcelCanvasOpts) => ParcelLayerInst)(opts);
 }
 
+function geometryKey(opts: ParcelCanvasOpts): string {
+  const rings = (opts.rings ?? [])
+    .map((ring) => ring.map(([a, b]) => `${a.toFixed(6)},${b.toFixed(6)}`).join(";"))
+    .join("|");
+  const ctx = (opts.contextParcels ?? [])
+    .map((p) => {
+      const pr = (p.rings ?? [])
+        .map((ring) => ring.map(([a, b]) => `${a.toFixed(6)},${b.toFixed(6)}`).join(";"))
+        .join("/");
+      return `${p.parcelNo ?? ""}:${p.isSubject ? 1 : 0}:${pr}`;
+    })
+    .join("||");
+  const clickable =
+    opts.contextInteractive !== false && typeof opts.onContextParcelClick === "function" ? 1 : 0;
+  return `${rings}::${ctx}::${opts.showContextGrid !== false ? 1 : 0}::${clickable}`;
+}
+
 function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
   const rings = layer.options.rings.filter((ring) => ring.length > 0);
   if (!rings.length || !layer._polys || !layer._corners) return;
 
+  const nextKey = geometryKey(layer.options);
+  // Always refresh click wiring when callback identity may change, but skip
+  // full rebuild when rings/context are unchanged and we already drew once.
+  const forceRebuild = layer._geomKey !== nextKey;
+  if (!forceRebuild && layer._polys.getLayers().length > 0) {
+    // Re-bind click callback on existing context polys if needed — simplest is rebuild
+    // only when geometry changes; click handler is read from layer.options at click time.
+    return;
+  }
+  layer._geomKey = nextKey;
+
   layer._polys.clearLayers();
   const drawContext = layer.options.showContextGrid !== false;
+  const contextInteractive =
+    layer.options.contextInteractive !== false && typeof layer.options.onContextParcelClick === "function";
   const context = (layer.options.contextParcels ?? []).flatMap((parcel) =>
-    (parcel.rings ?? []).filter((ring) => ring.length >= 3).map((ring) => ({ ring, isSubject: Boolean(parcel.isSubject) }))
+    (parcel.rings ?? [])
+      .filter((ring) => ring.length >= 3)
+      .map((ring) => ({
+        ring,
+        isSubject: Boolean(parcel.isSubject),
+        parcelNo: parcel.parcelNo ?? null,
+      }))
   );
   if (drawContext) {
     for (const item of context) {
       if (item.isSubject) continue;
-      L.polygon(item.ring.map(([lat, lng]) => L.latLng(lat, lng)), {
-        color: "#5f6f70",
-        weight: 2.1,
-        opacity: 1,
-        fillOpacity: 0,
-        lineJoin: "round",
-        lineCap: "round",
-        interactive: false,
-        className: "parcel-dls-context",
-      }).addTo(layer._polys);
+      const poly = L.polygon(
+        item.ring.map(([lat, lng]) => L.latLng(lat, lng)),
+        {
+          color: DLS_PARCEL_RED,
+          weight: 1.6,
+          opacity: 0.95,
+          fillColor: DLS_PARCEL_RED,
+          fillOpacity: contextInteractive ? 0.01 : 0,
+          lineJoin: "miter",
+          lineCap: "square",
+          interactive: contextInteractive,
+          className: "parcel-dls-context",
+          bubblingMouseEvents: true,
+        }
+      );
+      if (contextInteractive) {
+        poly.on("click", (e: import("leaflet").LeafletMouseEvent) => {
+          L.DomEvent.stopPropagation(e);
+          const cb = layer.options.onContextParcelClick;
+          if (!cb) return;
+          cb({
+            lat: e.latlng.lat,
+            lng: e.latlng.lng,
+            parcelNo: item.parcelNo,
+          });
+        });
+      }
+      poly.addTo(layer._polys);
     }
   }
   for (const ring of rings) {
-    // Outer halo so the selected edge reads thicker against sat/OSM tiles.
+    // Selected parcel: thicker DLS red edge + light fill (stands out vs neighbor grid).
     L.polygon(ring.map(([lat, lng]) => L.latLng(lat, lng)), {
-      color: "#f5e6c8",
-      weight: 7.5,
-      opacity: 0.92,
-      fillOpacity: 0,
-      lineJoin: "round",
-      lineCap: "round",
-      interactive: false,
-      className: "parcel-dls-outline-halo",
-    }).addTo(layer._polys);
-    L.polygon(ring.map(([lat, lng]) => L.latLng(lat, lng)), {
-      color: "#0f342f",
-      weight: 4.5,
+      color: DLS_PARCEL_RED,
+      weight: 3.75,
       opacity: 1,
-      fillColor: "#c8a064",
-      fillOpacity: 0.22,
-      lineJoin: "round",
-      lineCap: "round",
+      fillColor: DLS_PARCEL_RED,
+      fillOpacity: 0.12,
+      lineJoin: "miter",
+      lineCap: "square",
       interactive: false,
       className: "parcel-dls-outline",
     }).addTo(layer._polys);
@@ -192,10 +247,10 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
       seen.add(key);
       const isHard = hard.has(key);
       L.circleMarker([lat, lng], {
-        radius: isHard ? 5.5 : 4,
-        color: "#f5e6c8",
-        weight: 1.75,
-        fillColor: "#caa064",
+        radius: isHard ? 4 : 3,
+        color: "#ffffff",
+        weight: 1.25,
+        fillColor: DLS_PARCEL_RED,
         fillOpacity: 1,
         opacity: 1,
         interactive: false,
@@ -282,13 +337,13 @@ function paintLabels(
     const c = map.latLngToContainerPoint([center.lat, center.lng]);
     ctx.save();
     ctx.translate(c.x, c.y);
-    ctx.font = '800 14px system-ui, "IBM Plex Sans Arabic", sans-serif';
+    ctx.font = '800 13px system-ui, "IBM Plex Sans Arabic", sans-serif';
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.lineWidth = 3.5;
+    ctx.lineWidth = 3;
     ctx.strokeStyle = "rgba(255,255,255,0.95)";
     ctx.strokeText(parcelNo, 0, 0);
-    ctx.fillStyle = "#0f342f";
+    ctx.fillStyle = "#111111";
     ctx.fillText(parcelNo, 0, 0);
     ctx.restore();
   }
@@ -303,13 +358,13 @@ function paintLabels(
       const c = map.latLngToContainerPoint([center.lat, center.lng]);
       ctx.save();
       ctx.translate(c.x, c.y);
-      ctx.font = '900 13px system-ui, "IBM Plex Sans Arabic", sans-serif';
+      ctx.font = '700 12px system-ui, "IBM Plex Sans Arabic", sans-serif';
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.lineWidth = 3.5;
-      ctx.strokeStyle = "rgba(255,255,255,0.96)";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(255,255,255,0.95)";
       ctx.strokeText(parcel.parcelNo, 0, 0);
-      ctx.fillStyle = "#3f4f50";
+      ctx.fillStyle = "#111111";
       ctx.fillText(parcel.parcelNo, 0, 0);
       ctx.restore();
     }
@@ -323,7 +378,7 @@ function paintLabels(
       ctx.font = '700 11px system-ui, "IBM Plex Sans Arabic", sans-serif';
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillStyle = "rgba(15,52,47,0.95)";
+      ctx.fillStyle = "rgba(17,17,17,0.95)";
       ctx.fillText(opts.parcelLabel, 0, 0);
       ctx.restore();
     }
