@@ -133,7 +133,9 @@ export function ExpenseForm({ meta, initial, defaultScope: _defaultScope, defaul
     <div className="space-y-5">
       <div className="rounded-2xl bg-[#0f342f] text-white px-4 py-3">
         <div className="text-sm font-extrabold">مصروف مشروع</div>
-        <div className="text-[11px] text-white/70 mt-0.5">مواد، معدات، نقل… · مصاريف الشركة من لوحة الإدارة</div>
+        <div className="text-[11px] text-white/70 mt-0.5">
+          المهندس يسجّل المصروف على المشروع · المنسق (أحمد / محمد) يتحمّل التكلفة
+        </div>
       </div>
 
       {/* Project picker */}
@@ -156,12 +158,21 @@ export function ExpenseForm({ meta, initial, defaultScope: _defaultScope, defaul
               >
                 <div className="text-sm font-bold truncate">{p.name}</div>
                 <div className={`text-[10px] mt-0.5 truncate ${projectId === p.id ? "text-white/70" : "text-[#5a6b66]"}`}>
-                  {p.isCoordinator ? "أنت المنسق" : p.coordinator ? `المنسق: ${p.coordinator.name}` : p.code || "—"}
+                  {p.isCoordinator
+                    ? "أنت المنسق · تدفع أنت"
+                    : p.coordinator
+                      ? `يدفع: ${p.coordinator.name}`
+                      : p.code || "—"}
                 </div>
               </button>
             ))}
           </div>
         )}
+        {selectedProject?.coordinator && !selectedProject.isCoordinator ? (
+          <p className="text-[11px] text-[#5a6b66] mt-2">
+            يُسجَّل باسمك ويُحسب على ميزانية المنسق {selectedProject.coordinator.name}.
+          </p>
+        ) : null}
       </div>
 
       {/* Amount */}

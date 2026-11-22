@@ -173,7 +173,7 @@ function ProjectsHome({ engineerName }: { engineerName: string }) {
         <div className="text-sm text-red-700 font-bold">{error}</div>
       ) : projects.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-[#d9d2c4] bg-white/60 p-6 text-sm text-[#5a6b66]">
-          لا توجد مشاريع معيّنة لك بعد. يمكنك تسجيل مصاريف الشركة، وتواصل مع الإدارة لتخصيص المشاريع.
+          لا توجد مشاريع معيّنة لك بعد. تواصل مع الإدارة لتعيينك على مشروع حتى تسجّل الحضور والمصاريف.
         </div>
       ) : (
         <div className="space-y-6">

@@ -61,6 +61,12 @@ function WeekSheet({ engineerName }: { engineerName: string }) {
     >
       <div className="flex flex-wrap gap-2 mb-4">
         <Link
+          href={`/site/expenses/new?scope=PROJECT&projectId=${projectId}&back=${encodeURIComponent(`/site/projects/${projectId}/week?weekStart=${weekStart}`)}`}
+          className="h-10 px-3 rounded-xl bg-[#0f342f] text-white text-sm font-bold inline-flex items-center"
+        >
+          + مصروف
+        </Link>
+        <Link
           href={`/site/projects/${projectId}/cost`}
           className="h-10 px-3 rounded-xl bg-[#d4a84b]/25 text-[#0f342f] text-sm font-bold inline-flex items-center"
         >
