@@ -202,13 +202,27 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
   const contextInteractive =
     layer.options.contextInteractive !== false && typeof layer.options.onContextParcelClick === "function";
   const contextParcels = layer.options.contextParcels ?? [];
+  const subjectNos = new Set<string>();
+  const pushNo = (v?: string | null) => {
+    const t = (v || "").trim();
+    if (!t) return;
+    subjectNos.add(t);
+    const n = Number(t);
+    if (Number.isFinite(n) && n > 0) subjectNos.add(String(Math.trunc(n)));
+  };
+  pushNo(layer.options.parcelNumber);
+  for (const n of layer.options.parcelNumbers ?? []) pushNo(n);
+
   if (drawContext) {
     // Cap drawn neighbors so dense cadastral areas stay smooth on phones.
     const MAX_CONTEXT_POLYS = 700;
     let drawn = 0;
     const seen = new Set<string>();
     for (const parcel of contextParcels) {
+      // Never redraw the selected lot in the neighbor grid — that caused the
+      // thick+thin "extra line" double border (and internal chords when rings differed).
       if (parcel.isSubject) continue;
+      if (parcel.parcelNo && subjectNos.has(parcel.parcelNo)) continue;
       const outer = parcel.rings?.[0];
       if (!outer || outer.length < 3) continue;
       const id = `${parcel.parcelNo ?? ""}:${ringFingerprint(outer)}`;
@@ -249,47 +263,48 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
     }
   }
   if (rings.length) {
-    // Subject: one polygon (outer + holes) so edges aren't stroked twice.
-    const latLngs = rings.map((ring) => ring.map(([lat, lng]) => L.latLng(lat, lng)));
-    L.polygon(latLngs as import("leaflet").LatLngExpression[][], {
-      color: DLS_PARCEL_RED,
-      weight: 3.5,
-      opacity: 1,
-      fillColor: DLS_PARCEL_RED,
-      fillOpacity: 0.12,
-      lineJoin: "round",
-      lineCap: "round",
-      interactive: false,
-      className: "parcel-dls-outline",
-      renderer: svg,
-    }).addTo(layer._polys);
+    // Outer ring only — treating multiparts as holes drew phantom chords across the lot.
+    const outer = rings[0]!;
+    L.polygon(
+      outer.map(([lat, lng]) => L.latLng(lat, lng)),
+      {
+        color: DLS_PARCEL_RED,
+        weight: 3.5,
+        opacity: 1,
+        fillColor: DLS_PARCEL_RED,
+        fillOpacity: 0.12,
+        lineJoin: "round",
+        lineCap: "round",
+        interactive: false,
+        className: "parcel-dls-outline",
+        renderer: svg,
+      }
+    ).addTo(layer._polys);
   }
 
   if (!rings.length) return;
+  // Corners only on the outer subject ring (matches the outline we stroke).
+  const cornerRing = rings[0]!;
   const hard = new Set<string>();
-  for (const ring of rings) {
-    for (const c of ringCornerPoints(ring)) {
-      hard.add(`${c.lat.toFixed(7)},${c.lng.toFixed(7)}`);
-    }
+  for (const c of ringCornerPoints(cornerRing)) {
+    hard.add(`${c.lat.toFixed(7)},${c.lng.toFixed(7)}`);
   }
-  const seen = new Set<string>();
-  for (const ring of rings) {
-    for (const [lat, lng] of ring) {
-      const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const isHard = hard.has(key);
-      L.circleMarker([lat, lng], {
-        radius: isHard ? 4 : 3,
-        color: "#ffffff",
-        weight: 1.25,
-        fillColor: DLS_PARCEL_RED,
-        fillOpacity: 1,
-        opacity: 1,
-        interactive: false,
-        renderer: svg,
-      }).addTo(layer._corners);
-    }
+  const seenCorners = new Set<string>();
+  for (const [lat, lng] of cornerRing) {
+    const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
+    if (seenCorners.has(key)) continue;
+    seenCorners.add(key);
+    const isHard = hard.has(key);
+    L.circleMarker([lat, lng], {
+      radius: isHard ? 4 : 3,
+      color: "#ffffff",
+      weight: 1.25,
+      fillColor: DLS_PARCEL_RED,
+      fillOpacity: 1,
+      opacity: 1,
+      interactive: false,
+      renderer: svg,
+    }).addTo(layer._corners);
   }
 }
 
@@ -385,9 +400,20 @@ function paintLabels(
     ctx.restore();
   }
   if (opts.showContextGrid !== false) {
+    const skipNos = new Set<string>();
+    const addSkip = (v?: string | null) => {
+      const t = (v || "").trim();
+      if (!t) return;
+      skipNos.add(t);
+      const n = Number(t);
+      if (Number.isFinite(n) && n > 0) skipNos.add(String(Math.trunc(n)));
+    };
+    addSkip(opts.parcelNumber);
+    for (const n of opts.parcelNumbers ?? []) addSkip(n);
     const contextParcels = opts.contextParcels ?? [];
     for (const parcel of contextParcels) {
       if (parcel.isSubject || !parcel.parcelNo) continue;
+      if (skipNos.has(parcel.parcelNo)) continue;
       const ring = parcel.rings?.[0];
       if (!ring || ring.length < 3) continue;
       const center = ringInteriorCentroid(ring);

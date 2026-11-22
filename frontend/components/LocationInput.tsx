@@ -1067,6 +1067,12 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         polygonRef.current = layer;
       }
 
+      // Once the cadastral ring is on the map, never keep the drop-pin on top of it.
+      if (hasSubject && markerRef.current) {
+        map.removeLayer(markerRef.current);
+        markerRef.current = null;
+      }
+
       if (geometryChanged) {
         appliedPolygonKeyRef.current = polygonKey;
         try {
@@ -1079,10 +1085,6 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           }
         } catch {
           /* ignore */
-        }
-        if (markerRef.current) {
-          map.removeLayer(markerRef.current);
-          markerRef.current = null;
         }
       } else if (!hasSubject && selected) {
         placeMarker(L, map, selected.lat, selected.lng, !locked);

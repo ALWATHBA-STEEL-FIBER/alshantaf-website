@@ -697,6 +697,12 @@ export function MapFullscreenPortal({
         parcelSnapTargets(hasSubject ? (polygon as [number, number][][] | null | undefined) : null)
       );
 
+      // Parcel outline replaces the pin — keep it hidden while a subject ring is shown.
+      if (hasSubject && markerRef.current) {
+        liveMap.removeLayer(markerRef.current);
+        markerRef.current = null;
+      }
+
       if (geometryChanged) {
         appliedPolygonKeyRef.current = polygonKey;
         try {
@@ -710,10 +716,8 @@ export function MapFullscreenPortal({
         } catch {
           /* ignore */
         }
-        if (markerRef.current) {
-          liveMap.removeLayer(markerRef.current);
-          markerRef.current = null;
-        }
+      } else if (!hasSubject && selected) {
+        upsertMarker(L, liveMap, selected);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
