@@ -1588,7 +1588,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
             {/* Hide map widget stack while topography owns the stage — avoids control collisions.
                 Keep tools inside the map stage (below the mobile sheet stacking context). */}
             {!showTopoSurface ? (
-              <div className="pointer-events-auto absolute left-1.5 top-1.5 z-20 max-h-[calc(100%-0.75rem)] overflow-y-auto overscroll-contain sm:left-3 sm:top-3">
+              <div className="pointer-events-auto absolute left-1.5 top-1.5 z-20 sm:left-3 sm:top-3">
                 {dlsControls}
               </div>
             ) : null}

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type Basemap = "map" | "satellite";
 export type EditTool = "lines" | "space";
@@ -210,13 +211,64 @@ export function DlsMapControls({
   onCompass,
 }: Props) {
   const [toolsOpen, setToolsOpen] = useState(Boolean(editTool));
+  const [flyoutPos, setFlyoutPos] = useState<{ top: number; left: number } | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const toolsBtnRef = useRef<HTMLButtonElement | null>(null);
   const panelId = useId();
   const editing = editTool != null;
   const topoOn = surfaceView === "topo";
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
     if (editTool) setToolsOpen(true);
   }, [editTool]);
+
+  // Portal + fixed position — inline maps clip overflow, so a side flyout never showed.
+  useLayoutEffect(() => {
+    if (!toolsOpen) {
+      setFlyoutPos(null);
+      return;
+    }
+    const place = () => {
+      const el = toolsBtnRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setFlyoutPos({ top: r.top, left: r.right + 6 });
+    };
+    place();
+    window.addEventListener("resize", place);
+    // Capture scroll from nested map/workspace panes.
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [toolsOpen]);
+
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeTools();
+    };
+    const onPointer = (e: MouseEvent | PointerEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (toolsBtnRef.current?.contains(t)) return;
+      const panel = document.getElementById(panelId);
+      if (panel?.contains(t)) return;
+      closeTools();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer, true);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toolsOpen, editTool, panelId]);
 
   function closeTools() {
     setToolsOpen(false);
@@ -239,6 +291,52 @@ export function DlsMapControls({
     onSurfaceViewChange(topoOn ? "map" : "topo");
   }
 
+  const toolsFlyout =
+    mounted &&
+    toolsOpen &&
+    flyoutPos &&
+    createPortal(
+      <div
+        id={panelId}
+        role="group"
+        aria-label={labels.tools}
+        className="pointer-events-auto fixed z-[10050] flex items-center overflow-hidden rounded-[2px] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.28)]"
+        style={{ top: flyoutPos.top, left: flyoutPos.left }}
+        dir="ltr"
+      >
+        <button
+          type="button"
+          className={`${flyBtn} border-e border-[#d5dbe0] ${editTool === "lines" ? btnActive : ""}`}
+          onClick={() => pickTool("lines")}
+          aria-label={labels.editLines}
+          aria-pressed={editTool === "lines"}
+          title={labels.editLines}
+        >
+          <IconLines />
+        </button>
+        <button
+          type="button"
+          className={`${flyBtn} border-e border-[#d5dbe0] ${editTool === "space" ? btnActive : ""}`}
+          onClick={() => pickTool("space")}
+          aria-label={labels.editSpace}
+          aria-pressed={editTool === "space"}
+          title={labels.editSpace}
+        >
+          <IconSpace />
+        </button>
+        <button
+          type="button"
+          className={flyBtn}
+          onClick={closeTools}
+          aria-label={labels.toolsClose}
+          title={labels.toolsClose}
+        >
+          <IconClose />
+        </button>
+      </div>,
+      document.body
+    );
+
   // Always LTR so the flyout opens clear of the left stack and icon order stays stable in Arabic.
   return (
     <div
@@ -258,6 +356,7 @@ export function DlsMapControls({
 
       <div className="relative overflow-visible">
         <button
+          ref={toolsBtnRef}
           type="button"
           className={`${btn} rounded-[2px] ${toolsOpen || editing ? btnActive : ""}`}
           onClick={toggleTools}
@@ -268,43 +367,7 @@ export function DlsMapControls({
         >
           <IconMeter />
         </button>
-
-        {toolsOpen && (
-          <div
-            id={panelId}
-            className="absolute left-[calc(100%+0.4rem)] top-0 z-40 flex items-center overflow-hidden rounded-[2px] bg-white shadow-[0_1px_4px_rgba(0,0,0,0.28)]"
-          >
-            <button
-              type="button"
-              className={`${flyBtn} border-e border-[#d5dbe0] ${editTool === "lines" ? btnActive : ""}`}
-              onClick={() => pickTool("lines")}
-              aria-label={labels.editLines}
-              aria-pressed={editTool === "lines"}
-              title={labels.editLines}
-            >
-              <IconLines />
-            </button>
-            <button
-              type="button"
-              className={`${flyBtn} border-e border-[#d5dbe0] ${editTool === "space" ? btnActive : ""}`}
-              onClick={() => pickTool("space")}
-              aria-label={labels.editSpace}
-              aria-pressed={editTool === "space"}
-              title={labels.editSpace}
-            >
-              <IconSpace />
-            </button>
-            <button
-              type="button"
-              className={flyBtn}
-              onClick={closeTools}
-              aria-label={labels.toolsClose}
-              title={labels.toolsClose}
-            >
-              <IconClose />
-            </button>
-          </div>
-        )}
+        {toolsFlyout}
       </div>
 
       <button
