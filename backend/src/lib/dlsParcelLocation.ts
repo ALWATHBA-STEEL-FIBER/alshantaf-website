@@ -466,8 +466,9 @@ export async function lookupDlsParcelContextByPoint(params: {
     if (lng < minLng) minLng = lng;
     if (lng > maxLng) maxLng = lng;
   }
-  const latPad = Math.max((maxLat - minLat) * 1.4, 0.001);
-  const lngPad = Math.max((maxLng - minLng) * 1.4, 0.001);
+  // Wide DLS-like ring (~0.5–1 km) so neighbor parcels fill the view.
+  const latPad = Math.max((maxLat - minLat) * 6, 0.005);
+  const lngPad = Math.max((maxLng - minLng) * 6, 0.005);
   const queryGeom = {
     xmin: minLng - lngPad,
     ymin: minLat - latPad,
@@ -488,7 +489,7 @@ export async function lookupDlsParcelContextByPoint(params: {
         inSR: 4326,
         spatialRel: "esriSpatialRelIntersects",
         outSR: 4326,
-        resultRecordCount: 260,
+        resultRecordCount: 800,
         f: "json",
       },
       controller.signal,

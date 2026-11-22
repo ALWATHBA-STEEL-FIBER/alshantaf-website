@@ -304,8 +304,10 @@ export async function fetchDlsContextByPointClient(params: {
     if (b < minLng) minLng = b;
     if (b > maxLng) maxLng = b;
   }
-  const latPad = Math.max((maxLat - minLat) * 1.4, 0.001);
-  const lngPad = Math.max((maxLng - minLng) * 1.4, 0.001);
+  // Wide DLS-like ring around the subject (~0.5–1 km) so the red grid
+  // fills the map instead of a tiny island of lots in empty desert.
+  const latPad = Math.max((maxLat - minLat) * 6, 0.005);
+  const lngPad = Math.max((maxLng - minLng) * 6, 0.005);
   const subjectKey = strAttr(subject.attributes, "DLS_KEY");
 
   const rows = await queryFeatures(
@@ -325,7 +327,7 @@ export async function fetchDlsContextByPointClient(params: {
       inSR: 4326,
       spatialRel: "esriSpatialRelIntersects",
       outSR: 4326,
-      resultRecordCount: 260,
+      resultRecordCount: 800,
       f: "json",
     },
     params.signal
