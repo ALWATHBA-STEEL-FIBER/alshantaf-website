@@ -194,16 +194,21 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
       }))
   );
   if (drawContext) {
+    // Cap drawn neighbors so dense cadastral areas stay smooth on phones.
+    const MAX_CONTEXT_POLYS = 700;
+    let drawn = 0;
     for (const item of context) {
       if (item.isSubject) continue;
+      if (drawn >= MAX_CONTEXT_POLYS) break;
+      drawn += 1;
       const poly = L.polygon(
         item.ring.map(([lat, lng]) => L.latLng(lat, lng)),
         {
           color: DLS_PARCEL_RED,
-          weight: 1.6,
-          opacity: 0.95,
+          weight: 1.35,
+          opacity: 0.88,
           fillColor: DLS_PARCEL_RED,
-          fillOpacity: contextInteractive ? 0.01 : 0,
+          fillOpacity: contextInteractive ? 0.008 : 0,
           lineJoin: "miter",
           lineCap: "square",
           interactive: contextInteractive,

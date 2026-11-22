@@ -27,10 +27,11 @@ import {
 } from "@/lib/mapTiles";
 import { attachDlsLodController, DLS_LOD } from "@/lib/dlsMapLod";
 import {
-  DLS_PARCEL_GRID_MAX,
   fetchDlsParcelsByBboxClient,
+  parcelRecordLimitForZoom,
   parcelSimplifyOffsetForZoom,
 } from "@/lib/dlsClientMap";
+import { viewportDedupeKey } from "@/lib/dlsMapCache";
 import { dictionary } from "@/lib/dictionary";
 import { Logo } from "@/components/Logo";
 import type { AdjacentRoad, ContextParcel, ParcelRing } from "@/components/LocationInput";
@@ -756,8 +757,14 @@ export function MapFullscreenPortal({
       abort = new AbortController();
       const signal = abort.signal;
       const zoom = map.getZoom();
-      const bounds = map.getBounds().pad(0.15);
-      const key = `${zoom.toFixed(1)}|${bounds.getWest().toFixed(4)},${bounds.getSouth().toFixed(4)},${bounds.getEast().toFixed(4)},${bounds.getNorth().toFixed(4)}`;
+      const b = map.getBounds();
+      const view = {
+        west: b.getWest(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        north: b.getNorth(),
+      };
+      const key = viewportDedupeKey(zoom, view);
       if (key === lastKey) return;
       void (async () => {
         const apply = (parcels: ContextParcel[]) => {
@@ -768,35 +775,17 @@ export function MapFullscreenPortal({
         try {
           apply(
             await fetchDlsParcelsByBboxClient({
-              west: bounds.getWest(),
-              south: bounds.getSouth(),
-              east: bounds.getEast(),
-              north: bounds.getNorth(),
+              ...view,
+              zoom,
               maxAllowableOffset: parcelSimplifyOffsetForZoom(zoom),
-              resultRecordCount: DLS_PARCEL_GRID_MAX,
+              resultRecordCount: parcelRecordLimitForZoom(zoom),
               subjectDlsKey: parcelIdentity?.dlsKey ?? null,
               subjectParcelNo: parcelNumber,
               signal,
             })
           );
-          return;
         } catch {
-          /* server proxy if browser→DLS is blocked (CSP / network) */
-        }
-        if (cancelled || signal.aborted) return;
-        const center = map.getCenter();
-        try {
-          const res = await fetch("/api/submissions/dls-context-by-point", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
-            signal,
-            body: JSON.stringify({ latitude: center.lat, longitude: center.lng }),
-          });
-          if (!res.ok) return;
-          const body = (await res.json()) as { parcels?: ContextParcel[] };
-          apply(Array.isArray(body.parcels) ? body.parcels : []);
-        } catch {
-          /* keep previous */
+          /* keep previous — client cache/gate handles retries; avoid proxy flood */
         }
       })();
     };
@@ -806,12 +795,11 @@ export function MapFullscreenPortal({
       timer = setTimeout(() => {
         timer = null;
         load();
-      }, 180);
+      }, 420);
     };
 
     map.on("moveend", schedule);
     map.on("zoomend", schedule);
-    map.on("zoom", schedule);
     schedule();
     return () => {
       cancelled = true;
@@ -819,7 +807,6 @@ export function MapFullscreenPortal({
       abort.abort();
       map.off("moveend", schedule);
       map.off("zoomend", schedule);
-      map.off("zoom", schedule);
     };
   }, [
     open,

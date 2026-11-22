@@ -53,11 +53,12 @@ import {
 } from "@/lib/mapTiles";
 import { attachDlsLodController, DLS_LOD } from "@/lib/dlsMapLod";
 import {
-  DLS_PARCEL_GRID_MAX,
   fetchDlsContextByPointClient,
   fetchDlsParcelsByBboxClient,
+  parcelRecordLimitForZoom,
   parcelSimplifyOffsetForZoom,
 } from "@/lib/dlsClientMap";
+import { viewportDedupeKey } from "@/lib/dlsMapCache";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
@@ -885,9 +886,10 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       .join("||");
   }, [polygon]);
 
-  // Viewport-based parcel grid (DLS-style): loads whatever is on screen as you pan/zoom.
+  // Viewport parcel grid — settle-only (moveend/zoomend). Paused while fullscreen
+  // owns the live map so we never double-hit DLS.
   useEffect(() => {
-    if (!showMap || !showContextGrid || !parcelGridAllowed || !mapReady) {
+    if (!showMap || !showContextGrid || !parcelGridAllowed || !mapReady || mapFullscreen) {
       if (!parcelGridAllowed || !showContextGrid || !showMap) setContextParcels([]);
       return;
     }
@@ -905,9 +907,14 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       abort = new AbortController();
       const signal = abort.signal;
       const zoom = map.getZoom();
-      // Soft pad so panning doesn't flash empty edges before the next fetch.
-      const bounds = map.getBounds().pad(0.15);
-      const key = `${zoom.toFixed(1)}|${bounds.getWest().toFixed(4)},${bounds.getSouth().toFixed(4)},${bounds.getEast().toFixed(4)},${bounds.getNorth().toFixed(4)}`;
+      const b = map.getBounds();
+      const view = {
+        west: b.getWest(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        north: b.getNorth(),
+      };
+      const key = viewportDedupeKey(zoom, view);
       if (key === lastKey) return;
 
       void (async () => {
@@ -919,23 +926,21 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         try {
           apply(
             await fetchDlsParcelsByBboxClient({
-              west: bounds.getWest(),
-              south: bounds.getSouth(),
-              east: bounds.getEast(),
-              north: bounds.getNorth(),
+              ...view,
+              zoom,
               maxAllowableOffset: parcelSimplifyOffsetForZoom(zoom),
-              resultRecordCount: DLS_PARCEL_GRID_MAX,
+              resultRecordCount: parcelRecordLimitForZoom(zoom),
               subjectDlsKey: dlsKey,
               subjectParcelNo: blueprint?.parcel ?? null,
               signal,
             })
           );
           return;
-        } catch {
-          /* try point / server fallbacks below */
+        } catch (err) {
+          if (signal.aborted || cancelled) return;
+          if (err instanceof DOMException && err.name === "AbortError") return;
         }
-        if (signal.aborted || cancelled) return;
-        // Fallback: ring around pin/subject if viewport query fails (CSP / DLS).
+        // Soft fallback only when the live viewport query truly failed.
         const fallbackFromRing = polygon?.[0]?.length
           ? (() => {
               const ring = polygon[0]!;
@@ -956,23 +961,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
               signal,
             })
           );
-          return;
         } catch {
-          /* server proxy last resort */
-        }
-        if (signal.aborted || cancelled) return;
-        try {
-          const res = await fetch("/api/submissions/dls-context-by-point", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
-            signal,
-            body: JSON.stringify({ latitude: coords.lat, longitude: coords.lng }),
-          });
-          if (!res.ok) return;
-          const body = (await res.json()) as { parcels?: ContextParcel[] };
-          apply(Array.isArray(body.parcels) ? body.parcels : []);
-        } catch {
-          /* keep previous grid */
+          /* keep previous grid — avoid hammering our server proxy */
         }
       })();
     };
@@ -982,13 +972,11 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       timer = setTimeout(() => {
         timer = null;
         load();
-      }, 180);
+      }, 420);
     };
 
     map.on("moveend", schedule);
     map.on("zoomend", schedule);
-    // Refresh while zooming so the grid tracks the viewport, not only after settle.
-    map.on("zoom", schedule);
     schedule();
 
     return () => {
@@ -997,13 +985,13 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       abort.abort();
       map.off("moveend", schedule);
       map.off("zoomend", schedule);
-      map.off("zoom", schedule);
     };
   }, [
     showMap,
     showContextGrid,
     parcelGridAllowed,
     mapReady,
+    mapFullscreen,
     dlsKey,
     blueprint?.parcel,
     selected,

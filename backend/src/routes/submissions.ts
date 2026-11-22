@@ -29,6 +29,10 @@ import { normalizeDecimalInput, toWesternDigits, westernDigitsString } from "../
 import { assertValidMultiParcel, canonicalParcelList } from "../lib/multiParcel";
 import { syncIndustryTypeCatalogOnce } from "../lib/industryTypeCatalog";
 import { requireBotGuard } from "../middleware/botGuard";
+import {
+  assertReasonableBbox,
+  requireSameSiteMapClient,
+} from "../middleware/sameSiteMapClient";
 
 export const submissionsRouter = Router();
 const PRICE_PER_SQM_RE = /^\d+(\.\d+)?$/;
@@ -62,14 +66,31 @@ const dlsValueLimiter = rateLimit({
   message: { error: "Too many lookups — please wait a few minutes and try again." },
 });
 
-// Lightweight ArcGIS HTTP queries — still capped so a public form can't be
-// used to hammer the government map service.
+// Pin-drop / parcel identity — moderate.
 const dlsLocationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 120,
+  limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many map lookups — please wait a few minutes and try again." },
+});
+
+// Server-side ArcGIS proxy (fallback only) — strict so browsers prefer device→DLS.
+const dlsProxyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many map proxy lookups — please wait a few minutes and try again." },
+});
+
+// Token mint is cached client-side; allow a few refreshes without sharing the proxy budget.
+const dlsTokenLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many map token requests — please wait a few minutes and try again." },
 });
 
 const dlsValueSchema = z.object({
@@ -100,7 +121,7 @@ const dlsAdminBboxSchema = z.object({
   east: z.coerce.number().finite().gte(-180).lte(180),
   north: z.coerce.number().finite().gte(-90).lte(90),
   maxAllowableOffset: z.coerce.number().finite().gte(0).lte(1).optional(),
-  resultRecordCount: z.coerce.number().int().finite().gte(1).lte(400).optional(),
+  resultRecordCount: z.coerce.number().int().finite().gte(1).lte(200).optional(),
 });
 
 const ammanZoningSchema = z
@@ -153,6 +174,7 @@ submissionsRouter.post(
 
 submissionsRouter.post(
   "/dls-location",
+  requireSameSiteMapClient,
   dlsLocationLimiter,
   asyncHandler(async (req, res) => {
     const input = dlsLocationSchema.parse(req.body);
@@ -177,6 +199,7 @@ submissionsRouter.post(
 
 submissionsRouter.post(
   "/dls-location-by-point",
+  requireSameSiteMapClient,
   dlsLocationLimiter,
   asyncHandler(async (req, res) => {
     const input = dlsPointSchema.parse(req.body);
@@ -201,12 +224,14 @@ submissionsRouter.post(
 
 submissionsRouter.post(
   "/dls-context-by-point",
-  dlsLocationLimiter,
+  requireSameSiteMapClient,
+  dlsProxyLimiter,
   asyncHandler(async (req, res) => {
     const input = dlsPointSchema.parse(req.body);
     try {
       const result = await lookupDlsParcelContextByPoint(input);
-      res.json({ parcels: result });
+      // Cap payload — clients should prefer viewport ArcGIS queries.
+      res.json({ parcels: result.slice(0, 1200) });
     } catch (err) {
       if (err instanceof DlsParcelLocationError) {
         res.status(502).json({ error: err.message });
@@ -219,9 +244,15 @@ submissionsRouter.post(
 
 submissionsRouter.post(
   "/dls-admin-by-bbox",
-  dlsLocationLimiter,
+  requireSameSiteMapClient,
+  dlsProxyLimiter,
   asyncHandler(async (req, res) => {
     const input = dlsAdminBboxSchema.parse(req.body);
+    const bad = assertReasonableBbox(input);
+    if (bad) {
+      res.status(400).json({ error: bad });
+      return;
+    }
     try {
       const features = await lookupDlsAdminByBbox({
         layer: input.layer as DlsAdminLayer,
@@ -246,11 +277,13 @@ submissionsRouter.post(
 /** Thin token proxy — ArcGIS queries run on the user device; gettoken has no CORS. */
 submissionsRouter.get(
   "/dls-map-token",
-  dlsLocationLimiter,
+  requireSameSiteMapClient,
+  dlsTokenLimiter,
   asyncHandler(async (_req, res) => {
     try {
       const issued = await issueDlsMapToken();
-      res.setHeader("Cache-Control", "private, max-age=60");
+      // Align with client reuse window; token itself lives longer server-side.
+      res.setHeader("Cache-Control", "private, max-age=120");
       res.json(issued);
     } catch (err) {
       if (err instanceof DlsParcelLocationError) {

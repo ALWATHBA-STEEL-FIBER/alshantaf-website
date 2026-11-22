@@ -33,8 +33,8 @@ export const DLS_LOD = {
   basinsMaxZoom: 14.75,
   /** Parcel cadastral grid — start a touch earlier so browse-without-pick works. */
   parcelsMinZoom: 13.5,
-  /** Debounce after pan/zoom settles — short enough to feel live, still kind to phones. */
-  debounceMs: 280,
+  /** Only fire after pan/zoom settles — never on every zoom frame. */
+  debounceMs: 420,
 } as const;
 
 export function lodLevelForZoom(zoom: number): DlsLodLevel {
@@ -62,8 +62,8 @@ export function maxOffsetForZoom(zoom: number): number {
 
 export function recordLimitForLayer(layer: "governorates" | "directorates" | "basins"): number {
   if (layer === "governorates") return 30;
-  if (layer === "directorates") return 70;
-  return 100;
+  if (layer === "directorates") return 55;
+  return 70;
 }
 
 type LeafletMap = import("leaflet").Map;
@@ -207,15 +207,20 @@ export function attachDlsLodController(opts: AttachOpts): LodController {
           south: bounds.getSouth(),
           east: bounds.getEast(),
           north: bounds.getNorth(),
+          zoom,
           maxAllowableOffset: maxOffsetForZoom(zoom),
           resultRecordCount: recordLimitForLayer(adminLayer),
           signal,
         });
       } catch (clientErr) {
+        // Only hit our proxy on real failures — not on abort/cancel.
         if (signal.aborted || destroyed) return;
+        const reason = clientErr instanceof Error ? clientErr.message : "";
+        if (reason === "Aborted" || reason.includes("AbortError")) return;
         const res = await fetch("/api/submissions/dls-admin-by-bbox", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          credentials: "same-origin",
           signal,
           body: JSON.stringify({
             layer: adminLayer,

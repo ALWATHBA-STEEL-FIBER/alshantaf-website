@@ -4,7 +4,19 @@
  * Browser-side DLS ArcGIS queries.
  * Token is fetched from our API (gettoken has no CORS); MapServer calls go
  * straight from the user device to maps.dls.gov.jo.
+ *
+ * Requests are gated + cached (see dlsMapCache) so pan/zoom stays light.
  */
+
+import {
+  getCachedAdmin,
+  getCachedParcels,
+  padBBox,
+  runDlsQuery,
+  setCachedAdmin,
+  setCachedParcels,
+  type BBox,
+} from "@/lib/dlsMapCache";
 
 export type DlsAdminLayer = "governorates" | "directorates" | "basins";
 
@@ -55,7 +67,8 @@ async function getClientDlsToken(signal?: AbortSignal): Promise<string> {
       method: "GET",
       signal,
       headers: { Accept: "application/json" },
-      cache: "no-store",
+      credentials: "same-origin",
+      cache: "default",
     });
     if (!res.ok) throw new Error(`dls-token-${res.status}`);
     const body = (await res.json()) as { token?: string; expiresAt?: number };
@@ -158,7 +171,8 @@ function featureToAdmin(layer: DlsAdminLayer, feature: DlsFeature): DlsAdminFeat
 async function queryFeatures(
   endpoint: string,
   params: Record<string, string | number | boolean>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  gateKey?: string
 ): Promise<DlsFeature[]> {
   async function run(token: string): Promise<DlsQueryBody> {
     const url = new URL(endpoint);
@@ -170,20 +184,28 @@ async function queryFeatures(
       method: "GET",
       signal,
       headers: { Accept: "application/json" },
+      // Never send our site cookies to the government map host.
+      credentials: "omit",
+      referrerPolicy: "strict-origin-when-cross-origin",
     });
     if (!res.ok) throw new Error(`dls-query-${res.status}`);
     return (await res.json()) as DlsQueryBody;
   }
 
-  let token = await getClientDlsToken(signal);
-  let body = await run(token);
-  if (body.error?.code === 499) {
-    tokenCache = null;
-    token = await getClientDlsToken(signal);
-    body = await run(token);
-  }
-  if (body.error) throw new Error(body.error.message || "dls-query-failed");
-  return body.features ?? [];
+  const exec = async () => {
+    let token = await getClientDlsToken(signal);
+    let body = await run(token);
+    if (body.error?.code === 499) {
+      tokenCache = null;
+      token = await getClientDlsToken(signal);
+      body = await run(token);
+    }
+    if (body.error) throw new Error(body.error.message || "dls-query-failed");
+    return body.features ?? [];
+  };
+
+  if (!gateKey) return exec();
+  return runDlsQuery(gateKey, signal, exec);
 }
 
 let governoratesMem: { at: number; features: DlsAdminFeature[] } | null = null;
@@ -196,6 +218,7 @@ export async function fetchDlsAdminByBboxClient(params: {
   south: number;
   east: number;
   north: number;
+  zoom?: number;
   maxAllowableOffset?: number;
   resultRecordCount?: number;
   signal?: AbortSignal;
@@ -205,6 +228,14 @@ export async function fetchDlsAdminByBboxClient(params: {
     return governoratesMem.features;
   }
 
+  const view: BBox = { west, south, east, north };
+  const zoom = typeof params.zoom === "number" ? params.zoom : 12;
+  if (layer !== "governorates") {
+    const hit = getCachedAdmin<DlsAdminFeature[]>(layer, view, zoom);
+    if (hit) return hit;
+  }
+
+  const fetchBox = layer === "governorates" ? view : padBBox(view, 0.4);
   const offset =
     typeof params.maxAllowableOffset === "number" && Number.isFinite(params.maxAllowableOffset)
       ? Math.max(0, params.maxAllowableOffset)
@@ -215,12 +246,12 @@ export async function fetchDlsAdminByBboxClient(params: {
           : 0.0008;
   const limit =
     typeof params.resultRecordCount === "number" && Number.isFinite(params.resultRecordCount)
-      ? Math.min(400, Math.max(1, Math.floor(params.resultRecordCount)))
+      ? Math.min(200, Math.max(1, Math.floor(params.resultRecordCount)))
       : layer === "governorates"
         ? 30
         : layer === "directorates"
-          ? 80
-          : 120;
+          ? 60
+          : 80;
 
   const query: Record<string, string | number | boolean> = {
     where: "1=1",
@@ -233,10 +264,10 @@ export async function fetchDlsAdminByBboxClient(params: {
   };
   if (layer !== "governorates") {
     query.geometry = JSON.stringify({
-      xmin: west,
-      ymin: south,
-      xmax: east,
-      ymax: north,
+      xmin: fetchBox.west,
+      ymin: fetchBox.south,
+      xmax: fetchBox.east,
+      ymax: fetchBox.north,
       spatialReference: { wkid: 4326 },
     });
     query.geometryType = "esriGeometryEnvelope";
@@ -244,7 +275,8 @@ export async function fetchDlsAdminByBboxClient(params: {
     query.spatialRel = "esriSpatialRelIntersects";
   }
 
-  const rows = await queryFeatures(adminEndpoint(layer), query, signal);
+  const gateKey = `admin|${layer}|${fetchBox.west.toFixed(3)}|${fetchBox.south.toFixed(3)}|${fetchBox.east.toFixed(3)}|${fetchBox.north.toFixed(3)}`;
+  const rows = await queryFeatures(adminEndpoint(layer), query, signal, gateKey);
   const list: DlsAdminFeature[] = [];
   for (const row of rows) {
     const item = featureToAdmin(layer, row);
@@ -252,6 +284,8 @@ export async function fetchDlsAdminByBboxClient(params: {
   }
   if (layer === "governorates") {
     governoratesMem = { at: Date.now(), features: list };
+  } else {
+    setCachedAdmin(layer, fetchBox, zoom, list);
   }
   return list;
 }
@@ -288,25 +322,38 @@ function parcelNoFromAttrs(attrs: Record<string, unknown> | undefined): string |
   return null;
 }
 
-/** Practical ceiling — DLS allows more, but 3k keeps phones responsive. */
-export const DLS_PARCEL_GRID_MAX = 3000;
+/**
+ * Hard ceiling per request — denser than this tanks phones and hammers DLS.
+ * Prefer zoom-scaled limits via parcelRecordLimitForZoom().
+ */
+export const DLS_PARCEL_GRID_MAX = 1200;
 
 export function parcelSimplifyOffsetForZoom(zoom: number): number {
-  if (zoom < 14.5) return 0.0004;
+  if (zoom < 14) return 0.00055;
+  if (zoom < 14.5) return 0.00038;
   if (zoom < 15.5) return 0.00022;
   if (zoom < 16.5) return 0.00012;
-  return 0.00005;
+  return 0.00006;
+}
+
+export function parcelRecordLimitForZoom(zoom: number): number {
+  if (zoom < 14) return 400;
+  if (zoom < 15) return 700;
+  if (zoom < 16) return 900;
+  if (zoom < 17) return 1100;
+  return DLS_PARCEL_GRID_MAX;
 }
 
 /**
- * Parcel grid for the visible map (DLS-style): as far as the viewport,
- * simplified geometry so ~2–3k lots load in roughly half a second.
+ * Parcel grid for the visible map. Pads + caches the bbox so small pans
+ * reuse the last payload instead of re-hitting ArcGIS.
  */
 export async function fetchDlsParcelsByBboxClient(params: {
   west: number;
   south: number;
   east: number;
   north: number;
+  zoom?: number;
   maxAllowableOffset?: number;
   resultRecordCount?: number;
   subjectDlsKey?: string | null;
@@ -317,20 +364,29 @@ export async function fetchDlsParcelsByBboxClient(params: {
   if (![west, south, east, north].every(Number.isFinite) || east <= west || north <= south) {
     return [];
   }
+  const view: BBox = { west, south, east, north };
+  const zoom = typeof params.zoom === "number" && Number.isFinite(params.zoom) ? params.zoom : 15;
+  const cached = getCachedParcels<DlsContextParcel[]>(view, zoom);
+  if (cached) {
+    return tagSubject(cached, params.subjectDlsKey, params.subjectParcelNo);
+  }
+
+  const fetchBox = padBBox(view, 0.35);
   const offset =
     typeof params.maxAllowableOffset === "number" && Number.isFinite(params.maxAllowableOffset)
       ? Math.max(0, params.maxAllowableOffset)
-      : 0.00015;
+      : parcelSimplifyOffsetForZoom(zoom);
   const limit = Math.min(
     DLS_PARCEL_GRID_MAX,
     Math.max(
-      100,
+      80,
       typeof params.resultRecordCount === "number" && Number.isFinite(params.resultRecordCount)
         ? Math.floor(params.resultRecordCount)
-        : DLS_PARCEL_GRID_MAX
+        : parcelRecordLimitForZoom(zoom)
     )
   );
 
+  const gateKey = `parcels|${fetchBox.west.toFixed(3)}|${fetchBox.south.toFixed(3)}|${fetchBox.east.toFixed(3)}|${fetchBox.north.toFixed(3)}|${limit}`;
   const rows = await queryFeatures(
     PARCEL_LAYER_URL,
     {
@@ -338,10 +394,10 @@ export async function fetchDlsParcelsByBboxClient(params: {
       outFields: "DLS_KEY,PARCEL_ID",
       returnGeometry: true,
       geometry: JSON.stringify({
-        xmin: west,
-        ymin: south,
-        xmax: east,
-        ymax: north,
+        xmin: fetchBox.west,
+        ymin: fetchBox.south,
+        xmax: fetchBox.east,
+        ymax: fetchBox.north,
         spatialReference: { wkid: 4326 },
       }),
       geometryType: "esriGeometryEnvelope",
@@ -352,23 +408,36 @@ export async function fetchDlsParcelsByBboxClient(params: {
       resultRecordCount: limit,
       f: "json",
     },
-    signal
+    signal,
+    gateKey
   );
 
-  const subjectKey = (params.subjectDlsKey || "").trim() || null;
-  const subjectNo = normalizeParcelNo(params.subjectParcelNo ?? null);
   const list: DlsContextParcel[] = [];
   for (const row of rows) {
     const rings = ringsFromFeature(row);
     if (!rings.length) continue;
     const dlsKey = strAttr(row.attributes, "DLS_KEY");
     const parcelNo = parcelNoFromAttrs(row.attributes);
-    const isSubject = Boolean(
-      (subjectKey && dlsKey && dlsKey === subjectKey) ||
-        (subjectNo && parcelNo && parcelNo === subjectNo)
-    );
-    list.push({ dlsKey, parcelNo, rings, isSubject });
+    list.push({ dlsKey, parcelNo, rings, isSubject: false });
   }
+  setCachedParcels(fetchBox, zoom, list);
+  return tagSubject(list, params.subjectDlsKey, params.subjectParcelNo);
+}
+
+function tagSubject(
+  parcels: DlsContextParcel[],
+  subjectDlsKey?: string | null,
+  subjectParcelNo?: string | null
+): DlsContextParcel[] {
+  const subjectKey = (subjectDlsKey || "").trim() || null;
+  const subjectNo = normalizeParcelNo(subjectParcelNo ?? null);
+  const list = parcels.map((p) => ({
+    ...p,
+    isSubject: Boolean(
+      (subjectKey && p.dlsKey && p.dlsKey === subjectKey) ||
+        (subjectNo && p.parcelNo && p.parcelNo === subjectNo)
+    ),
+  }));
   list.sort(
     (a, b) =>
       Number(b.isSubject) - Number(a.isSubject) ||
@@ -387,15 +456,16 @@ export async function fetchDlsContextByPointClient(params: {
   const lng = Number(params.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
 
-  // ~2 km half-span — fills a typical parcel-zoom viewport.
-  const pad = 0.018;
+  // ~1.2 km half-span — enough for a parcel-zoom viewport without a huge pull.
+  const pad = 0.011;
   return fetchDlsParcelsByBboxClient({
     west: lng - pad,
     south: lat - pad,
     east: lng + pad,
     north: lat + pad,
-    maxAllowableOffset: 0.0002,
-    resultRecordCount: DLS_PARCEL_GRID_MAX,
+    zoom: 15,
+    maxAllowableOffset: 0.00022,
+    resultRecordCount: parcelRecordLimitForZoom(15),
     signal: params.signal,
   });
 }
