@@ -26,9 +26,27 @@ function actor(req: { session?: { userId?: string; email?: string } }) {
 }
 
 function httpError(err: unknown, res: import("express").Response) {
-  const status = (err as { status?: number })?.status ?? 500;
-  const message = err instanceof Error ? err.message : "Server error";
-  res.status(status).json({ error: message });
+  const e = err as { status?: number; code?: string; duplicates?: unknown };
+  // FinanceError carries a code but no HTTP status — it is a validation problem.
+  const status = e?.status ?? (e?.code && err instanceof Error && err.name === "FinanceError" ? 400 : 500);
+  const message = status >= 500 ? "Server error" : err instanceof Error ? err.message : "Server error";
+  if (status >= 500) console.error("[invest]", err);
+  res.status(status).json({ error: message, ...(e?.duplicates ? { duplicates: e.duplicates } : {}) });
+}
+
+/** Wrap a handler so thrown service errors become JSON responses. */
+function h(fn: (req: import("express").Request, res: import("express").Response) => Promise<unknown>) {
+  return asyncHandler(async (req, res) => {
+    try {
+      const out = await fn(req, res);
+      if (!res.headersSent) {
+        if (out === undefined) res.status(204).end();
+        else res.json(out);
+      }
+    } catch (e) {
+      httpError(e, res);
+    }
+  });
 }
 
 function requestIsSecure(req: { get: (n: string) => string | undefined; secure?: boolean }) {
@@ -51,10 +69,18 @@ admin.get(
 );
 
 admin.get(
+  "/meta",
+  h(async () => ({ expenseCategories: capital.EXPENSE_CATEGORIES }))
+);
+
+admin.get(
   "/projects",
-  asyncHandler(async (_req, res) => {
-    res.json(await projects.listProjects());
-  })
+  h(async (req) => projects.listProjects({ q: String(req.query.q || ""), status: String(req.query.status || "") }))
+);
+
+admin.post(
+  "/preview",
+  h(async (req) => projects.previewDistribution(req.body ?? {}))
 );
 
 admin.post(
@@ -111,6 +137,50 @@ admin.post(
       httpError(e, res);
     }
   })
+);
+
+admin.patch(
+  "/projects/:id/members/:investorId",
+  h(async (req) => {
+    await investors.updateProjectMember(req.params.id, req.params.investorId, req.body ?? {}, actor(req));
+    return projects.getProjectDetail(req.params.id);
+  })
+);
+
+admin.delete(
+  "/projects/:id/members/:investorId",
+  h(async (req) => {
+    await investors.removeProjectMember(req.params.id, req.params.investorId, actor(req));
+    return projects.getProjectDetail(req.params.id);
+  })
+);
+
+admin.post(
+  "/contributions/:id/reverse",
+  h(async (req) => {
+    await capital.reverseContribution(req.params.id, actor(req), req.body?.reason ? String(req.body.reason) : undefined);
+    return { ok: true };
+  })
+);
+
+admin.post(
+  "/expenses/:id/reverse",
+  h(async (req) => {
+    await capital.reverseExpense(req.params.id, actor(req), req.body?.reason ? String(req.body.reason) : undefined);
+    return { ok: true };
+  })
+);
+
+admin.get(
+  "/projects/:id/settlement",
+  h(async (req) => ({ settlement: await settlement.latestSettlement(req.params.id) }))
+);
+
+admin.post(
+  "/projects/:projectId/settlements/:settlementId/payouts/:partnerId",
+  h(async (req) =>
+    settlement.markPayout(req.params.projectId, req.params.settlementId, req.params.partnerId, req.body ?? {}, actor(req))
+  )
 );
 
 admin.get(
@@ -206,9 +276,18 @@ admin.post(
 
 admin.get(
   "/investors",
-  asyncHandler(async (_req, res) => {
-    res.json(await investors.listInvestors());
-  })
+  h(async (req) =>
+    investors.listInvestors({
+      q: String(req.query.q || ""),
+      active: req.query.active ? String(req.query.active) : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+    })
+  )
+);
+
+admin.post(
+  "/investors/duplicates",
+  h(async (req) => investors.findDuplicates(req.body ?? {}, req.body?.excludeId ? String(req.body.excludeId) : undefined))
 );
 
 admin.post(

@@ -255,3 +255,311 @@ export const investApi = {
   portalProjects: () => clientFetch<InvestProjectSummary[]>("/invest/portal/projects"),
   portalProject: (id: string) => clientFetch<InvestPortalProject>(`/invest/portal/projects/${id}`),
 };
+// ─────────────────────────────────────────────────────────────
+// Partnership CRM (v2) — richer shapes used by the admin workspace.
+// ─────────────────────────────────────────────────────────────
+
+export type CommissionBasis = "investor_net_profit" | "distributable_profit" | "sale_value" | "fixed" | "hybrid";
+
+export type CommissionRule = {
+  basis: CommissionBasis;
+  percent?: string | number | null;
+  fixedAmount?: string | number | null;
+};
+
+export type PartnerRow = {
+  id: string;
+  code: string | null;
+  name: string;
+  legalName: string;
+  kind: "individual" | "company" | string;
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+  nationalIdLast4: string | null;
+  notes: string | null;
+  active: boolean;
+  createdAt: string;
+  projectIds: string[];
+  projectCount: number;
+  openProjectCount: number;
+  coordinatorOf: number;
+  portal: { email: string; active: boolean } | null;
+  totals: { contributedCapital: InvestMoneyField };
+};
+
+export type PartnerProjectRow = {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+  currency: string;
+  active: boolean;
+  role: "coordinator" | "investor";
+  ownershipPercent: string | null;
+  capital: string;
+  expensesOutstanding: string;
+  commissionPercent: string | null;
+  joinedAt: string;
+  settlement: {
+    grossProfit: string;
+    commissionPaid: string;
+    profitShare: string;
+    commissionEarned: string;
+    totalPayout: string;
+    paidAmount: string;
+    paidAt: string | null;
+  } | null;
+};
+
+export type PartnerFull = Omit<PartnerRow, "projectCount" | "openProjectCount" | "coordinatorOf" | "totals"> & {
+  displayName: string | null;
+  address: string | null;
+  nationalId: string | null;
+  bankDetails: string | null;
+  projects: PartnerProjectRow[];
+  contributions: {
+    id: string;
+    projectId: string;
+    projectName: string;
+    kind: string;
+    amount: string;
+    currency: string;
+    contributedAt: string;
+    status: string;
+    notes: string | null;
+  }[];
+  expenses: {
+    id: string;
+    projectId: string;
+    projectName: string;
+    title: string;
+    category: string | null;
+    amount: string;
+    expenseDate: string;
+    status: string;
+  }[];
+  portal: { email: string; active: boolean; lastLoginAt: string | null } | null;
+  totals: Record<"contributedCapital" | "outstandingReimbursements" | "realizedProfit" | "paidOut" | "toReceive", InvestMoneyField>;
+};
+
+export type ProjectStats = {
+  partnerCount: number;
+  capital: string;
+  purchasePrice: string | null;
+  fundingPercent: string | null;
+  fundingGap: string | null;
+  poolCash: string;
+  expensesApproved: string;
+  expensesPending: string;
+  expensesPendingCount: number;
+  expensesPartnerPaid: string;
+  expensesPoolPaid: string;
+  totalCost: string;
+  totalInvested: string;
+  targetSalePrice: string | null;
+  actualSalePrice: string | null;
+  projectedProfit: string | null;
+  projectedRoiPercent: string | null;
+  coordinator: { investorId: string; name: string } | null;
+};
+
+export type ProjectListRow = InvestProjectSummary & { plotParcelNo: string | null; stats: ProjectStats };
+
+export type ProjectMember = {
+  id: string;
+  investorId: string;
+  investorName: string;
+  code: string | null;
+  phone: string | null;
+  ownershipPercent: string;
+  ownershipMode: "capital" | "manual";
+  role: "coordinator" | "investor";
+  isCoordinator: boolean;
+  commissionPercent: string | null;
+  effectiveCommissionPercent: string | null;
+  capital: string;
+  expensesOutstanding: string;
+  expensesPending: string;
+  notes: string | null;
+  joinedAt: string;
+};
+
+export type ProjectExpense = {
+  id: string;
+  title: string;
+  category: string | null;
+  description: string | null;
+  amount: InvestMoneyField;
+  expenseDate: string;
+  status: "pending" | "approved" | "rejected" | "reimbursed" | "written_off" | string;
+  submittedAt: string;
+  approvedAt: string | null;
+  rejectedReason: string | null;
+  finalized: boolean;
+  fundedBy: "partner" | "project";
+  payerInvestorId: string | null;
+  payerName: string | null;
+  payerCode: string | null;
+  reimbursable: boolean;
+};
+
+export type ProjectContribution = {
+  id: string;
+  investorId: string;
+  investorName: string;
+  investorCode: string | null;
+  amount: InvestMoneyField;
+  contributedAt: string;
+  status: string;
+  notes: string | null;
+  kind: string;
+};
+
+export type ProjectFull = InvestProjectSummary & {
+  description: string | null;
+  city: string | null;
+  area: string | null;
+  landLocation: string | null;
+  plotParcelNo: string | null;
+  landAreaSqm: string | null;
+  purchaseDate: string | null;
+  expectedSaleDate: string | null;
+  actualSaleDate: string | null;
+  agreementNotes: string | null;
+  commissionRule: CommissionRule;
+  coordinatorParticipatesInProfit: boolean;
+  shareLossesByOwnership: boolean;
+  closed: boolean;
+  stats: ProjectStats;
+  purchasePrice: InvestMoneyField;
+  targetSalePrice: InvestMoneyField;
+  actualSalePrice: InvestMoneyField;
+  ownership: InvestOwnershipSlice[];
+  members: ProjectMember[];
+  contributions: ProjectContribution[];
+  expenses: ProjectExpense[];
+  settlements: InvestSettlementSummary[];
+  statusHistory: { id: string; from: string | null; to: string; note: string | null; actor: string | null; at: string }[];
+};
+
+export type DistributionLine = {
+  partnerId: string;
+  label: string;
+  code?: string | null;
+  phone?: string | null;
+  isCoordinator: boolean;
+  ownershipPercent: string;
+  capitalContributed?: string;
+  expensesPaid?: string;
+  capitalReturned: string;
+  expenseReimbursement: string;
+  grossProfit: string;
+  commissionPaid: string;
+  commissionRatePercent?: string;
+  profitShare: string;
+  commissionEarned: string;
+  totalPayout: string;
+  netGain?: string;
+  roiPercent?: string;
+  profitPercentBefore?: string;
+  profitPercentAfter?: string;
+  paidAmount?: string;
+  paidAt?: string | null;
+  paidRef?: string | null;
+};
+
+export type DistributionResult = {
+  hypothetical?: boolean;
+  currency: string;
+  saleProceeds: string;
+  closingCosts: string;
+  unpaidLiabilities: string;
+  netProceedsAfterCosts: string;
+  totalCapitalReturned: string;
+  totalExpenseReimbursements: string;
+  distributableProfitBeforeCommission: string;
+  coordinatorCommission: string;
+  distributableProfitAfterCommission: string;
+  totalPayouts: string;
+  residualCash: string;
+  lossShared: boolean;
+  balanced: boolean;
+  lines: DistributionLine[];
+  notes: string[];
+};
+
+export type PostedSettlement = {
+  id: string;
+  status: string;
+  createdAt: string;
+  postedAt: string | null;
+  finalized: boolean;
+  currency: string;
+  summary: DistributionResult | null;
+  totals: Record<"saleProceeds" | "closingCosts" | "totalPayouts" | "totalPaid", InvestMoneyField>;
+  lines: DistributionLine[];
+};
+
+const qs = (o: Record<string, string | undefined>) => {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(o)) if (v) p.set(k, v);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+};
+
+export const crmApi = {
+  meta: () => clientFetch<{ expenseCategories: string[] }>("/invest/meta"),
+  partners: (q?: string, active?: string) => clientFetch<PartnerRow[]>(`/invest/investors${qs({ q, active })}`),
+  partner: (id: string) => clientFetch<PartnerFull>(`/invest/investors/${id}`),
+  createPartner: (data: Record<string, unknown>) =>
+    clientFetch<PartnerRow>("/invest/investors", { method: "POST", body: JSON.stringify(data) }),
+  updatePartner: (id: string, data: Record<string, unknown>) =>
+    clientFetch<PartnerFull>(`/invest/investors/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  duplicates: (data: Record<string, unknown>) =>
+    clientFetch<PartnerRow[]>("/invest/investors/duplicates", { method: "POST", body: JSON.stringify(data) }),
+
+  projects: (q?: string, status?: string) => clientFetch<ProjectListRow[]>(`/invest/projects${qs({ q, status })}`),
+  project: (id: string) => clientFetch<ProjectFull>(`/invest/projects/${id}`),
+  createProject: (data: Record<string, unknown>) =>
+    clientFetch<InvestProjectSummary>("/invest/projects", { method: "POST", body: JSON.stringify(data) }),
+  updateProject: (id: string, data: Record<string, unknown>) =>
+    clientFetch<ProjectFull>(`/invest/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  setStatus: (id: string, status: string, note?: string) =>
+    clientFetch<ProjectFull>(`/invest/projects/${id}/status`, { method: "POST", body: JSON.stringify({ status, note }) }),
+
+  addMember: (projectId: string, data: Record<string, unknown>) =>
+    clientFetch<unknown>(`/invest/projects/${projectId}/members`, { method: "POST", body: JSON.stringify(data) }),
+  updateMember: (projectId: string, investorId: string, data: Record<string, unknown>) =>
+    clientFetch<ProjectFull>(`/invest/projects/${projectId}/members/${investorId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  removeMember: (projectId: string, investorId: string) =>
+    clientFetch<ProjectFull>(`/invest/projects/${projectId}/members/${investorId}`, { method: "DELETE" }),
+
+  addContribution: (projectId: string, data: Record<string, unknown>) =>
+    clientFetch<unknown>(`/invest/projects/${projectId}/contributions`, { method: "POST", body: JSON.stringify(data) }),
+  reverseContribution: (id: string, reason?: string) =>
+    clientFetch<unknown>(`/invest/contributions/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
+
+  addExpense: (projectId: string, data: Record<string, unknown>) =>
+    clientFetch<ProjectExpense>(`/invest/projects/${projectId}/expenses`, { method: "POST", body: JSON.stringify(data) }),
+  approveExpense: (id: string) => clientFetch<unknown>(`/invest/expenses/${id}/approve`, { method: "POST", body: "{}" }),
+  reverseExpense: (id: string, reason?: string) =>
+    clientFetch<unknown>(`/invest/expenses/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
+
+  preview: (data: Record<string, unknown>) =>
+    clientFetch<DistributionResult>("/invest/preview", { method: "POST", body: JSON.stringify(data) }),
+  simulate: (projectId: string, data: Record<string, unknown>) =>
+    clientFetch<DistributionResult>(`/invest/projects/${projectId}/simulate`, { method: "POST", body: JSON.stringify(data) }),
+  settle: (projectId: string, data: Record<string, unknown>) =>
+    clientFetch<PostedSettlement>(`/invest/projects/${projectId}/settlements`, { method: "POST", body: JSON.stringify(data) }),
+  settlement: (projectId: string) =>
+    clientFetch<{ settlement: PostedSettlement | null }>(`/invest/projects/${projectId}/settlement`),
+  markPayout: (projectId: string, settlementId: string, partnerId: string, data: Record<string, unknown>) =>
+    clientFetch<PostedSettlement>(`/invest/projects/${projectId}/settlements/${settlementId}/payouts/${partnerId}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};

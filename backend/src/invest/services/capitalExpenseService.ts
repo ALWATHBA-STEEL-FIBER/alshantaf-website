@@ -96,10 +96,18 @@ export async function createContribution(
   const membership = await prisma.invMembership.findUnique({
     where: { projectId_investorId: { projectId, investorId } },
   });
-  if (!membership) throw Object.assign(new Error("Investor is not a project member"), { status: 400 });
+  if (!membership || !membership.active) {
+    throw Object.assign(new Error("الشريك ليس عضواً في المشروع"), { status: 400 });
+  }
+  if (["settled", "closed", "cancelled"].includes(project.status)) {
+    throw Object.assign(new Error("المشروع مغلق"), { status: 400 });
+  }
 
-  const kind = String(data.kind || "additional");
-  const contributedAt = data.contributedAt ? new Date(String(data.contributedAt)) : new Date();
+  const kind = CONTRIBUTION_KINDS.includes(String(data.kind) as (typeof CONTRIBUTION_KINDS)[number])
+    ? String(data.kind)
+    : "additional";
+  const contributedAt = parseDate(data.contributedAt);
+  const withdrawal = kind === "withdrawal";
 
   const journal = await postBalancedJournal({
     organizationId: project.organizationId,
@@ -109,11 +117,17 @@ export async function createContribution(
     createdBy: actor.id,
     idempotencyKey: data.idempotencyKey ? String(data.idempotencyKey) : undefined,
     lines: [
-      { accountCode: PROJECT_COA.BANK, debit: amount, credit: "0", currency: project.currency, partnerId: investorId },
+      {
+        accountCode: PROJECT_COA.BANK,
+        debit: withdrawal ? "0" : amount,
+        credit: withdrawal ? amount : "0",
+        currency: project.currency,
+        partnerId: investorId,
+      },
       {
         accountCode: PROJECT_COA.INVESTOR_CAPITAL,
-        debit: "0",
-        credit: amount,
+        debit: withdrawal ? amount : "0",
+        credit: withdrawal ? "0" : amount,
         currency: project.currency,
         partnerId: investorId,
       },
@@ -129,7 +143,8 @@ export async function createContribution(
       currency: project.currency,
       contributedAt,
       description: data.notes ? String(data.notes) : data.description ? String(data.description) : null,
-      countsAsEquity: data.countsAsEquity !== false && kind !== "withdrawal",
+      // Withdrawals reduce the partner's equity (resolveProjectPartners subtracts them).
+      countsAsEquity: data.countsAsEquity !== false,
       approvalStatus: "approved",
       approvedBy: actor.id,
       approvedAt: new Date(),
@@ -174,23 +189,184 @@ export async function createContribution(
   };
 }
 
-export async function listExpenses(projectId: string) {
-  const rows = await prisma.invExpense.findMany({
-    where: { projectId },
-    orderBy: { expenseDate: "desc" },
-  });
-  return rows.map((e) => ({
+export function serializeExpense(e: {
+  id: string;
+  title: string;
+  category: string | null;
+  description: string | null;
+  amount: { toString(): string };
+  currency: string;
+  expenseDate: Date;
+  status: string;
+  createdAt: Date;
+  approvedAt: Date | null;
+  rejectedReason: string | null;
+  payerInvestorId: string | null;
+  paidByCoordinator: boolean;
+  reimbursementDue: { toString(): string };
+  payerInvestor?: { displayName: string | null; legalName: string; code: string | null } | null;
+}) {
+  const fundedBy = e.payerInvestorId || e.paidByCoordinator ? "partner" : "project";
+  return {
     id: e.id,
     title: e.title,
     category: e.category,
+    description: e.description,
     amount: moneyField(e.amount, { currency: e.currency, finalized: e.status === "approved" || e.status === "reimbursed" }),
+    expenseDate: e.expenseDate.toISOString().slice(0, 10),
     status: e.status,
     submittedAt: e.createdAt.toISOString(),
     approvedAt: e.approvedAt?.toISOString() ?? null,
+    rejectedReason: e.rejectedReason,
     finalized: e.status === "approved" || e.status === "reimbursed",
+    fundedBy,
     payerInvestorId: e.payerInvestorId,
+    payerName: e.payerInvestor ? e.payerInvestor.displayName || e.payerInvestor.legalName : e.paidByCoordinator ? "المنسق" : null,
+    payerCode: e.payerInvestor?.code ?? null,
     paidByCoordinator: e.paidByCoordinator,
-  }));
+    reimbursable: fundedBy === "partner" && Number(dstr(e.reimbursementDue)) > 0,
+  };
+}
+
+export async function listExpenses(projectId: string) {
+  const rows = await prisma.invExpense.findMany({
+    where: { projectId },
+    include: { payerInvestor: { select: { displayName: true, legalName: true, code: true } } },
+    orderBy: [{ expenseDate: "desc" }, { createdAt: "desc" }],
+  });
+  return rows.map(serializeExpense);
+}
+
+const CONTRIBUTION_KINDS = ["initial", "additional", "capital_call", "adjustment", "withdrawal"] as const;
+
+export const EXPENSE_CATEGORIES = [
+  "land_purchase_fees",
+  "registration",
+  "survey",
+  "legal",
+  "brokerage",
+  "taxes",
+  "development",
+  "fencing",
+  "maintenance",
+  "marketing",
+  "valuation",
+  "transport",
+  "other",
+] as const;
+
+function parseDate(v: unknown): Date {
+  if (v == null || v === "") return new Date();
+  const d = new Date(String(v));
+  if (Number.isNaN(d.getTime())) throw Object.assign(new Error("تاريخ غير صالح"), { status: 400 });
+  return d;
+}
+
+function strictMakerChecker() {
+  return process.env.INVEST_STRICT_MAKER_CHECKER === "1";
+}
+
+export async function reverseContribution(id: string, actor: { id?: string; email?: string }, reason?: string) {
+  const c = await prisma.invContribution.findUnique({ where: { id }, include: { project: true } });
+  if (!c) throw Object.assign(new Error("الحركة غير موجودة"), { status: 404 });
+  if (c.approvalStatus !== "approved") throw Object.assign(new Error("الحركة معكوسة مسبقاً"), { status: 400 });
+  if (["settled", "closed"].includes(c.project.status)) {
+    throw Object.assign(new Error("لا يمكن عكس حركة في مشروع تمت تسويته"), { status: 400 });
+  }
+  const amount = dstr(c.amount);
+  const withdrawal = c.kind === "withdrawal";
+  const journal = await postBalancedJournal({
+    organizationId: c.project.organizationId,
+    projectId: c.projectId,
+    memo: `Reversal of contribution ${c.id}${reason ? `: ${reason}` : ""}`,
+    valueDate: new Date(),
+    createdBy: actor.id,
+    idempotencyKey: `reverse:contribution:${c.id}`,
+    lines: [
+      { accountCode: PROJECT_COA.BANK, debit: withdrawal ? amount : "0", credit: withdrawal ? "0" : amount, currency: c.currency, partnerId: c.investorId },
+      { accountCode: PROJECT_COA.INVESTOR_CAPITAL, debit: withdrawal ? "0" : amount, credit: withdrawal ? amount : "0", currency: c.currency, partnerId: c.investorId },
+    ],
+  });
+  if (c.journalId) {
+    await prisma.invJournal.update({ where: { id: c.journalId }, data: { status: "reversed" } }).catch(() => undefined);
+    await prisma.invJournal.update({ where: { id: journal.id }, data: { reversesJournalId: c.journalId } }).catch(() => undefined);
+  }
+  await prisma.invContribution.update({ where: { id }, data: { approvalStatus: "reversed" } });
+  await prisma.invTransaction.create({
+    data: {
+      projectId: c.projectId,
+      partnerId: c.investorId,
+      type: "contribution.reversed",
+      amount,
+      currency: c.currency,
+      transactionDate: new Date(),
+      description: reason ?? null,
+      approvalStatus: "approved",
+      createdBy: actor.id,
+      journalId: journal.id,
+    },
+  });
+  await investAudit({
+    actorId: actor.id,
+    actorEmail: actor.email,
+    action: "contribution.reverse",
+    entityType: "InvContribution",
+    entityId: id,
+    reason,
+  });
+}
+
+export async function reverseExpense(id: string, actor: { id?: string; email?: string }, reason?: string) {
+  const e = await prisma.invExpense.findUnique({ where: { id }, include: { project: true } });
+  if (!e) throw Object.assign(new Error("المصروف غير موجود"), { status: 404 });
+  if (["settled", "closed"].includes(e.project.status)) {
+    throw Object.assign(new Error("لا يمكن إلغاء مصروف في مشروع تمت تسويته"), { status: 400 });
+  }
+  if (e.status === "pending") {
+    await prisma.invExpense.update({
+      where: { id },
+      data: { status: "rejected", rejectedReason: reason ?? "ألغي", approvedBy: actor.id, approvedAt: new Date() },
+    });
+  } else if (e.status === "approved") {
+    const amount = dstr(e.amount);
+    const partnerFunded = Boolean(e.payerInvestorId || e.paidByCoordinator);
+    const journal = await postBalancedJournal({
+      organizationId: e.project.organizationId,
+      projectId: e.projectId,
+      memo: `Reversal of expense: ${e.title}`,
+      valueDate: new Date(),
+      createdBy: actor.id,
+      idempotencyKey: `reverse:expense:${e.id}`,
+      lines: [
+        {
+          accountCode: partnerFunded ? PROJECT_COA.REIMBURSEMENT_PAYABLE : PROJECT_COA.BANK,
+          debit: amount,
+          credit: "0",
+          currency: e.currency,
+          partnerId: e.payerInvestorId ?? undefined,
+        },
+        { accountCode: PROJECT_COA.EXPENSE, debit: "0", credit: amount, currency: e.currency, partnerId: e.payerInvestorId ?? undefined },
+      ],
+    });
+    if (e.journalId) {
+      await prisma.invJournal.update({ where: { id: e.journalId }, data: { status: "reversed" } }).catch(() => undefined);
+      await prisma.invJournal.update({ where: { id: journal.id }, data: { reversesJournalId: e.journalId } }).catch(() => undefined);
+    }
+    await prisma.invExpense.update({
+      where: { id },
+      data: { status: "written_off", rejectedReason: reason ?? "ألغي بعد الاعتماد", reimbursementDue: "0" },
+    });
+  } else {
+    throw Object.assign(new Error("لا يمكن إلغاء هذا المصروف"), { status: 400 });
+  }
+  await investAudit({
+    actorId: actor.id,
+    actorEmail: actor.email,
+    action: "expense.reverse",
+    entityType: "InvExpense",
+    entityId: id,
+    reason,
+  });
 }
 
 export async function createExpense(
@@ -199,14 +375,29 @@ export async function createExpense(
   actor: { id?: string; email?: string }
 ) {
   const project = await prisma.invProject.findUnique({ where: { id: projectId } });
-  if (!project) throw Object.assign(new Error("Project not found"), { status: 404 });
-  const title = String(data.title || data.description || "").trim();
-  if (!title) throw Object.assign(new Error("title is required"), { status: 400 });
+  if (!project) throw Object.assign(new Error("المشروع غير موجود"), { status: 404 });
+  if (["settled", "closed", "cancelled"].includes(project.status)) {
+    throw Object.assign(new Error("المشروع مغلق"), { status: 400 });
+  }
+  const title = String(data.title || "").trim();
+  if (!title) throw Object.assign(new Error("وصف المصروف مطلوب"), { status: 400 });
   const amount = dstr(data.amount as string | number | null | undefined);
-  if (!amount || Number(amount) <= 0) throw Object.assign(new Error("amount must be positive"), { status: 400 });
+  if (!amount || !(Number(amount) > 0)) throw Object.assign(new Error("المبلغ يجب أن يكون أكبر من صفر"), { status: 400 });
 
-  const paidByCoordinator = Boolean(data.paidByCoordinator) || !data.payerInvestorId;
-  const payerInvestorId = data.payerInvestorId ? String(data.payerInvestorId) : null;
+  const fundedBy = data.fundedBy === "project" ? "project" : "partner";
+  let payerInvestorId: string | null = null;
+  if (fundedBy === "partner") {
+    payerInvestorId = data.payerInvestorId ? String(data.payerInvestorId) : null;
+    if (!payerInvestorId) {
+      const coord = await prisma.invMembership.findFirst({ where: { projectId, isCoordinator: true, active: true } });
+      payerInvestorId = coord?.investorId ?? null;
+    }
+    if (!payerInvestorId) throw Object.assign(new Error("اختر الشريك الذي دفع المصروف"), { status: 400 });
+    const m = await prisma.invMembership.findUnique({
+      where: { projectId_investorId: { projectId, investorId: payerInvestorId } },
+    });
+    if (!m || !m.active) throw Object.assign(new Error("الدافع ليس شريكاً في المشروع"), { status: 400 });
+  }
 
   const row = await prisma.invExpense.create({
     data: {
@@ -216,11 +407,12 @@ export async function createExpense(
       description: data.description ? String(data.description) : null,
       amount,
       currency: project.currency,
-      expenseDate: data.expenseDate ? new Date(String(data.expenseDate)) : new Date(),
+      expenseDate: parseDate(data.expenseDate),
       status: "pending",
-      reimbursementDue: amount,
+      // Partner-paid expenses are reimbursed at settlement; project-funded ones came out of the pool.
+      reimbursementDue: fundedBy === "partner" ? amount : "0",
       reimbursementPaid: "0",
-      paidByCoordinator,
+      paidByCoordinator: false,
       payerInvestorId,
       createdBy: actor.id,
     },
@@ -232,26 +424,25 @@ export async function createExpense(
     action: "expense.create",
     entityType: "InvExpense",
     entityId: row.id,
-    newState: { projectId, amount, title },
+    newState: { projectId, amount, title, fundedBy, payerInvestorId },
   });
 
-  return {
-    id: row.id,
-    title: row.title,
-    category: row.category,
-    amount: moneyField(row.amount, { currency: row.currency, finalized: false }),
-    status: row.status,
-    submittedAt: row.createdAt.toISOString(),
-    approvedAt: null,
-    finalized: false,
-  };
+  if (data.approveNow === true && !strictMakerChecker()) {
+    await approveExpense(row.id, actor, true, undefined, { allowSelf: true });
+  }
+  const fresh = await prisma.invExpense.findUniqueOrThrow({
+    where: { id: row.id },
+    include: { payerInvestor: { select: { displayName: true, legalName: true, code: true } } },
+  });
+  return serializeExpense(fresh);
 }
 
 export async function approveExpense(
   expenseId: string,
   actor: { id?: string; email?: string },
   approve: boolean,
-  reason?: string
+  reason?: string,
+  opts: { allowSelf?: boolean } = {}
 ) {
   const expense = await prisma.invExpense.findUnique({
     where: { id: expenseId },
@@ -262,7 +453,16 @@ export async function approveExpense(
     throw Object.assign(new Error("Expense is not pending"), { status: 400 });
   }
   // Maker-checker: creator cannot approve
-  if (approve && expense.createdBy && actor.id && expense.createdBy === actor.id) {
+  // Maker-checker is opt-in (INVEST_STRICT_MAKER_CHECKER=1): a single-admin office must be able to
+  // record and approve its own expenses.
+  if (
+    approve &&
+    strictMakerChecker() &&
+    !opts.allowSelf &&
+    expense.createdBy &&
+    actor.id &&
+    expense.createdBy === actor.id
+  ) {
     throw Object.assign(new Error("Maker-checker: you cannot approve your own expense"), { status: 403 });
   }
 
@@ -304,7 +504,8 @@ export async function approveExpense(
         partnerId: expense.payerInvestorId ?? undefined,
       },
       {
-        accountCode: PROJECT_COA.REIMBURSEMENT_PAYABLE,
+        accountCode:
+          expense.payerInvestorId || expense.paidByCoordinator ? PROJECT_COA.REIMBURSEMENT_PAYABLE : PROJECT_COA.BANK,
         debit: "0",
         credit: amount,
         currency: expense.currency,

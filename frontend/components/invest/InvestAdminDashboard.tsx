@@ -49,11 +49,17 @@ export function InvestAdminDashboard() {
           {L("شراكات الاستثمار", "Investor partnerships", lang)}
         </h1>
         <p className="text-sm text-ink-soft mt-1">
-          {L("لوحة المحفظة — الأرقام من واجهة البرمجة فقط", "Portfolio dashboard — figures from API only", lang)}
+          {L("مشاريع الأراضي مع الشركاء: رأس المال، المصاريف، وتوزيع الأرباح", "Land projects with partners: capital, expenses and profit split", lang)}
         </p>
       </header>
 
       <div className="flex flex-wrap gap-2">
+        <Link
+          href="/admin/invest/projects/new"
+          className="h-10 px-4 rounded-xl bg-gold text-green text-sm font-extrabold inline-flex items-center"
+        >
+          + {L("مشروع جديد", "New project", lang)}
+        </Link>
         <Link
           href="/admin/invest/projects"
           className="h-10 px-4 rounded-xl bg-green text-white text-sm font-bold inline-flex items-center"
@@ -64,7 +70,7 @@ export function InvestAdminDashboard() {
           href="/admin/invest/investors"
           className="h-10 px-4 rounded-xl border border-line bg-white text-sm font-bold inline-flex items-center"
         >
-          {L("المستثمرون", "Investors", lang)}
+          {L("سجل الشركاء", "Partners", lang)}
         </Link>
       </div>
 

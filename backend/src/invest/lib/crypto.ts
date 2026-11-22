@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 
 function keyBytes(): Buffer {
   const secret = process.env.INVEST_PII_SECRET || process.env.JWT_SECRET || "dev-only-invest-pii-key";
@@ -26,4 +26,26 @@ export function decryptPii(payload: string): string {
 export function maybeEncrypt(value: string | null | undefined): string | null {
   if (value == null || value === "") return null;
   return encryptPii(value);
+}
+
+/** Normalize a national ID / passport number for matching (digits + letters, upper-case). */
+export function normalizeNationalId(value: string): string {
+  return value.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+}
+
+/** Deterministic HMAC blind index so national IDs can be searched without decrypting. */
+export function nationalIdHash(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const norm = normalizeNationalId(value);
+  if (!norm) return null;
+  return createHmac("sha256", keyBytes()).update(`nid:${norm}`).digest("hex");
+}
+
+export function safeDecrypt(payload: string | null | undefined): string | null {
+  if (!payload) return null;
+  try {
+    return decryptPii(payload);
+  } catch {
+    return null;
+  }
 }

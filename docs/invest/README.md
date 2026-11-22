@@ -57,3 +57,12 @@ Backup: [BACKUP-AND-RECOVERY.md](./BACKUP-AND-RECOVERY.md).
 - Maker-checker: expense creator cannot approve their own expense.
 - Posted journals are immutable; settlements use idempotency keys.
 - Simulator responses always include `hypothetical: true` and never write the ledger.
+
+## Partner CRM & profit split (v2, 2026-11-22)
+
+- `/admin/invest/investors` — searchable partner register: name, partner no. (`P-0001`), phone, email, full national ID (HMAC blind index) or its last 4 digits. Duplicate phone / national ID / email is blocked unless confirmed.
+- `/admin/invest/projects/new` — one-page setup: land details, pick partners and their capital (ownership % computed live), coordinator, coordinator cut, live payout preview.
+- Project workspace tabs: overview, partners (per-partner cut override, 0 = exempt), capital (payments, withdrawals, reversals), expenses (paid by a partner → refunded at sale, or from the project pool; approve now; void), sale & payout (what-if calculator → close & distribute → mark each partner paid), details & log.
+- Default coordinator rule is `investor_net_profit`: X% is taken from each partner's gross profit share; the coordinator is never charged on his own share. Every settlement line stores gross profit (before cut), cut, net profit (after cut), cut earned, payout, ROI.
+- Losses are shared by ownership by default (`shareLossesByOwnership`).
+- Maker-checker for expenses is opt-in via `INVEST_STRICT_MAKER_CHECKER=1`.

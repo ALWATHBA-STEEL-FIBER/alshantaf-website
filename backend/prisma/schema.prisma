@@ -914,10 +914,18 @@ model InvInvestor {
   organization    InvOrganization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   legalName       String
   displayName     String?
+  /// Human-friendly partner number (P-0001), unique per organization.
+  code            String?
+  /// individual | company
+  kind            String    @default("individual")
   email           String?
   phone           String?
   /// Encrypted-at-rest payload (AES-GCM); never returned in list APIs.
   nationalIdEnc   String?
+  /// HMAC blind index of the normalized national ID (exact-match search without decrypting).
+  nationalIdHash  String?
+  nationalIdLast4 String?
+  city            String?
   address         String?
   /// Encrypted bank details JSON.
   bankDetailsEnc  String?
@@ -933,9 +941,12 @@ model InvInvestor {
   portalUser    InvPortalUser?
   documents     InvDocument[]
 
+  @@unique([organizationId, code])
   @@index([organizationId])
   @@index([email])
   @@index([legalName])
+  @@index([nationalIdHash])
+  @@index([phone])
 }
 
 /// Investor-facing login (separate from admin User).
@@ -981,6 +992,8 @@ model InvProject {
   /// Default commission rule JSON (CommissionRuleInput shape).
   commissionRule   Json?
   coordinatorParticipatesInProfit Boolean @default(true)
+  /// Share a sale shortfall by ownership instead of strict capital-first.
+  shareLossesByOwnership Boolean @default(true)
   agreementNotes   String?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
@@ -1027,6 +1040,9 @@ model InvMembership {
   roleLabel         String?
   /// Optional per-investor commission override JSON.
   commissionOverride Json?
+  /// Coordinator cut % on this partner's profit (null = project default, 0 = exempt).
+  commissionPercent Decimal?  @db.Decimal(8, 4)
+  notes             String?
   joinedAt          DateTime    @default(now())
   leftAt            DateTime?
   active            Boolean     @default(true)
@@ -1219,13 +1235,17 @@ model InvSettlementLine {
   partnerId            String
   label                String
   isCoordinator        Boolean       @default(false)
+  ownershipPercent     Decimal       @db.Decimal(12, 8) @default(0)
   capitalReturned      Decimal       @db.Decimal(18, 3) @default(0)
   expenseReimbursement Decimal       @db.Decimal(18, 3) @default(0)
+  grossProfit          Decimal       @db.Decimal(18, 3) @default(0)
+  commissionPaid       Decimal       @db.Decimal(18, 3) @default(0)
   profitShare          Decimal       @db.Decimal(18, 3) @default(0)
   commissionEarned     Decimal       @db.Decimal(18, 3) @default(0)
   totalPayout          Decimal       @db.Decimal(18, 3) @default(0)
   paidAmount           Decimal       @db.Decimal(18, 3) @default(0)
   paidAt               DateTime?
+  paidRef              String?
 
   @@index([settlementId])
   @@index([partnerId])

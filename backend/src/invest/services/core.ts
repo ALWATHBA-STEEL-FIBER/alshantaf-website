@@ -6,6 +6,7 @@ import {
   type MoneyString,
 } from "../finance";
 import { dstr } from "../lib/moneyField";
+import { Decimal } from "../finance/decimal";
 
 const DEFAULT_ORG_SLUG = "alshantaf";
 
@@ -48,11 +49,22 @@ async function seedChartOfAccounts(organizationId: string) {
 export type ResolvedPartner = {
   partnerId: string;
   investorId: string;
+  membershipId: string;
   label: string;
+  code: string | null;
+  phone: string | null;
   isCoordinator: boolean;
+  /** Per-partner coordinator cut override (null = project default). */
+  commissionPercent: string | null;
+  notes: string | null;
+  joinedAt: string;
   capitalContributed: MoneyString;
   ownershipPercent: MoneyString;
+  /** Approved partner-paid expenses still to be reimbursed. */
   expensesOutstanding: MoneyString;
+  /** Pending (not yet approved) partner-paid expenses. */
+  expensesPending: MoneyString;
+  ownershipMode: "capital" | "manual";
 };
 
 /** Resolve live ownership + capital + unreimbursed expenses for settlement. */
@@ -60,54 +72,47 @@ export async function resolveProjectPartners(projectId: string): Promise<Resolve
   const memberships = await prisma.invMembership.findMany({
     where: { projectId, active: true },
     include: { investor: true },
+    orderBy: [{ isCoordinator: "desc" }, { joinedAt: "asc" }],
   });
   if (memberships.length === 0) return [];
 
   const contributions = await prisma.invContribution.findMany({
-    where: {
-      projectId,
-      approvalStatus: { in: ["approved"] },
-      countsAsEquity: true,
-    },
+    where: { projectId, approvalStatus: "approved", countsAsEquity: true },
   });
-
-  const capitalByInvestor = new Map<string, number>();
-  for (const m of memberships) capitalByInvestor.set(m.investorId, 0);
+  const capital = new Map<string, Decimal>(memberships.map((m) => [m.investorId, new Decimal(0)]));
   for (const c of contributions) {
-    const prev = capitalByInvestor.get(c.investorId) ?? 0;
-    capitalByInvestor.set(c.investorId, prev + Number(dstr(c.amount)));
+    if (!capital.has(c.investorId)) continue;
+    const sign = c.kind === "withdrawal" ? -1 : 1;
+    capital.set(c.investorId, capital.get(c.investorId)!.plus(new Decimal(dstr(c.amount)).times(sign)));
   }
 
   const expenses = await prisma.invExpense.findMany({
-    where: { projectId, status: { in: ["approved"] } },
+    where: { projectId, status: { in: ["approved", "pending"] } },
   });
-  const expenseByInvestor = new Map<string, number>();
-  for (const m of memberships) expenseByInvestor.set(m.investorId, 0);
+  const coord = memberships.find((m) => m.isCoordinator);
+  const outstanding = new Map<string, Decimal>(memberships.map((m) => [m.investorId, new Decimal(0)]));
+  const pending = new Map<string, Decimal>(memberships.map((m) => [m.investorId, new Decimal(0)]));
   for (const e of expenses) {
-    const due = Number(dstr(e.reimbursementDue)) - Number(dstr(e.reimbursementPaid));
-    if (due <= 0) continue;
-    if (e.payerInvestorId) {
-      expenseByInvestor.set(e.payerInvestorId, (expenseByInvestor.get(e.payerInvestorId) ?? 0) + due);
-    } else if (e.paidByCoordinator) {
-      const coord = memberships.find((m) => m.isCoordinator);
-      if (coord) {
-        expenseByInvestor.set(coord.investorId, (expenseByInvestor.get(coord.investorId) ?? 0) + due);
-      }
+    const payer = e.payerInvestorId ?? (e.paidByCoordinator ? coord?.investorId : undefined);
+    if (!payer || !outstanding.has(payer)) continue;
+    if (e.status === "pending") {
+      pending.set(payer, pending.get(payer)!.plus(new Decimal(dstr(e.amount))));
+      continue;
     }
+    const due = new Decimal(dstr(e.reimbursementDue)).minus(new Decimal(dstr(e.reimbursementPaid)));
+    if (due.lte(0)) continue;
+    outstanding.set(payer, outstanding.get(payer)!.plus(due));
   }
 
   const hasExplicit = memberships.some((m) => m.ownershipPercent != null);
   let percentByInvestor = new Map<string, string>();
-
   if (hasExplicit) {
-    for (const m of memberships) {
-      percentByInvestor.set(m.investorId, dstr(m.ownershipPercent ?? 0));
-    }
+    for (const m of memberships) percentByInvestor.set(m.investorId, dstr(m.ownershipPercent ?? 0));
   } else {
     const computed = computeOwnershipFromCapital(
       memberships.map((m) => ({
         partnerId: m.investorId,
-        equityCapital: String(capitalByInvestor.get(m.investorId) ?? 0),
+        equityCapital: Decimal.max(0, capital.get(m.investorId) ?? 0).toFixed(3),
       }))
     );
     percentByInvestor = new Map(computed.map((c) => [c.partnerId, c.ownershipPercent]));
@@ -116,12 +121,30 @@ export async function resolveProjectPartners(projectId: string): Promise<Resolve
   return memberships.map((m) => ({
     partnerId: m.investorId,
     investorId: m.investorId,
+    membershipId: m.id,
     label: m.investor.displayName || m.investor.legalName,
+    code: m.investor.code,
+    phone: m.investor.phone,
     isCoordinator: m.isCoordinator,
-    capitalContributed: Number(capitalByInvestor.get(m.investorId) ?? 0).toFixed(3),
+    commissionPercent: m.commissionPercent != null ? dstr(m.commissionPercent) : null,
+    notes: m.notes,
+    joinedAt: m.joinedAt.toISOString(),
+    capitalContributed: Decimal.max(0, capital.get(m.investorId) ?? 0).toFixed(3),
     ownershipPercent: percentByInvestor.get(m.investorId) ?? "0",
-    expensesOutstanding: Number(expenseByInvestor.get(m.investorId) ?? 0).toFixed(3),
+    expensesOutstanding: (outstanding.get(m.investorId) ?? new Decimal(0)).toFixed(3),
+    expensesPending: (pending.get(m.investorId) ?? new Decimal(0)).toFixed(3),
+    ownershipMode: hasExplicit ? "manual" : "capital",
   }));
+}
+
+/** Project rule + per-partner overrides from memberships. */
+export function commissionRuleFor(raw: unknown, partners: ResolvedPartner[]): CommissionRuleInput {
+  const rule = parseCommissionRule(raw) ?? { basis: "investor_net_profit", percent: 0 };
+  const overrides: Record<string, string> = { ...((rule.perInvestorPercent as Record<string, string>) || {}) };
+  for (const p of partners) {
+    if (p.commissionPercent != null) overrides[p.partnerId] = p.commissionPercent;
+  }
+  return { ...rule, perInvestorPercent: Object.keys(overrides).length ? overrides : undefined };
 }
 
 export function parseCommissionRule(raw: unknown): CommissionRuleInput | null {
