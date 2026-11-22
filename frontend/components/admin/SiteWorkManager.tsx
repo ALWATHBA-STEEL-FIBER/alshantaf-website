@@ -17,6 +17,7 @@ import {
   todayLocalISO,
 } from "@/lib/siteDates";
 import { SiteExcelViewer } from "@/components/site/SiteExcelViewer";
+import { ClearRecordsDialog } from "./SiteRecordsCleanup";
 
 type Panel = "workspace" | "engineers" | "workers" | "new-project";
 
@@ -92,20 +93,73 @@ export function SiteWorkManager() {
   const [workerSearch, setWorkerSearch] = useState("");
   const [dayAddQuery, setDayAddQuery] = useState("");
   const [payoutSearch, setPayoutSearch] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  /** "all" = every project; otherwise the project being cleared. */
+  const [clearTarget, setClearTarget] = useState<"all" | { id: string; name: string } | null>(null);
 
   const selected = projects.find((p) => p.id === selectedId) || null;
+  /** Archived projects are closed in the site portal, so skip loading their day sheet. */
+  const selectedActive = selected?.active !== false;
   const weekStart = useMemo(() => saturdayOf(date), [date]);
 
   const filteredProjects = useMemo(() => {
     const q = projectSearch.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter(
+    const pool = showArchived ? projects : projects.filter((p) => p.active);
+    if (!q) return pool;
+    return pool.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         (p.code || "").toLowerCase().includes(q) ||
         p.workers.some((w) => w.name.toLowerCase().includes(q))
     );
-  }, [projects, projectSearch]);
+  }, [projects, projectSearch, showArchived]);
+  const archivedCount = projects.filter((p) => !p.active).length;
+
+  async function setProjectArchived(p: SiteProject, archived: boolean) {
+    setBusy(true);
+    try {
+      await api.updateSiteProject(p.id, { active: !archived });
+      showSuccess(
+        archived
+          ? lang === "ar" ? "تمت أرشفة المشروع (مخفي عن المهندسين)" : "Project archived (hidden from engineers)"
+          : lang === "ar" ? "تمت استعادة المشروع" : "Project restored"
+      );
+      if (archived && !showArchived) setSelectedId(projects.find((x) => x.active && x.id !== p.id)?.id ?? null);
+      await loadAll();
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : t.admin.saveFailed);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function purgeProject(p: SiteProject) {
+    const typed = window.prompt(
+      lang === "ar"
+        ? `حذف نهائي للمشروع «${p.name}» مع كل سجلات الحضور والدفعات والمصاريف. لا يمكن التراجع.\nاكتب اسم المشروع للتأكيد:`
+        : `Permanently delete “${p.name}” with all attendance, payouts and expenses. This cannot be undone.\nType the project name to confirm:`
+    );
+    if (typed == null) return;
+    if (typed.trim() !== p.name.trim()) {
+      showError(lang === "ar" ? "الاسم غير مطابق، لم يُحذف شيء" : "Name didn't match; nothing deleted");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await api.purgeSiteProject(p.id, typed);
+      showSuccess(
+        lang === "ar"
+          ? `حُذف المشروع (${r.records} سجل · ${r.payouts} دفعة · ${r.expenses} مصروف)`
+          : `Project deleted (${r.records} rows · ${r.payouts} payouts · ${r.expenses} expenses)`
+      );
+      setSelectedId(projects.find((x) => x.id !== p.id && (showArchived || x.active))?.id ?? null);
+      await loadAll();
+    } catch (err) {
+      showError(err instanceof ApiError ? err.message : t.admin.saveFailed);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const filteredWorkers = useMemo(() => {
     const q = workerSearch.trim().toLowerCase();
@@ -170,7 +224,7 @@ export function SiteWorkManager() {
       setProjects(p);
       setEngineers(e);
       setWorkers(w);
-      if (!selectedId && p.length) setSelectedId(p[0]!.id);
+      if (!selectedId && p.length) setSelectedId((p.find((x) => x.active) ?? p[0]!).id);
     } catch (err) {
       showError(err instanceof ApiError ? err.message : t.admin.saveFailed);
     } finally {
@@ -221,8 +275,8 @@ export function SiteWorkManager() {
   );
 
   useEffect(() => {
-    if (selectedId && panel === "workspace") void loadDay(selectedId, date);
-  }, [selectedId, date, panel, loadDay]);
+    if (selectedId && selectedActive && panel === "workspace") void loadDay(selectedId, date);
+  }, [selectedId, selectedActive, date, panel, loadDay]);
 
   const loadPayouts = useCallback(
     async (projectId: string, week: string) => {
@@ -241,8 +295,8 @@ export function SiteWorkManager() {
   );
 
   useEffect(() => {
-    if (selectedId && panel === "workspace") void loadPayouts(selectedId, weekStart);
-  }, [selectedId, weekStart, panel, loadPayouts]);
+    if (selectedId && selectedActive && panel === "workspace") void loadPayouts(selectedId, weekStart);
+  }, [selectedId, selectedActive, weekStart, panel, loadPayouts]);
 
   async function saveDay() {
     if (!selectedId) return;
@@ -479,6 +533,14 @@ export function SiteWorkManager() {
           </button>
           <button
             type="button"
+            disabled={busy}
+            onClick={() => setClearTarget("all")}
+            className="h-10 px-3 rounded-xl border border-red-300 text-red-700 text-sm font-bold"
+          >
+            {lang === "ar" ? "مسح كل السجلات" : "Clear all records"}
+          </button>
+          <button
+            type="button"
             onClick={() => setPanel("workspace")}
             className={`h-10 px-3 rounded-xl text-sm font-bold ${panel === "workspace" ? "bg-ink text-white" : "bg-white border border-line"}`}
           >
@@ -508,6 +570,23 @@ export function SiteWorkManager() {
         </div>
       </header>
 
+      {clearTarget ? (
+        <ClearRecordsDialog
+          lang={lang}
+          project={clearTarget === "all" ? null : clearTarget}
+          onClose={() => setClearTarget(null)}
+          onError={showError}
+          onDone={async (msg) => {
+            showSuccess(msg);
+            await loadAll();
+            if (selectedId && selectedActive && panel === "workspace") {
+              await loadDay(selectedId, date);
+              await loadPayouts(selectedId, weekStart);
+            }
+          }}
+        />
+      ) : null}
+
       {panel === "workspace" && (
         <div className="grid lg:grid-cols-[280px_1fr] gap-4 items-start">
           <aside className="bg-white rounded-2xl border border-line overflow-hidden">
@@ -521,6 +600,12 @@ export function SiteWorkManager() {
                 value={projectSearch}
                 onChange={(e) => setProjectSearch(e.target.value)}
               />
+              {archivedCount ? (
+                <label className="flex items-center gap-2 text-[11px] font-bold text-ink-soft">
+                  <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+                  {lang === "ar" ? `عرض المؤرشفة (${archivedCount})` : `Show archived (${archivedCount})`}
+                </label>
+              ) : null}
             </div>
             <div className="max-h-[70vh] overflow-auto">
               {filteredProjects.length === 0 ? (
@@ -635,6 +720,32 @@ export function SiteWorkManager() {
                       >
                         {lang === "ar" ? "فتح في بوابة الموقع" : "Open in portal"}
                       </a>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setProjectArchived(selected, selected.active)}
+                        className="h-10 px-3 rounded-xl border border-line text-xs font-bold"
+                      >
+                        {selected.active
+                          ? lang === "ar" ? "أرشفة" : "Archive"
+                          : lang === "ar" ? "استعادة من الأرشيف" : "Restore"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setClearTarget({ id: selected.id, name: selected.name })}
+                        className="h-10 px-3 rounded-xl border border-red-300 text-red-700 text-xs font-bold"
+                      >
+                        {lang === "ar" ? "مسح السجلات" : "Clear records"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => purgeProject(selected)}
+                        className="h-10 px-3 rounded-xl bg-red-700 text-white text-xs font-bold"
+                      >
+                        {lang === "ar" ? "حذف نهائي" : "Delete"}
+                      </button>
                     </div>
                   </div>
 

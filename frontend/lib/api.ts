@@ -759,6 +759,16 @@ export const api = {
     clientFetch<SiteProject>(`/admin/site-work/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteSiteProject: (id: string) =>
     clientFetch<{ ok?: boolean; deactivated?: boolean }>(`/admin/site-work/projects/${id}`, { method: "DELETE" }),
+  purgeSiteProject: (id: string, confirmName: string) =>
+    clientFetch<{ ok: boolean; records: number; payouts: number; expenses: number }>(
+      `/admin/site-work/projects/${id}/purge`,
+      { method: "POST", body: JSON.stringify({ confirmName }) }
+    ),
+  purgeSiteRecords: (data: { confirm: string; projectId?: string | null; includeExpenses?: boolean }) =>
+    clientFetch<{ ok: boolean; projects: number; records: number; payouts: number; expenses: number }>(
+      "/admin/site-work/records/purge",
+      { method: "POST", body: JSON.stringify(data) }
+    ),
   downloadSiteProjectExcel: async (id: string) => {
     const res = await fetch(`${CLIENT_BASE}/admin/site-work/projects/${id}/excel`, {
       credentials: "include",

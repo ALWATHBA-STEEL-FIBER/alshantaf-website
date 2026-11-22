@@ -24,7 +24,8 @@ import {
   weekKey,
 } from "../lib/siteWorkPayout";
 import { ensureProjectExcel, syncProjectDayToExcel } from "../lib/siteWorkSync";
-import { buildExcelPreview, safeExcelFilename } from "../lib/siteWorkExcel";
+import { buildExcelPreview, projectExcelAbsolutePath, safeExcelFilename } from "../lib/siteWorkExcel";
+import { siteWorkDataDir } from "../lib/siteWorkPaths";
 import { importAllSiteWorkSource } from "../lib/siteWorkImport";
 import { driveConfigured } from "../lib/siteWorkDrive";
 import fs from "node:fs";
@@ -1255,6 +1256,126 @@ adminSiteWorkRouter.delete(
       ip: req.ip,
     });
     res.json({ ok: true, deactivated: true });
+  })
+);
+
+// ── Archive / permanent delete / clear old records ─────────
+
+/**
+ * Move a project's workbook out of the live folder (kept under archive/ as a backup)
+ * so the next save starts a clean workbook from the template.
+ */
+function archiveProjectWorkbook(excelFilename: string | null, stamp: string) {
+  if (!excelFilename) return;
+  try {
+    const abs = projectExcelAbsolutePath(path.basename(excelFilename));
+    if (!fs.existsSync(abs)) return;
+    const dir = path.join(siteWorkDataDir(), "archive", stamp);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.renameSync(abs, path.join(dir, path.basename(abs)));
+  } catch (err) {
+    console.error("[site-work] workbook archive failed", err);
+  }
+}
+
+function archiveStamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+/** Permanently delete a project: attendance, payouts, its expenses (and receipts), assignments. */
+adminSiteWorkRouter.post(
+  "/projects/:id/purge",
+  asyncHandler(async (req, res) => {
+    const input = z.object({ confirmName: z.string().max(200) }).parse(req.body);
+    const target = await prisma.siteProject.findUnique({ where: { id: req.params.id } });
+    if (!target) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (input.confirmName.trim() !== target.name.trim()) {
+      res.status(400).json({ error: "اكتب اسم المشروع كما هو لتأكيد الحذف النهائي" });
+      return;
+    }
+    const receipts = await prisma.siteExpense.findMany({
+      where: { projectId: target.id, receiptFile: { not: null } },
+      select: { receiptFile: true },
+    });
+    const counts = await prisma.$transaction(async (tx) => {
+      const records = await tx.siteDailyRecord.deleteMany({ where: { projectId: target.id } });
+      const payouts = await tx.siteWorkerWeekPayout.deleteMany({ where: { projectId: target.id } });
+      const expenses = await tx.siteExpense.deleteMany({ where: { projectId: target.id } });
+      await tx.siteProject.delete({ where: { id: target.id } });
+      return { records: records.count, payouts: payouts.count, expenses: expenses.count };
+    });
+    for (const r of receipts) deleteReceiptFiles(r.receiptFile);
+    archiveProjectWorkbook(target.excelFilename, archiveStamp());
+    await audit({
+      actorEmail: req.session!.email,
+      action: "site_project.purge",
+      targetType: "site_project",
+      targetId: target.id,
+      ip: req.ip,
+      metadata: { name: target.name, ...counts },
+    });
+    res.json({ ok: true, deleted: true, ...counts });
+  })
+);
+
+/**
+ * Clear attendance + weekly payouts (optionally project expenses) for one project or all.
+ * Projects, workers, engineers and assignments stay.
+ */
+adminSiteWorkRouter.post(
+  "/records/purge",
+  asyncHandler(async (req, res) => {
+    const input = z
+      .object({
+        confirm: z.string().max(40),
+        projectId: z.string().uuid().optional().nullable(),
+        includeExpenses: z.boolean().optional(),
+      })
+      .parse(req.body);
+    if (input.confirm.trim() !== "حذف") {
+      res.status(400).json({ error: "اكتب كلمة «حذف» للتأكيد" });
+      return;
+    }
+    const projects = await prisma.siteProject.findMany({
+      where: input.projectId ? { id: input.projectId } : {},
+      select: { id: true, excelFilename: true },
+    });
+    if (input.projectId && !projects.length) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const ids = projects.map((p) => p.id);
+    const scope = input.projectId ? { projectId: input.projectId } : {};
+    const receipts = input.includeExpenses
+      ? await prisma.siteExpense.findMany({
+          where: { projectId: { in: ids }, receiptFile: { not: null } },
+          select: { receiptFile: true },
+        })
+      : [];
+    const counts = await prisma.$transaction(async (tx) => {
+      const records = await tx.siteDailyRecord.deleteMany({ where: scope });
+      const payouts = await tx.siteWorkerWeekPayout.deleteMany({ where: scope });
+      const expenses = input.includeExpenses
+        ? await tx.siteExpense.deleteMany({ where: { projectId: { in: ids } } })
+        : { count: 0 };
+      await tx.siteProject.updateMany({ where: { id: { in: ids } }, data: { weekCounter: 1 } });
+      return { records: records.count, payouts: payouts.count, expenses: expenses.count };
+    });
+    for (const r of receipts) deleteReceiptFiles(r.receiptFile);
+    const stamp = archiveStamp();
+    for (const p of projects) archiveProjectWorkbook(p.excelFilename, stamp);
+    await audit({
+      actorEmail: req.session!.email,
+      action: "site_records.purge",
+      targetType: input.projectId ? "site_project" : "site_work",
+      targetId: input.projectId ?? undefined,
+      ip: req.ip,
+      metadata: { projects: ids.length, includeExpenses: Boolean(input.includeExpenses), ...counts },
+    });
+    res.json({ ok: true, projects: ids.length, ...counts });
   })
 );
 
