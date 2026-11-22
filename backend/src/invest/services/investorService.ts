@@ -57,6 +57,107 @@ async function nextInvestorCode(organizationId: string): Promise<string> {
   return `P-${String(max + 1).padStart(4, "0")}`;
 }
 
+/**
+ * The signed-in admin's own partner profile (they coordinate every project by default).
+ * Links an existing partner with the same email/phone, otherwise creates one from the admin account.
+ */
+export async function ensureAdminPartner(actor: Actor) {
+  if (!actor.id) throw bad("سجّل الدخول", 401);
+  const org = await ensureDefaultOrganization();
+  const linked = await prisma.invInvestor.findUnique({ where: { userId: actor.id } });
+  if (linked) return adminPartnerOut(linked);
+  const user = await prisma.user.findUnique({ where: { id: actor.id }, select: { name: true, email: true, phone: true } });
+  if (!user) throw bad("حساب المدير غير موجود", 404);
+  const phone = normalizePhone(user.phone);
+  const match = await prisma.invInvestor.findFirst({
+    where: {
+      organizationId: org.id,
+      userId: null,
+      active: true,
+      OR: [{ email: { equals: user.email, mode: "insensitive" } }, ...(phone ? [{ phone }] : [])],
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  if (match) {
+    const upd = await prisma.invInvestor.update({ where: { id: match.id }, data: { userId: actor.id } });
+    return adminPartnerOut(upd);
+  }
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const created = await prisma.invInvestor.create({
+        data: {
+          organizationId: org.id,
+          code: await nextInvestorCode(org.id),
+          legalName: user.name || user.email,
+          displayName: user.name || user.email,
+          email: user.email.toLowerCase(),
+          phone,
+          userId: actor.id,
+          notes: "ملف المنسق (حساب المدير)",
+        },
+      });
+      await investAudit({ actorId: actor.id, actorEmail: actor.email, action: "investor.create_admin_profile", entityType: "InvInvestor", entityId: created.id });
+      return adminPartnerOut(created);
+    } catch (e) {
+      const raced = await prisma.invInvestor.findUnique({ where: { userId: actor.id } });
+      if (raced) return adminPartnerOut(raced);
+      if ((e as { code?: string }).code !== "P2002") throw e;
+    }
+  }
+  throw bad("تعذّر إنشاء ملف المنسق", 500);
+}
+
+/** Point the admin's own profile at an existing partner record ("this partner is me"). */
+export async function linkAdminPartner(actor: Actor, investorId: string) {
+  if (!actor.id) throw bad("سجّل الدخول", 401);
+  const target = await prisma.invInvestor.findUnique({ where: { id: investorId } });
+  if (!target) throw bad("الشريك غير موجود", 404);
+  if (target.userId && target.userId !== actor.id) throw bad("هذا الشريك مرتبط بحساب مدير آخر", 409);
+  const previous = await prisma.invInvestor.findUnique({
+    where: { userId: actor.id },
+    include: { _count: { select: { memberships: true, contributions: true, expensesPaid: true } } },
+  });
+  await prisma.$transaction(async (tx) => {
+    if (previous && previous.id !== investorId) {
+      const unused = !previous._count.memberships && !previous._count.contributions && !previous._count.expensesPaid;
+      // An auto-created, never-used profile is just removed; otherwise only unlinked.
+      if (unused && previous.notes === "ملف المنسق (حساب المدير)") await tx.invInvestor.delete({ where: { id: previous.id } });
+      else await tx.invInvestor.update({ where: { id: previous.id }, data: { userId: null } });
+    }
+    await tx.invInvestor.update({ where: { id: investorId }, data: { userId: actor.id } });
+  });
+  await investAudit({ actorId: actor.id, actorEmail: actor.email, action: "investor.link_admin", entityType: "InvInvestor", entityId: investorId });
+  return adminPartnerOut((await prisma.invInvestor.findUnique({ where: { id: investorId } }))!);
+}
+
+function adminPartnerOut(i: { id: string; legalName: string; displayName: string | null; code: string | null; phone: string | null }) {
+  return { id: i.id, name: i.displayName || i.legalName, code: i.code, phone: i.phone };
+}
+
+/**
+ * Set a partner's opening (initial) payment in a project: updates the earliest initial payment,
+ * creates one if missing, or deletes it when set to 0. Ledger corrections go through the payment services.
+ */
+export async function setInitialPayment(projectId: string, investorId: string, raw: Record<string, unknown>, actor: Actor) {
+  const amount = raw.amount == null || raw.amount === "" ? "0" : String(raw.amount).replace(/,/g, "");
+  if (!(Number(amount) >= 0) || Number(amount) > 1e12) throw bad("مبلغ الدفعة الأولى غير صالح");
+  const svc = await import("./capitalExpenseService");
+  const existing = await prisma.invContribution.findFirst({
+    where: { projectId, investorId, kind: "initial", approvalStatus: "approved" },
+    orderBy: [{ contributedAt: "asc" }, { createdAt: "asc" }],
+  });
+  const extra: Record<string, unknown> = {};
+  for (const k of ["contributedAt", "paymentMethod", "paymentRef", "notes"]) {
+    if (Object.prototype.hasOwnProperty.call(raw, k)) extra[k] = raw[k];
+  }
+  if (existing) {
+    if (Number(amount) === 0) return svc.deleteContribution(existing.id, actor, "تصفير الدفعة الأولى");
+    return svc.updateContribution(existing.id, { amount, ...extra }, actor);
+  }
+  if (Number(amount) === 0) return null;
+  return svc.createContribution(projectId, { investorId, amount, kind: "initial", notes: "رأس مال الدخول", ...extra }, actor);
+}
+
 /** Partners created by scripts or older code have no number yet — give them one. */
 async function backfillMissingCodes(organizationId: string) {
   const missing = await prisma.invInvestor.findMany({
@@ -334,6 +435,8 @@ export async function getInvestor(id: string) {
     hasNationalId: Boolean(r.nationalIdEnc),
     bankDetails: null as string | null,
     hasBankDetails: Boolean(r.bankDetailsEnc),
+    /** This partner is an admin's own profile (the coordinator). */
+    isAdminProfile: Boolean(r.userId),
     notes: r.notes,
     active: r.active,
     createdAt: r.createdAt.toISOString(),
@@ -539,6 +642,9 @@ export async function updateProjectMember(projectId: string, investorId: string,
   if (!m || !m.active) throw bad("الشريك ليس عضواً في المشروع", 404);
   if (["settled", "closed", "cancelled"].includes(m.project.status)) throw bad("المشروع مغلق");
   const commissionPercent = parsePercentOrNull(data.commissionPercent);
+  if (data.initialPayment && typeof data.initialPayment === "object") {
+    await setInitialPayment(projectId, investorId, data.initialPayment as Record<string, unknown>, actor);
+  }
   await prisma.$transaction(async (tx) => {
     if (data.isCoordinator === true) {
       await tx.invMembership.updateMany({ where: { projectId, isCoordinator: true }, data: { isCoordinator: false } });

@@ -319,6 +319,7 @@ export type PartnerFull = Omit<PartnerRow, "projectCount" | "openProjectCount" |
   bankDetails: string | null;
   hasNationalId?: boolean;
   hasBankDetails?: boolean;
+  isAdminProfile?: boolean;
   projects: PartnerProjectRow[];
   contributions: {
     id: string;
@@ -657,6 +658,16 @@ export const crmApi = {
     clientFetch<ProjectExpense>(`/invest/expenses/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteExpense: (id: string, reason?: string) =>
     clientFetch<unknown>(`/invest/expenses/${id}${qs({ reason })}`, { method: "DELETE" }),
+
+  /** The signed-in admin's own partner profile (created/linked on first call). */
+  mePartner: () => clientFetch<{ id: string; name: string; code: string | null; phone: string | null }>("/invest/me/partner"),
+  linkMePartner: (investorId: string) =>
+    clientFetch<{ id: string; name: string; code: string | null }>("/invest/me/partner", { method: "POST", body: JSON.stringify({ investorId }) }),
+  setInitialPayment: (projectId: string, investorId: string, data: Record<string, unknown>) =>
+    clientFetch<ProjectFull>(`/invest/projects/${projectId}/members/${investorId}/initial-payment`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 
   preview: (data: Record<string, unknown>) =>
     clientFetch<DistributionResult>("/invest/preview", { method: "POST", body: JSON.stringify(data) }),

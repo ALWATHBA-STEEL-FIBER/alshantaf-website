@@ -931,6 +931,8 @@ model InvInvestor {
   bankDetailsEnc  String?
   verificationStatus String @default("unverified")
   notes           String?
+  /// Admin User this partner profile belongs to (the coordinator's own profile).
+  userId          String?   @unique
   active          Boolean   @default(true)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt

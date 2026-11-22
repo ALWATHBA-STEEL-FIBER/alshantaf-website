@@ -301,6 +301,24 @@ admin.post(
 );
 
 admin.get(
+  "/me/partner",
+  h(async (req) => investors.ensureAdminPartner(actor(req)))
+);
+
+admin.post(
+  "/me/partner",
+  h(async (req) => investors.linkAdminPartner(actor(req), String(req.body?.investorId || "")))
+);
+
+admin.put(
+  "/projects/:id/members/:investorId/initial-payment",
+  h(async (req) => {
+    await investors.setInitialPayment(req.params.id, req.params.investorId, req.body ?? {}, actor(req));
+    return projects.getProjectDetail(req.params.id);
+  })
+);
+
+admin.get(
   "/investors",
   h(async (req) =>
     investors.listInvestors({

@@ -34,6 +34,24 @@ export function NewProjectWizard() {
   const [preview, setPreview] = useState<DistributionResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [meId, setMeId] = useState("");
+
+  // The admin coordinates by default: start with their own partner profile as coordinator.
+  useEffect(() => {
+    let ignore = false;
+    crmApi
+      .mePartner()
+      .then((me) => {
+        if (ignore) return;
+        setMeId(me.id);
+        setRows((rs) => (rs.some((r) => r.id === me.id) ? rs : [{ id: me.id, name: me.name, code: me.code, capital: "", cut: "" }, ...rs]));
+        setCoordId((c) => c || me.id);
+      })
+      .catch(() => undefined);
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const totalCapital = rows.reduce((a, r) => a + (toNum(r.capital) ?? 0), 0);
   const price = toNum(purchasePrice);
@@ -194,12 +212,15 @@ export function NewProjectWizard() {
                   <div className="flex items-center gap-2 min-w-[180px] flex-1">
                     <Avatar name={r.name} coordinator={isCoord} />
                     <div className="min-w-0">
-                      <div className="font-bold truncate">{r.name}</div>
+                      <div className="font-bold truncate">
+                        {r.name}
+                        {r.id === meId ? <span className="ms-1.5 text-[10px] font-bold text-gold bg-gold/10 rounded px-1.5 py-0.5">{t("أنت", "You")}</span> : null}
+                      </div>
                       <div className="text-[11px] text-ink-soft">{r.code}</div>
                     </div>
                   </div>
                   <div className="w-40">
-                    <MoneyInput value={r.capital} onChange={(v) => update(r.id, { capital: v })} placeholder={t("المبلغ", "Amount")} />
+                    <MoneyInput value={r.capital} onChange={(v) => update(r.id, { capital: v })} placeholder={t("الدفعة الأولى", "Initial payment")} />
                   </div>
                   <div className="w-16 text-center">
                     <div className="text-[10px] text-ink-soft">{t("الحصة", "Share")}</div>

@@ -214,7 +214,15 @@ export async function createProject(data: Record<string, unknown>, actor: Actor)
   const dupRef = await prisma.invProject.findFirst({ where: { organizationId: org.id, referenceNo } });
   if (dupRef) throw bad(`رمز المشروع ${referenceNo} مستخدم`, 409);
 
-  const partners = Array.isArray(data.partners) ? (data.partners as PartnerInput[]) : [];
+  const partners = Array.isArray(data.partners) ? [...(data.partners as PartnerInput[])] : [];
+  // The signed-in admin coordinates by default: add (or flag) their own partner profile.
+  if (!partners.some((p) => p?.isCoordinator) && actor.id) {
+    const { ensureAdminPartner } = await import("./investorService");
+    const me = await ensureAdminPartner(actor);
+    const mine = partners.find((p) => p?.investorId === me.id);
+    if (mine) mine.isCoordinator = true;
+    else partners.unshift({ investorId: me.id, isCoordinator: true, capital: (data.coordinatorCapital as string | number | null) ?? 0 });
+  }
   const seen = new Set<string>();
   for (const p of partners) {
     if (!p || !p.investorId) throw bad("شريك غير صالح");

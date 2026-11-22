@@ -360,8 +360,31 @@ function PartnersTab({ p, done }: TabProps) {
     }
   }
 
+  async function addMeAsCoordinator() {
+    setBusy(true);
+    setError("");
+    try {
+      const me = await crmApi.mePartner();
+      if (p.members.some((m) => m.investorId === me.id)) await crmApi.updateMember(p.id, me.id, { isCoordinator: true });
+      else await crmApi.addMember(p.id, { investorId: me.id, isCoordinator: true, capital: 0 });
+      await done(t("أنت الآن منسق المشروع — أضف دفعتك الأولى", "You are now the coordinator — add your initial payment"));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
+      {!p.closed && !p.members.some((m) => m.isCoordinator) ? (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm font-bold text-amber-900">{t("لا يوجد منسق لهذا المشروع.", "This project has no coordinator.")}</div>
+          <button className={btnPrimary} disabled={busy} onClick={addMeAsCoordinator}>
+            {t("أضفني كمنسق", "Make me the coordinator")}
+          </button>
+        </div>
+      ) : null}
       {!p.closed ? (
         <Card title={t("إضافة شريك للمشروع", "Add a partner")}>
           {!adding ? (
@@ -421,7 +444,28 @@ function PartnersTab({ p, done }: TabProps) {
                     </span>
                   </Link>
                 </td>
-                <td className="px-3 py-2.5 tabular-nums font-bold">{fmt(m.capital)}</td>
+                <td className="px-3 py-2.5 tabular-nums">
+                  <div className="font-bold">{fmt(m.capital)}</div>
+                  {(() => {
+                    const first = initialOf(p, m.investorId);
+                    return (
+                      <div className="text-[10px] text-ink-soft">
+                        {first ? (
+                          <>
+                            {t("الدفعة الأولى", "Initial")} {fmt(first.amount, { decimals: 0 })} · <span dir="ltr">{first.contributedAt}</span>
+                          </>
+                        ) : (
+                          <span className="text-amber-700">{t("لا دفعة أولى", "No initial payment")}</span>
+                        )}
+                        {!p.closed ? (
+                          <button className="ms-1.5 font-bold text-green underline" onClick={() => setEditing(m)}>
+                            {first ? t("تعديل", "edit") : t("إضافة", "add")}
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
+                </td>
                 <td className="px-3 py-2.5 tabular-nums font-extrabold text-green">{fmtPct(m.ownershipPercent)}</td>
                 <td className="px-3 py-2.5 tabular-nums">
                   {fmt(m.expensesOutstanding)}
@@ -467,30 +511,90 @@ function PartnersTab({ p, done }: TabProps) {
   );
 }
 
+/** Earliest active "initial" payment of a partner in this project. */
+function initialOf(p: ProjectFull, investorId: string) {
+  return (
+    p.contributions
+      .filter((c) => c.investorId === investorId && c.kind === "initial" && c.status === "approved")
+      .sort((a, b) => a.contributedAt.localeCompare(b.contributedAt))[0] ?? null
+  );
+}
+
 function MemberModal({ p, m, onClose, done }: { p: ProjectFull; m: ProjectMember; onClose: () => void; done: TabProps["done"] }) {
-  const { t } = useT();
+  const { t, lang } = useT();
+  const first = initialOf(p, m.investorId);
   const [cut, setCut] = useState(m.commissionPercent ?? "");
   const [coord, setCoord] = useState(m.isCoordinator);
   const [notes, setNotes] = useState(m.notes ?? "");
+  const [pay, setPay] = useState({
+    amount: first ? String(toNum(first.amount) ?? "") : "",
+    contributedAt: first?.contributedAt ?? p.purchaseDate ?? todayISO(),
+    paymentMethod: first?.paymentMethod ?? "",
+    paymentRef: first?.paymentRef ?? "",
+  });
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const perPartner = p.commissionRule.basis === "investor_net_profit";
+  const payChanged =
+    (toNum(pay.amount) ?? 0) !== (toNum(first?.amount) ?? 0) ||
+    (first != null &&
+      (pay.contributedAt !== first.contributedAt || pay.paymentMethod !== (first.paymentMethod ?? "") || pay.paymentRef !== (first.paymentRef ?? "")));
   async function save() {
     setError("");
+    setBusy(true);
     try {
       await crmApi.updateMember(p.id, m.investorId, {
         commissionPercent: cut === "" ? null : cut,
         isCoordinator: coord,
         notes,
+        ...(payChanged
+          ? { initialPayment: { amount: pay.amount || 0, contributedAt: pay.contributedAt, paymentMethod: pay.paymentMethod || null, paymentRef: pay.paymentRef } }
+          : {}),
       });
       onClose();
       await done(t("تم الحفظ", "Saved"));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed");
+    } finally {
+      setBusy(false);
     }
   }
   return (
     <Modal open onClose={onClose} title={m.investorName}>
       <div className="space-y-3">
+        <div className="rounded-xl border border-line bg-surface-2/60 p-3 space-y-2">
+          <div className="text-xs font-extrabold text-green">
+            {t("الدفعة الأولى (رأس مال الدخول)", "Initial payment (opening capital)")}
+            {!first ? <span className="ms-2 text-amber-700 font-bold">{t("— غير مسجلة بعد", "— not recorded yet")}</span> : null}
+          </div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            <Field label={t("المبلغ", "Amount")}>
+              <MoneyInput value={pay.amount} onChange={(v) => setPay((x) => ({ ...x, amount: v }))} />
+            </Field>
+            <Field label={t("التاريخ", "Date")}>
+              <input type="date" className={inputCls} value={pay.contributedAt} onChange={(e) => setPay((x) => ({ ...x, contributedAt: e.target.value }))} />
+            </Field>
+            <Field label={t("طريقة الدفع", "Method")}>
+              <select className={inputCls} value={pay.paymentMethod} onChange={(e) => setPay((x) => ({ ...x, paymentMethod: e.target.value }))}>
+                <option value="">—</option>
+                {Object.entries(PAYMENT_METHOD_LABELS).map(([k, [ar, en]]) => (
+                  <option key={k} value={k}>
+                    {lang === "ar" ? ar : en}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t("رقم الحوالة / الشيك", "Transfer / cheque no.")}>
+              <input className={inputCls} dir="ltr" value={pay.paymentRef} onChange={(e) => setPay((x) => ({ ...x, paymentRef: e.target.value }))} />
+            </Field>
+          </div>
+          <p className="text-[11px] text-ink-soft">
+            {t(
+              "الدفعات الإضافية والسحوبات في تبويب «رأس المال». ضع 0 لحذف الدفعة الأولى. تتحدّث نسب الملكية تلقائياً.",
+              "Additional payments and withdrawals are in the Capital tab. Set 0 to remove the initial payment. Ownership updates automatically."
+            )}
+          </p>
+        </div>
         <label className="flex items-center gap-2 text-sm font-bold">
           <input type="checkbox" checked={coord} onChange={(e) => setCoord(e.target.checked)} className="accent-[var(--color-green)]" />
           {t("هذا الشريك هو منسق المشروع", "This partner is the coordinator")}
@@ -507,8 +611,8 @@ function MemberModal({ p, m, onClose, done }: { p: ProjectFull; m: ProjectMember
           <textarea className={`${inputCls} h-20 py-2`} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
         <ErrorNote message={error} />
-        <button className={`${btnPrimary} w-full`} onClick={save}>
-          {t("حفظ", "Save")}
+        <button className={`${btnPrimary} w-full`} onClick={save} disabled={busy}>
+          {busy ? "…" : t("حفظ", "Save")}
         </button>
       </div>
     </Modal>

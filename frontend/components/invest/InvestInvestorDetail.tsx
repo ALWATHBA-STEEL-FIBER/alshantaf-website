@@ -61,7 +61,28 @@ export function InvestInvestorDetail({ investorId }: { investorId: string }) {
               </div>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {p.isAdminProfile ? (
+              <span className="h-11 px-3 rounded-xl bg-gold/15 text-green text-xs font-extrabold inline-flex items-center">
+                {t("ملف المنسق (حساب المدير)", "Coordinator profile (admin)")}
+              </span>
+            ) : (
+              <button
+                className={btnGhost}
+                title={t("يصبح هذا الشريك ملفك، ويُضاف كمنسق افتراضي للمشاريع الجديدة", "Use this partner as your own profile — default coordinator for new projects")}
+                onClick={async () => {
+                  if (!confirm(t("هل هذا الشريك هو أنت؟ سيصبح ملفك كمنسق في المشاريع الجديدة.", "Is this partner you? It becomes your coordinator profile for new projects."))) return;
+                  try {
+                    await crmApi.linkMePartner(p.id);
+                    setP({ ...p, isAdminProfile: true });
+                  } catch (err) {
+                    setError(err instanceof ApiError ? err.message : "Failed");
+                  }
+                }}
+              >
+                {t("هذا أنا", "This is me")}
+              </button>
+            )}
             <button className={btnGhost} onClick={() => setEditing(true)}>
               {t("تعديل البيانات", "Edit")}
             </button>
