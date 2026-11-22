@@ -20,6 +20,7 @@ import {
   lookupDlsAdminByBbox,
   lookupDlsParcelByPoint,
   lookupDlsParcelContextByPoint,
+  lookupDlsParcelsByBbox,
   lookupDlsParcelLocation,
   DlsParcelLocationError,
   type DlsAdminLayer,
@@ -75,10 +76,10 @@ const dlsLocationLimiter = rateLimit({
   message: { error: "Too many map lookups — please wait a few minutes and try again." },
 });
 
-// Server-side ArcGIS proxy (fallback only) — strict so browsers prefer device→DLS.
+// Server-side ArcGIS proxy — required because DLS tokens are Referer-bound.
 const dlsProxyLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 40,
+  limit: 90,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many map proxy lookups — please wait a few minutes and try again." },
@@ -122,6 +123,20 @@ const dlsAdminBboxSchema = z.object({
   north: z.coerce.number().finite().gte(-90).lte(90),
   maxAllowableOffset: z.coerce.number().finite().gte(0).lte(1).optional(),
   resultRecordCount: z.coerce.number().int().finite().gte(1).lte(200).optional(),
+});
+
+const dlsParcelsBboxSchema = z.object({
+  west: z.coerce.number().finite().gte(-180).lte(180),
+  south: z.coerce.number().finite().gte(-90).lte(90),
+  east: z.coerce.number().finite().gte(-180).lte(180),
+  north: z.coerce.number().finite().gte(-90).lte(90),
+  maxAllowableOffset: z.coerce.number().finite().gte(0).lte(0.002).optional(),
+  resultRecordCount: z.coerce.number().int().finite().gte(1).lte(1000).optional(),
+  subjectDlsKey: z.string().max(64).optional().nullable(),
+  subjectParcelNo: z.preprocess(
+    (v) => (v == null || v === "" ? null : typeof v === "string" ? toWesternDigits(v) : v),
+    z.string().max(32).nullable().optional()
+  ),
 });
 
 const ammanZoningSchema = z
@@ -230,8 +245,42 @@ submissionsRouter.post(
     const input = dlsPointSchema.parse(req.body);
     try {
       const result = await lookupDlsParcelContextByPoint(input);
-      // Cap payload — clients should prefer viewport ArcGIS queries.
-      res.json({ parcels: result.slice(0, 1200) });
+      res.json({ parcels: result.slice(0, 1000) });
+    } catch (err) {
+      if (err instanceof DlsParcelLocationError) {
+        res.status(502).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+  })
+);
+
+submissionsRouter.post(
+  "/dls-parcels-by-bbox",
+  requireSameSiteMapClient,
+  dlsProxyLimiter,
+  asyncHandler(async (req, res) => {
+    const input = dlsParcelsBboxSchema.parse(req.body);
+    const spanX = input.east - input.west;
+    const spanY = input.north - input.south;
+    if (spanX <= 0 || spanY <= 0 || spanX > 0.12 || spanY > 0.12) {
+      res.status(400).json({ error: "Map area too large" });
+      return;
+    }
+    try {
+      const parcels = await lookupDlsParcelsByBbox({
+        west: input.west,
+        south: input.south,
+        east: input.east,
+        north: input.north,
+        maxAllowableOffset: input.maxAllowableOffset,
+        resultRecordCount: input.resultRecordCount,
+        subjectDlsKey: input.subjectDlsKey,
+        subjectParcelNo: input.subjectParcelNo,
+      });
+      res.setHeader("Cache-Control", "private, max-age=30");
+      res.json({ parcels });
     } catch (err) {
       if (err instanceof DlsParcelLocationError) {
         res.status(502).json({ error: err.message });

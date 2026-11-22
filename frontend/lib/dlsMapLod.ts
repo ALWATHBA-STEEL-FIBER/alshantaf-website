@@ -198,44 +198,18 @@ export function attachDlsLodController(opts: AttachOpts): LodController {
     const signal = abort.signal;
 
     try {
-      // Prefer device → DLS ArcGIS; fall back to our server proxy if needed.
-      let features: DlsAdminFeature[] = [];
-      try {
-        features = await fetchDlsAdminByBboxClient({
-          layer: adminLayer,
-          west: bounds.getWest(),
-          south: bounds.getSouth(),
-          east: bounds.getEast(),
-          north: bounds.getNorth(),
-          zoom,
-          maxAllowableOffset: maxOffsetForZoom(zoom),
-          resultRecordCount: recordLimitForLayer(adminLayer),
-          signal,
-        });
-      } catch (clientErr) {
-        // Only hit our proxy on real failures — not on abort/cancel.
-        if (signal.aborted || destroyed) return;
-        const reason = clientErr instanceof Error ? clientErr.message : "";
-        if (reason === "Aborted" || reason.includes("AbortError")) return;
-        const res = await fetch("/api/submissions/dls-admin-by-bbox", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "same-origin",
-          signal,
-          body: JSON.stringify({
-            layer: adminLayer,
-            west: bounds.getWest(),
-            south: bounds.getSouth(),
-            east: bounds.getEast(),
-            north: bounds.getNorth(),
-            maxAllowableOffset: maxOffsetForZoom(zoom),
-            resultRecordCount: recordLimitForLayer(adminLayer),
-          }),
-        });
-        if (!res.ok) throw clientErr;
-        const body = (await res.json()) as { features?: DlsAdminFeature[] };
-        features = Array.isArray(body.features) ? body.features : [];
-      }
+      // Via our API — DLS tokens are Referer-bound so browsers cannot query ArcGIS directly.
+      const features = await fetchDlsAdminByBboxClient({
+        layer: adminLayer,
+        west: bounds.getWest(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        north: bounds.getNorth(),
+        zoom,
+        maxAllowableOffset: maxOffsetForZoom(zoom),
+        resultRecordCount: recordLimitForLayer(adminLayer),
+        signal,
+      });
       if (signal.aborted || destroyed) return;
       paint(level, features);
       lastKey = key;

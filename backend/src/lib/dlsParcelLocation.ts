@@ -469,74 +469,131 @@ export async function lookupDlsAdminByBbox(params: {
   }
 }
 
-export async function lookupDlsParcelContextByPoint(params: {
-  latitude: number;
-  longitude: number;
+/**
+ * Viewport cadastral grid. Runs on our server because DLS tokens are
+ * Referer-bound to maps.dls.gov.jo — browsers on alshantaf.com get 498.
+ */
+export async function lookupDlsParcelsByBbox(params: {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+  maxAllowableOffset?: number;
+  resultRecordCount?: number;
+  subjectDlsKey?: string | null;
+  subjectParcelNo?: string | null;
 }): Promise<DlsContextParcel[]> {
-  const subject = await lookupDlsParcelByPoint(params);
-  if (!subject) return [];
-  const primaryRing = subject.rings[0]?.filter((p) => Array.isArray(p) && p.length === 2) ?? [];
-  if (primaryRing.length < 3) return [];
-  let minLat = Infinity;
-  let maxLat = -Infinity;
-  let minLng = Infinity;
-  let maxLng = -Infinity;
-  for (const [lat, lng] of primaryRing) {
-    if (lat < minLat) minLat = lat;
-    if (lat > maxLat) maxLat = lat;
-    if (lng < minLng) minLng = lng;
-    if (lng > maxLng) maxLng = lng;
+  const { west, south, east, north } = params;
+  if (![west, south, east, north].every(Number.isFinite) || east <= west || north <= south) {
+    return [];
   }
-  // ~2 km half-span with simplified rings (fallback when client viewport query fails).
-  const pad = 0.018;
-  const queryGeom = {
-    xmin: minLng - pad,
-    ymin: minLat - pad,
-    xmax: maxLng + pad,
-    ymax: maxLat + pad,
-    spatialReference: { wkid: 4326 },
-  };
+  const spanX = east - west;
+  const spanY = north - south;
+  // ~12 km — enough for a pulled-back parcel view, not a kingdom scrape.
+  if (spanX > 0.12 || spanY > 0.12) {
+    throw new DlsParcelLocationError("Map area too large for parcel grid");
+  }
+
+  const offset =
+    typeof params.maxAllowableOffset === "number" && Number.isFinite(params.maxAllowableOffset)
+      ? Math.min(0.001, Math.max(0, params.maxAllowableOffset))
+      : 0.00006;
+  const limit = Math.min(
+    1000,
+    Math.max(
+      50,
+      typeof params.resultRecordCount === "number" && Number.isFinite(params.resultRecordCount)
+        ? Math.floor(params.resultRecordCount)
+        : 700
+    )
+  );
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ROAD_LOOKUP_TIMEOUT_MS);
   try {
-    const rows = await queryFeatures(
-      {
-        where: "1=1",
-        outFields: "DLS_KEY,PARCEL_ID",
-        returnGeometry: true,
-        geometry: JSON.stringify(queryGeom),
-        geometryType: "esriGeometryEnvelope",
-        inSR: 4326,
-        spatialRel: "esriSpatialRelIntersects",
-        outSR: 4326,
-        maxAllowableOffset: 0.00022,
-        resultRecordCount: 1200,
-        f: "json",
-      },
-      controller.signal,
-      PARCEL_LAYER_URL
-    );
+    const query: Record<string, string | number | boolean> = {
+      where: "1=1",
+      outFields: "DLS_KEY,PARCEL_ID",
+      returnGeometry: true,
+      geometry: JSON.stringify({
+        xmin: west,
+        ymin: south,
+        xmax: east,
+        ymax: north,
+        spatialReference: { wkid: 4326 },
+      }),
+      geometryType: "esriGeometryEnvelope",
+      inSR: 4326,
+      spatialRel: "esriSpatialRelIntersects",
+      outSR: 4326,
+      resultRecordCount: limit,
+      f: "json",
+    };
+    if (offset > 0) query.maxAllowableOffset = offset;
+
+    const rows = await queryFeatures(query, controller.signal, PARCEL_LAYER_URL);
+    const subjectKey = (params.subjectDlsKey || "").trim() || null;
+    const subjectNo = normalizeParcelNo(params.subjectParcelNo ?? null);
     const list: DlsContextParcel[] = [];
+    const seen = new Set<string>();
     for (const row of rows) {
-      const rings = (row.geometry?.rings ?? [])
+      const rawRings = (row.geometry?.rings ?? [])
         .map((ring) =>
           ring
             .map(([lng, lat]) => [lat, lng] as [number, number])
             .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng))
         )
         .filter((ring) => ring.length >= 3);
-      if (!rings.length) continue;
+      if (!rawRings.length) continue;
+      const outer = rawRings[0]!;
       const dlsKey = (row.attributes?.DLS_KEY || "").trim() || null;
       const parcelNo = parcelNoFromAttrs(row.attributes as Record<string, unknown> | undefined);
-      const isSubject = Boolean(dlsKey && subject.dlsKey && dlsKey === subject.dlsKey);
-      list.push({ dlsKey, parcelNo, rings, isSubject });
+      const id =
+        dlsKey ||
+        (parcelNo
+          ? `n:${parcelNo}:${outer[0]![0]!.toFixed(5)},${outer[0]![1]!.toFixed(5)}`
+          : `g:${outer[0]![0]!.toFixed(5)},${outer[0]![1]!.toFixed(5)}`);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const isSubject = Boolean(
+        (subjectKey && dlsKey && dlsKey === subjectKey) ||
+          (subjectNo && parcelNo && parcelNo === subjectNo)
+      );
+      list.push({ dlsKey, parcelNo, rings: [outer], isSubject });
     }
-    // Subject first, then numbered parcels, then unnamed shapes.
-    list.sort((a, b) => Number(b.isSubject) - Number(a.isSubject) || Number(Boolean(b.parcelNo)) - Number(Boolean(a.parcelNo)));
+    list.sort(
+      (a, b) =>
+        Number(b.isSubject) - Number(a.isSubject) ||
+        Number(Boolean(b.parcelNo)) - Number(Boolean(a.parcelNo))
+    );
     return list;
+  } catch (err) {
+    if (err instanceof DlsParcelLocationError) throw err;
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new DlsParcelLocationError("DLS parcel grid lookup timed out");
+    }
+    throw new DlsParcelLocationError(err instanceof Error ? err.message : "DLS parcel grid lookup failed");
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function lookupDlsParcelContextByPoint(params: {
+  latitude: number;
+  longitude: number;
+}): Promise<DlsContextParcel[]> {
+  const lat = Number(params.latitude);
+  const lng = Number(params.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+  const pad = 0.012;
+  return lookupDlsParcelsByBbox({
+    west: lng - pad,
+    south: lat - pad,
+    east: lng + pad,
+    north: lat + pad,
+    maxAllowableOffset: 0.00008,
+    resultRecordCount: 800,
+  });
 }
 
 async function queryFeatures(

@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * Browser-side DLS ArcGIS queries.
- * Token is fetched from our API (gettoken has no CORS); MapServer calls go
- * straight from the user device to maps.dls.gov.jo.
+ * DLS map queries for the browser.
  *
- * Requests are gated + cached (see dlsMapCache) so pan/zoom stays light.
+ * ArcGIS tokens from DLS are Referer-bound to maps.dls.gov.jo — browsers on
+ * alshantaf.com get HTTP 498 — so parcel/admin geometry is fetched via our
+ * same-origin API proxy. Results are still gated + cached client-side.
  */
 
 import {
@@ -211,7 +211,7 @@ async function queryFeatures(
 let governoratesMem: { at: number; features: DlsAdminFeature[] } | null = null;
 const GOV_CACHE_MS = 6 * 60 * 60 * 1000;
 
-/** Progressive admin boundaries — runs on the user device against DLS ArcGIS. */
+/** Progressive admin boundaries via our API proxy (DLS Referer-bound tokens). */
 export async function fetchDlsAdminByBboxClient(params: {
   layer: DlsAdminLayer;
   west: number;
@@ -235,7 +235,7 @@ export async function fetchDlsAdminByBboxClient(params: {
     if (hit) return hit;
   }
 
-  const fetchBox = layer === "governorates" ? view : padBBox(view, 0.4);
+  const fetchBox = layer === "governorates" ? view : padBBox(view, 0.35);
   const offset =
     typeof params.maxAllowableOffset === "number" && Number.isFinite(params.maxAllowableOffset)
       ? Math.max(0, params.maxAllowableOffset)
@@ -250,38 +250,31 @@ export async function fetchDlsAdminByBboxClient(params: {
       : layer === "governorates"
         ? 30
         : layer === "directorates"
-          ? 60
-          : 80;
+          ? 55
+          : 70;
 
-  const query: Record<string, string | number | boolean> = {
-    where: "1=1",
-    outFields: adminOutFields(layer),
-    returnGeometry: true,
-    outSR: 4326,
-    maxAllowableOffset: offset,
-    resultRecordCount: limit,
-    f: "json",
-  };
-  if (layer !== "governorates") {
-    query.geometry = JSON.stringify({
-      xmin: fetchBox.west,
-      ymin: fetchBox.south,
-      xmax: fetchBox.east,
-      ymax: fetchBox.north,
-      spatialReference: { wkid: 4326 },
+  const gateKey = `admin-proxy|${layer}|${fetchBox.west.toFixed(3)}|${fetchBox.south.toFixed(3)}|${fetchBox.east.toFixed(3)}|${fetchBox.north.toFixed(3)}`;
+  const list = await runDlsQuery(gateKey, signal, async () => {
+    const res = await fetch("/api/submissions/dls-admin-by-bbox", {
+      method: "POST",
+      signal,
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        layer,
+        west: fetchBox.west,
+        south: fetchBox.south,
+        east: fetchBox.east,
+        north: fetchBox.north,
+        maxAllowableOffset: offset,
+        resultRecordCount: limit,
+      }),
     });
-    query.geometryType = "esriGeometryEnvelope";
-    query.inSR = 4326;
-    query.spatialRel = "esriSpatialRelIntersects";
-  }
+    if (!res.ok) throw new Error(`dls-admin-${res.status}`);
+    const body = (await res.json()) as { features?: DlsAdminFeature[] };
+    return Array.isArray(body.features) ? body.features : [];
+  });
 
-  const gateKey = `admin|${layer}|${fetchBox.west.toFixed(3)}|${fetchBox.south.toFixed(3)}|${fetchBox.east.toFixed(3)}|${fetchBox.north.toFixed(3)}`;
-  const rows = await queryFeatures(adminEndpoint(layer), query, signal, gateKey);
-  const list: DlsAdminFeature[] = [];
-  for (const row of rows) {
-    const item = featureToAdmin(layer, row);
-    if (item) list.push(item);
-  }
   if (layer === "governorates") {
     governoratesMem = { at: Date.now(), features: list };
   } else {
@@ -332,12 +325,12 @@ export const DLS_PARCEL_GRID_MAX = 1000;
  * Keep shared cadastral edges crisp. Heavy maxAllowableOffset makes every
  * neighbor simplify independently → ghost double borders between lots.
  */
+/** Light topology-safe simplify — heavy offset caused ghost double borders. */
 export function parcelSimplifyOffsetForZoom(zoom: number): number {
-  if (zoom < 14) return 0.00028;
-  if (zoom < 14.5) return 0.00012;
-  if (zoom < 15.25) return 0.00004;
-  // Full-resolution rings once you're in typical parcel inspection zoom.
-  return 0;
+  if (zoom < 14) return 0.00018;
+  if (zoom < 15) return 0.0001;
+  if (zoom < 16) return 0.00006;
+  return 0.00004;
 }
 
 export function parcelRecordLimitForZoom(zoom: number): number {
@@ -350,8 +343,8 @@ export function parcelRecordLimitForZoom(zoom: number): number {
 }
 
 /**
- * Parcel grid for the visible map. Pads + caches the bbox so small pans
- * reuse the last payload instead of re-hitting ArcGIS.
+ * Parcel grid for the visible map via our API proxy (DLS Referer-bound tokens).
+ * Pads + caches the bbox so small pans reuse the last payload.
  */
 export async function fetchDlsParcelsByBboxClient(params: {
   west: number;
@@ -377,6 +370,19 @@ export async function fetchDlsParcelsByBboxClient(params: {
   }
 
   const fetchBox = padBBox(view, 0.22);
+  // Keep proxy bbox inside server cap (~0.12°).
+  const spanX = fetchBox.east - fetchBox.west;
+  const spanY = fetchBox.north - fetchBox.south;
+  if (spanX > 0.11 || spanY > 0.11) {
+    const cx = (fetchBox.west + fetchBox.east) / 2;
+    const cy = (fetchBox.south + fetchBox.north) / 2;
+    const half = 0.055;
+    fetchBox.west = cx - half;
+    fetchBox.east = cx + half;
+    fetchBox.south = cy - half;
+    fetchBox.north = cy + half;
+  }
+
   const offset =
     typeof params.maxAllowableOffset === "number" && Number.isFinite(params.maxAllowableOffset)
       ? Math.max(0, params.maxAllowableOffset)
@@ -391,47 +397,29 @@ export async function fetchDlsParcelsByBboxClient(params: {
     )
   );
 
-  const gateKey = `parcels|${fetchBox.west.toFixed(3)}|${fetchBox.south.toFixed(3)}|${fetchBox.east.toFixed(3)}|${fetchBox.north.toFixed(3)}|${limit}|${offset}`;
-  const query: Record<string, string | number | boolean> = {
-    where: "1=1",
-    outFields: "DLS_KEY,PARCEL_ID",
-    returnGeometry: true,
-    geometry: JSON.stringify({
-      xmin: fetchBox.west,
-      ymin: fetchBox.south,
-      xmax: fetchBox.east,
-      ymax: fetchBox.north,
-      spatialReference: { wkid: 4326 },
-    }),
-    geometryType: "esriGeometryEnvelope",
-    inSR: 4326,
-    spatialRel: "esriSpatialRelIntersects",
-    outSR: 4326,
-    resultRecordCount: limit,
-    f: "json",
-  };
-  // Omit offset entirely at 0 — ArcGIS independent-simplify is what ghosted borders.
-  if (offset > 0) query.maxAllowableOffset = offset;
+  const gateKey = `parcels-proxy|${fetchBox.west.toFixed(3)}|${fetchBox.south.toFixed(3)}|${fetchBox.east.toFixed(3)}|${fetchBox.north.toFixed(3)}|${limit}|${offset}`;
+  const list = await runDlsQuery(gateKey, signal, async () => {
+    const res = await fetch("/api/submissions/dls-parcels-by-bbox", {
+      method: "POST",
+      signal,
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        west: fetchBox.west,
+        south: fetchBox.south,
+        east: fetchBox.east,
+        north: fetchBox.north,
+        maxAllowableOffset: offset,
+        resultRecordCount: limit,
+        subjectDlsKey: params.subjectDlsKey ?? null,
+        subjectParcelNo: params.subjectParcelNo ?? null,
+      }),
+    });
+    if (!res.ok) throw new Error(`dls-parcels-${res.status}`);
+    const body = (await res.json()) as { parcels?: DlsContextParcel[] };
+    return Array.isArray(body.parcels) ? body.parcels : [];
+  });
 
-  const rows = await queryFeatures(PARCEL_LAYER_URL, query, signal, gateKey);
-
-  const list: DlsContextParcel[] = [];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    const rings = ringsFromFeature(row);
-    if (!rings.length) continue;
-    const dlsKey = strAttr(row.attributes, "DLS_KEY");
-    const parcelNo = parcelNoFromAttrs(row.attributes);
-    const id =
-      dlsKey ||
-      (parcelNo
-        ? `n:${parcelNo}:${rings[0]![0]![0]!.toFixed(5)},${rings[0]![0]![1]!.toFixed(5)}`
-        : `g:${rings[0]![0]![0]!.toFixed(5)},${rings[0]![0]![1]!.toFixed(5)}`);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    // Outer ring only for the grid — hole rings drawn separately looked like ghosts.
-    list.push({ dlsKey, parcelNo, rings: [rings[0]!], isSubject: false });
-  }
   setCachedParcels(fetchBox, zoom, list);
   return tagSubject(list, params.subjectDlsKey, params.subjectParcelNo);
 }
