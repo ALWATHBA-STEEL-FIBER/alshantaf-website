@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useCallback, useEffect, type ReactNode } from "react";
 import { useLanguage } from "@/lib/LanguageProvider";
 import type { InvestMoneyField } from "@/lib/investApi";
 
 export function useT() {
   const { lang } = useLanguage();
-  return { lang, t: (ar: string, en: string) => (lang === "ar" ? ar : en) };
+  // Stable per language so it is safe in effect dependency lists.
+  const t = useCallback((ar: string, en: string) => (lang === "ar" ? ar : en), [lang]);
+  return { lang, t };
 }
 
 type Num = string | number | null | undefined | InvestMoneyField;

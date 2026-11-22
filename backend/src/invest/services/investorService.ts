@@ -42,6 +42,25 @@ async function nextInvestorCode(organizationId: string): Promise<string> {
   return `P-${String(max + 1).padStart(4, "0")}`;
 }
 
+/** Partners created by scripts or older code have no number yet — give them one. */
+async function backfillMissingCodes(organizationId: string) {
+  const missing = await prisma.invInvestor.findMany({
+    where: { organizationId, code: null },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const m of missing) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await prisma.invInvestor.update({ where: { id: m.id }, data: { code: await nextInvestorCode(organizationId) } });
+        break;
+      } catch (e) {
+        if ((e as { code?: string }).code !== "P2002") throw e;
+      }
+    }
+  }
+}
+
 function buildSearchWhere(organizationId: string, q: string): Prisma.InvInvestorWhereInput {
   const term = q.trim();
   if (!term) return { organizationId };
@@ -106,6 +125,7 @@ function serializeListRow(r: ListRow) {
 
 export async function listInvestors(opts: { q?: string; active?: string; limit?: number } = {}) {
   const org = await ensureDefaultOrganization();
+  await backfillMissingCodes(org.id);
   const where = buildSearchWhere(org.id, opts.q || "");
   if (opts.active === "1") where.active = true;
   if (opts.active === "0") where.active = false;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ApiError } from "@/lib/api";
 import { crmApi, type PartnerRow } from "@/lib/investApi";
 import { PartnerFormModal } from "./PartnerForm";
 import { Avatar, fmt, inputCls, useT } from "./ui";
@@ -29,6 +30,7 @@ export function PartnerPicker({
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(0);
   const [creating, setCreating] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,15 +40,28 @@ export function PartnerPicker({
       setLoading(true);
       crmApi
         .partners(q.trim() || undefined, "1")
-        .then((r) => !ignore && (setRows(r.slice(0, 30)), setActive(0)))
-        .catch(() => !ignore && setRows([]))
+        .then((r) => {
+          if (ignore) return;
+          setRows(r.slice(0, 30));
+          setActive(0);
+          setLoadError("");
+        })
+        .catch((err) => {
+          if (ignore) return;
+          setRows([]);
+          setLoadError(
+            err instanceof ApiError
+              ? `${t("تعذّر البحث", "Search failed")} (${err.status}): ${err.message}`
+              : t("تعذّر الاتصال بالخادم", "Could not reach the server")
+          );
+        })
         .finally(() => !ignore && setLoading(false));
     }, 180);
     return () => {
       ignore = true;
       clearTimeout(id);
     };
-  }, [q, open]);
+  }, [q, open, t]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -130,8 +145,14 @@ export function PartnerPicker({
               </button>
             );
           })}
-          {!loading && !rows.length ? (
-            <div className="px-3 py-3 text-sm text-ink-soft">{t("لا نتائج", "No matches")}</div>
+          {loadError ? (
+            <div className="px-3 py-3 text-sm font-bold text-red-700 bg-red-50">{loadError}</div>
+          ) : !loading && !rows.length ? (
+            <div className="px-3 py-3 text-sm text-ink-soft">
+              {q.trim()
+                ? t("لا يوجد شريك بهذا الاسم أو الرقم في السجل", "No partner with that name or number")
+                : t("سجل الشركاء فارغ — أضف أول شريك", "The partner register is empty — add the first partner")}
+            </div>
           ) : null}
           <button
             type="button"
