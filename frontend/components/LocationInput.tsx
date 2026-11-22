@@ -51,7 +51,12 @@ import {
   satTileOptions,
 } from "@/lib/mapTiles";
 import { attachDlsLodController, DLS_LOD } from "@/lib/dlsMapLod";
-import { fetchDlsContextByPointClient } from "@/lib/dlsClientMap";
+import {
+  DLS_PARCEL_GRID_MAX,
+  fetchDlsContextByPointClient,
+  fetchDlsParcelsByBboxClient,
+  parcelSimplifyOffsetForZoom,
+} from "@/lib/dlsClientMap";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
@@ -879,63 +884,110 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       .join("||");
   }, [polygon]);
 
+  // Viewport-based parcel grid (DLS-style): loads whatever is on screen as you pan/zoom.
   useEffect(() => {
-    if (!showMap || !showContextGrid || !parcelGridAllowed) {
-      if (!parcelGridAllowed || !showContextGrid) setContextParcels([]);
-      if (!showMap) setContextParcels([]);
+    if (!showMap || !showContextGrid || !parcelGridAllowed || !mapReady) {
+      if (!parcelGridAllowed || !showContextGrid || !showMap) setContextParcels([]);
       return;
     }
+    const map = mapRef.current;
+    if (!map) return;
+
     let cancelled = false;
-    // Delay parcel-grid fetch slightly so admin LOD can settle first on weak devices.
-    const abort = new AbortController();
-    const delay = window.setTimeout(() => {
-      async function loadContextGrid() {
-        const fallbackFromRing = polygon?.[0]?.length
-          ? (() => {
-              const ring = polygon[0]!;
-              const sum = ring.reduce((acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }), { lat: 0, lng: 0 });
-              return { lat: sum.lat / ring.length, lng: sum.lng / ring.length };
-            })()
-          : null;
-        const coords = selected ?? parseCoords(value) ?? fallbackFromRing;
-        if (!coords) {
-          setContextParcels([]);
-          return;
-        }
+    let abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastKey = "";
+
+    const load = () => {
+      if (cancelled) return;
+      abort.abort();
+      abort = new AbortController();
+      const signal = abort.signal;
+      const zoom = map.getZoom();
+      // Soft pad so panning doesn't flash empty edges before the next fetch.
+      const bounds = map.getBounds().pad(0.15);
+      const key = `${zoom.toFixed(1)}|${bounds.getWest().toFixed(4)},${bounds.getSouth().toFixed(4)},${bounds.getEast().toFixed(4)},${bounds.getNorth().toFixed(4)}`;
+      if (key === lastKey) return;
+
+      void (async () => {
         try {
-          // Device → DLS first; server proxy only as fallback.
+          const parcels = await fetchDlsParcelsByBboxClient({
+            west: bounds.getWest(),
+            south: bounds.getSouth(),
+            east: bounds.getEast(),
+            north: bounds.getNorth(),
+            maxAllowableOffset: parcelSimplifyOffsetForZoom(zoom),
+            resultRecordCount: DLS_PARCEL_GRID_MAX,
+            subjectDlsKey: dlsKey,
+            subjectParcelNo: blueprint?.parcel ?? null,
+            signal,
+          });
+          if (signal.aborted || cancelled) return;
+          setContextParcels(parcels);
+          lastKey = key;
+        } catch {
+          if (signal.aborted || cancelled) return;
+          // Fallback: ring around pin/subject if viewport query fails.
+          const fallbackFromRing = polygon?.[0]?.length
+            ? (() => {
+                const ring = polygon[0]!;
+                const sum = ring.reduce(
+                  (acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }),
+                  { lat: 0, lng: 0 }
+                );
+                return { lat: sum.lat / ring.length, lng: sum.lng / ring.length };
+              })()
+            : null;
+          const coords = selected ?? parseCoords(value) ?? fallbackFromRing;
+          if (!coords) return;
           try {
             const parcels = await fetchDlsContextByPointClient({
               latitude: coords.lat,
               longitude: coords.lng,
-              signal: abort.signal,
+              signal,
             });
-            if (!cancelled) setContextParcels(parcels);
-            return;
+            if (!cancelled && !signal.aborted) {
+              setContextParcels(parcels);
+              lastKey = key;
+            }
           } catch {
-            if (abort.signal.aborted || cancelled) return;
+            /* keep previous grid */
           }
-          const res = await fetch("/api/submissions/dls-context-by-point", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: abort.signal,
-            body: JSON.stringify({ latitude: coords.lat, longitude: coords.lng }),
-          });
-          if (!res.ok) throw new Error("grid-failed");
-          const body = (await res.json()) as { parcels?: ContextParcel[] };
-          if (!cancelled) setContextParcels(Array.isArray(body.parcels) ? body.parcels : []);
-        } catch {
-          if (!cancelled) setContextParcels([]);
         }
-      }
-      void loadContextGrid();
-    }, DLS_LOD.debounceMs);
+      })();
+    };
+
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        load();
+      }, 380);
+    };
+
+    map.on("moveend", schedule);
+    map.on("zoomend", schedule);
+    schedule();
+
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
       abort.abort();
-      window.clearTimeout(delay);
+      map.off("moveend", schedule);
+      map.off("zoomend", schedule);
     };
-  }, [polygonKey, selected, value, showMap, showContextGrid, parcelGridAllowed]);
+  }, [
+    showMap,
+    showContextGrid,
+    parcelGridAllowed,
+    mapReady,
+    dlsKey,
+    blueprint?.parcel,
+    polygonKey,
+    selected,
+    value,
+    polygon,
+  ]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;

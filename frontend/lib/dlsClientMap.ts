@@ -264,7 +264,96 @@ function normalizeParcelNo(value: unknown): string | null {
   return raw;
 }
 
-/** Neighbor parcel grid around a point — device → DLS ArcGIS. */
+/** Practical ceiling — DLS allows more, but 3k keeps phones responsive. */
+export const DLS_PARCEL_GRID_MAX = 3000;
+
+export function parcelSimplifyOffsetForZoom(zoom: number): number {
+  if (zoom < 14.5) return 0.0004;
+  if (zoom < 15.5) return 0.00022;
+  if (zoom < 16.5) return 0.00012;
+  return 0.00005;
+}
+
+/**
+ * Parcel grid for the visible map (DLS-style): as far as the viewport,
+ * simplified geometry so ~2–3k lots load in roughly half a second.
+ */
+export async function fetchDlsParcelsByBboxClient(params: {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+  maxAllowableOffset?: number;
+  resultRecordCount?: number;
+  subjectDlsKey?: string | null;
+  subjectParcelNo?: string | null;
+  signal?: AbortSignal;
+}): Promise<DlsContextParcel[]> {
+  const { west, south, east, north, signal } = params;
+  if (![west, south, east, north].every(Number.isFinite) || east <= west || north <= south) {
+    return [];
+  }
+  const offset =
+    typeof params.maxAllowableOffset === "number" && Number.isFinite(params.maxAllowableOffset)
+      ? Math.max(0, params.maxAllowableOffset)
+      : 0.00015;
+  const limit = Math.min(
+    DLS_PARCEL_GRID_MAX,
+    Math.max(
+      100,
+      typeof params.resultRecordCount === "number" && Number.isFinite(params.resultRecordCount)
+        ? Math.floor(params.resultRecordCount)
+        : DLS_PARCEL_GRID_MAX
+    )
+  );
+
+  const rows = await queryFeatures(
+    PARCEL_LAYER_URL,
+    {
+      where: "1=1",
+      outFields: "DLS_KEY,PARCEL_ID",
+      returnGeometry: true,
+      geometry: JSON.stringify({
+        xmin: west,
+        ymin: south,
+        xmax: east,
+        ymax: north,
+        spatialReference: { wkid: 4326 },
+      }),
+      geometryType: "esriGeometryEnvelope",
+      inSR: 4326,
+      spatialRel: "esriSpatialRelIntersects",
+      outSR: 4326,
+      maxAllowableOffset: offset,
+      resultRecordCount: limit,
+      f: "json",
+    },
+    signal
+  );
+
+  const subjectKey = (params.subjectDlsKey || "").trim() || null;
+  const subjectNo = normalizeParcelNo(params.subjectParcelNo ?? null);
+  const list: DlsContextParcel[] = [];
+  for (const row of rows) {
+    const rings = ringsFromFeature(row);
+    if (!rings.length) continue;
+    const dlsKey = strAttr(row.attributes, "DLS_KEY");
+    const parcelNo = normalizeParcelNo(row.attributes?.PARCEL_ID);
+    const isSubject = Boolean(
+      (subjectKey && dlsKey && dlsKey === subjectKey) ||
+        (subjectNo && parcelNo && parcelNo === subjectNo)
+    );
+    list.push({ dlsKey, parcelNo, rings, isSubject });
+  }
+  list.sort(
+    (a, b) =>
+      Number(b.isSubject) - Number(a.isSubject) ||
+      Number(Boolean(b.parcelNo)) - Number(Boolean(a.parcelNo))
+  );
+  return list;
+}
+
+/** Neighbor parcel grid around a point — used as fallback when map bounds unavailable. */
 export async function fetchDlsContextByPointClient(params: {
   latitude: number;
   longitude: number;
@@ -274,78 +363,15 @@ export async function fetchDlsContextByPointClient(params: {
   const lng = Number(params.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
 
-  const subjectRows = await queryFeatures(
-    PARCEL_LAYER_URL,
-    {
-      geometry: JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } }),
-      geometryType: "esriGeometryPoint",
-      inSR: 4326,
-      spatialRel: "esriSpatialRelIntersects",
-      outFields: "DLS_KEY,PARCEL_ID",
-      returnGeometry: true,
-      outSR: 4326,
-      f: "json",
-    },
-    params.signal
-  );
-  const subject = subjectRows[0];
-  if (!subject) return [];
-  const subjectRings = ringsFromFeature(subject);
-  const primary = subjectRings[0];
-  if (!primary || primary.length < 3) return [];
-
-  let minLat = Infinity;
-  let maxLat = -Infinity;
-  let minLng = Infinity;
-  let maxLng = -Infinity;
-  for (const [a, b] of primary) {
-    if (a < minLat) minLat = a;
-    if (a > maxLat) maxLat = a;
-    if (b < minLng) minLng = b;
-    if (b > maxLng) maxLng = b;
-  }
-  // Wide DLS-like ring around the subject (~0.5–1 km) so the red grid
-  // fills the map instead of a tiny island of lots in empty desert.
-  const latPad = Math.max((maxLat - minLat) * 6, 0.005);
-  const lngPad = Math.max((maxLng - minLng) * 6, 0.005);
-  const subjectKey = strAttr(subject.attributes, "DLS_KEY");
-
-  const rows = await queryFeatures(
-    PARCEL_LAYER_URL,
-    {
-      where: "1=1",
-      outFields: "DLS_KEY,PARCEL_ID",
-      returnGeometry: true,
-      geometry: JSON.stringify({
-        xmin: minLng - lngPad,
-        ymin: minLat - latPad,
-        xmax: maxLng + lngPad,
-        ymax: maxLat + latPad,
-        spatialReference: { wkid: 4326 },
-      }),
-      geometryType: "esriGeometryEnvelope",
-      inSR: 4326,
-      spatialRel: "esriSpatialRelIntersects",
-      outSR: 4326,
-      resultRecordCount: 800,
-      f: "json",
-    },
-    params.signal
-  );
-
-  const list: DlsContextParcel[] = [];
-  for (const row of rows) {
-    const rings = ringsFromFeature(row);
-    if (!rings.length) continue;
-    const dlsKey = strAttr(row.attributes, "DLS_KEY");
-    const parcelNo = normalizeParcelNo(row.attributes?.PARCEL_ID);
-    const isSubject = Boolean(dlsKey && subjectKey && dlsKey === subjectKey);
-    list.push({ dlsKey, parcelNo, rings, isSubject });
-  }
-  list.sort(
-    (a, b) =>
-      Number(b.isSubject) - Number(a.isSubject) ||
-      Number(Boolean(b.parcelNo)) - Number(Boolean(a.parcelNo))
-  );
-  return list;
+  // ~2 km half-span — fills a typical parcel-zoom viewport.
+  const pad = 0.018;
+  return fetchDlsParcelsByBboxClient({
+    west: lng - pad,
+    south: lat - pad,
+    east: lng + pad,
+    north: lat + pad,
+    maxAllowableOffset: 0.0002,
+    resultRecordCount: DLS_PARCEL_GRID_MAX,
+    signal: params.signal,
+  });
 }

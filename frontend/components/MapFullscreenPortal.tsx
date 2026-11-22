@@ -26,6 +26,11 @@ import {
   satTileOptions,
 } from "@/lib/mapTiles";
 import { attachDlsLodController, DLS_LOD } from "@/lib/dlsMapLod";
+import {
+  DLS_PARCEL_GRID_MAX,
+  fetchDlsParcelsByBboxClient,
+  parcelSimplifyOffsetForZoom,
+} from "@/lib/dlsClientMap";
 import { dictionary } from "@/lib/dictionary";
 import { Logo } from "@/components/Logo";
 import type { AdjacentRoad, ContextParcel, ParcelRing } from "@/components/LocationInput";
@@ -215,7 +220,9 @@ export function MapFullscreenPortal({
   const measureToolRef = useRef<MeasureTool | null>(null);
   const [measureSnap, setMeasureSnap] = useState<MeasureSnapshot | null>(measureSnapshot ?? null);
   const [parcelGridAllowed, setParcelGridAllowed] = useState(false);
+  const [viewportParcels, setViewportParcels] = useState<ContextParcel[] | null>(null);
   const showContextGridEffective = showContextGrid && parcelGridAllowed;
+  const effectiveContextParcels = viewportParcels ?? contextParcels;
   const basemapRef = useRef(basemap);
   basemapRef.current = basemap;
   const measureModeRef = useRef(measureMode);
@@ -647,7 +654,7 @@ export function MapFullscreenPortal({
         !lockedRef.current && measureModeRef.current === "off" && showContextGridEffective;
       const opts: ParcelCanvasOpts = {
         rings: polygon as [number, number][][],
-        contextParcels,
+        contextParcels: effectiveContextParcels,
         showContextGrid: showContextGridEffective,
         showDimensions: dimsOnCanvas,
         perimeterM,
@@ -716,7 +723,7 @@ export function MapFullscreenPortal({
     parcelNumber,
     parcelNumbers,
     parcelLabel,
-    contextParcels,
+    effectiveContextParcels,
     showContextGridEffective,
     locked,
     measuring,
@@ -725,6 +732,76 @@ export function MapFullscreenPortal({
   useEffect(() => {
     lodRef.current?.refresh();
   }, [lang, open]);
+
+  // Fullscreen has its own map — load the parcel grid for the visible viewport.
+  useEffect(() => {
+    if (!open || !mapReady || !showContextGridEffective) {
+      setViewportParcels(null);
+      return;
+    }
+    const map = mapRef.current;
+    if (!map) return;
+
+    let cancelled = false;
+    let abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastKey = "";
+
+    const load = () => {
+      if (cancelled) return;
+      abort.abort();
+      abort = new AbortController();
+      const signal = abort.signal;
+      const zoom = map.getZoom();
+      const bounds = map.getBounds().pad(0.15);
+      const key = `${zoom.toFixed(1)}|${bounds.getWest().toFixed(4)},${bounds.getSouth().toFixed(4)},${bounds.getEast().toFixed(4)},${bounds.getNorth().toFixed(4)}`;
+      if (key === lastKey) return;
+      void fetchDlsParcelsByBboxClient({
+        west: bounds.getWest(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        north: bounds.getNorth(),
+        maxAllowableOffset: parcelSimplifyOffsetForZoom(zoom),
+        resultRecordCount: DLS_PARCEL_GRID_MAX,
+        subjectDlsKey: parcelIdentity?.dlsKey ?? null,
+        subjectParcelNo: parcelNumber,
+        signal,
+      })
+        .then((parcels) => {
+          if (cancelled || signal.aborted) return;
+          setViewportParcels(parcels);
+          lastKey = key;
+        })
+        .catch(() => {
+          /* keep previous */
+        });
+    };
+
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        load();
+      }, 380);
+    };
+
+    map.on("moveend", schedule);
+    map.on("zoomend", schedule);
+    schedule();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      abort.abort();
+      map.off("moveend", schedule);
+      map.off("zoomend", schedule);
+    };
+  }, [
+    open,
+    mapReady,
+    showContextGridEffective,
+    parcelIdentity?.dlsKey,
+    parcelNumber,
+  ]);
 
   useEffect(() => {
     if (!open) appliedPolygonKeyRef.current = "";
