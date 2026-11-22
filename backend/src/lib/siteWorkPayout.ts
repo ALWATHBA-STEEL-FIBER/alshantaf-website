@@ -14,8 +14,19 @@ export type PayRates = {
   extraHourPay: number;
 };
 
+/** Regular hours that make one full paid day. */
+export const STANDARD_DAY_HOURS = 8;
+
 export type WeekPayBreakdown = {
+  /** Days with any regular hours (full or partial). Extra-only days are not counted. */
   daysWorked: number;
+  /** Paid day-equivalents: Σ min(regular, 8) / 8 (e.g. 4.5). */
+  dayUnits: number;
+  fullDays: number;
+  partialDays: number;
+  /** Days with extra hours but no regular hours — paid as extra hours only. */
+  extraOnlyDays: number;
+  totalRegularHours: number;
   totalExtraHours: number;
   dailyPay: number;
   extraHourPay: number;
@@ -44,7 +55,14 @@ export function parseRates(worker: {
   };
 }
 
-/** A calendar day counts if the worker logged any regular or extra hours. */
+/** Day pay fraction for one record: regular hours / 8, capped at one full day. */
+export function dayFraction(regularHours: Prisma.Decimal | number | string): number {
+  const reg = n(regularHours);
+  if (reg <= 0) return 0;
+  return Math.min(reg, STANDARD_DAY_HOURS) / STANDARD_DAY_HOURS;
+}
+
+/** A record has something payable (regular and/or extra hours). */
 export function isWorkedDay(rec: {
   regularHours: Prisma.Decimal | number | string;
   extraHours: Prisma.Decimal | number | string;
@@ -52,20 +70,52 @@ export function isWorkedDay(rec: {
   return n(rec.regularHours) > 0 || n(rec.extraHours) > 0;
 }
 
+/**
+ * Weekly pay = daily wage × (regular hours / 8, max one day per date) + extra hours × extra-hour rate.
+ * Regular and extra hours are independent: a worker can do only extra hours on a day (no day pay),
+ * a partial day, or a partial day plus extra hours later.
+ */
 export function calcWeekPay(records: AttendanceSlice[], rates: PayRates): WeekPayBreakdown {
-  const dayKeys = new Set<string>();
-  let totalExtraHours = 0;
+  // One row per project/date normally; merge defensively so a date never pays more than one day.
+  const regularByDay = new Map<string, number>();
+  const extraByDay = new Map<string, number>();
   for (const rec of records) {
     if (!isWorkedDay(rec)) continue;
-    dayKeys.add(formatDateOnly(rec.workDate));
-    totalExtraHours += n(rec.extraHours);
+    const k = formatDateOnly(rec.workDate);
+    regularByDay.set(k, (regularByDay.get(k) ?? 0) + Math.max(0, n(rec.regularHours)));
+    extraByDay.set(k, (extraByDay.get(k) ?? 0) + Math.max(0, n(rec.extraHours)));
   }
-  const daysWorked = dayKeys.size;
-  const dayPayTotal = daysWorked * rates.dailyPay;
+  let dayUnits = 0;
+  let daysWorked = 0;
+  let fullDays = 0;
+  let partialDays = 0;
+  let extraOnlyDays = 0;
+  let totalRegularHours = 0;
+  let totalExtraHours = 0;
+  for (const [k, reg] of regularByDay) {
+    const extra = extraByDay.get(k) ?? 0;
+    totalRegularHours += reg;
+    totalExtraHours += extra;
+    if (reg > 0) {
+      daysWorked += 1;
+      const f = dayFraction(reg);
+      dayUnits += f;
+      if (f >= 1) fullDays += 1;
+      else partialDays += 1;
+    } else if (extra > 0) {
+      extraOnlyDays += 1;
+    }
+  }
+  const dayPayTotal = dayUnits * rates.dailyPay;
   const extraPayTotal = totalExtraHours * rates.extraHourPay;
   const amount = dayPayTotal + extraPayTotal;
   return {
     daysWorked,
+    dayUnits: Math.round(dayUnits * 1000) / 1000,
+    fullDays,
+    partialDays,
+    extraOnlyDays,
+    totalRegularHours: Math.round(totalRegularHours * 100) / 100,
     totalExtraHours: Math.round(totalExtraHours * 100) / 100,
     dailyPay: rates.dailyPay,
     extraHourPay: rates.extraHourPay,

@@ -346,7 +346,7 @@ export async function buildProjectCostSummary(projectId: string, range: DateRang
     where: {
       projectId,
       ...(dw ? { workDate: dw } : {}),
-      OR: [{ regularHours: { gt: 0 } }, { extraHours: { gt: 0 } }],
+      regularHours: { gt: 0 },
     },
   });
 

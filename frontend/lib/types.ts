@@ -748,6 +748,13 @@ export interface SiteWeekPayoutSheet {
     dailyPay: string;
     extraHourPay: string;
     daysWorked: number;
+    /** Paid day-equivalents (regular hours / 8 per day, max 1). */
+    dayUnits?: number;
+    fullDays?: number;
+    partialDays?: number;
+    /** Days with only extra hours — paid as extra, not as a day. */
+    extraOnlyDays?: number;
+    totalRegularHours?: string;
     totalExtraHours: string;
     dayPayTotal: string;
     extraPayTotal: string;

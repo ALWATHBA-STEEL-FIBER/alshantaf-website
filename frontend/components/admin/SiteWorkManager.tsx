@@ -1051,8 +1051,27 @@ export function SiteWorkManager() {
                                 <span className="text-ink-soft"> / </span>
                                 {formatMoney(w.extraHourPay)}
                               </td>
-                              <td className="py-2.5 px-2">{w.daysWorked}</td>
-                              <td className="py-2.5 px-2">{formatMoney(w.totalExtraHours)}</td>
+                              <td className="py-2.5 px-2">
+                                <div className="font-bold tabular-nums">
+                                  {w.dayUnits ?? w.daysWorked}
+                                  <span className="text-[11px] font-medium text-ink-soft">
+                                    {" "}
+                                    {lang === "ar" ? "يوم مدفوع" : "paid days"}
+                                  </span>
+                                </div>
+                                {w.partialDays || w.extraOnlyDays ? (
+                                  <div className="text-[10px] text-ink-soft leading-tight">
+                                    {w.fullDays ?? 0} {lang === "ar" ? "كامل" : "full"}
+                                    {w.partialDays ? ` · ${w.partialDays} ${lang === "ar" ? "جزئي" : "partial"}` : ""}
+                                    {w.extraOnlyDays ? ` · ${w.extraOnlyDays} ${lang === "ar" ? "إضافي فقط" : "extra only"}` : ""}
+                                  </div>
+                                ) : null}
+                                <div className="text-[10px] text-ink-soft">{formatMoney(w.dayPayTotal)}</div>
+                              </td>
+                              <td className="py-2.5 px-2">
+                                <div className="font-bold tabular-nums">{formatMoney(w.totalExtraHours)}</div>
+                                <div className="text-[10px] text-ink-soft">{formatMoney(w.extraPayTotal)}</div>
+                              </td>
                               <td className="py-2.5 px-2 font-bold">{formatMoney(w.amount)}</td>
                               <td className="py-2.5 px-2">{formatMoney(w.owedAmount)}</td>
                               <td className="py-2.5 ps-2">

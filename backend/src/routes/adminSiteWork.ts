@@ -564,7 +564,8 @@ adminSiteWorkRouter.get(
       cur.recordCount += 1;
       cur.totalRegular += reg;
       cur.totalExtra += extra;
-      if (reg > 0 || extra > 0) cur.daysWorked += 1;
+      // Extra-only days are paid as extra hours, not as a worked day.
+      if (reg > 0) cur.daysWorked += 1;
       byProject.set(r.projectId, cur);
     }
 
@@ -1595,6 +1596,11 @@ adminSiteWorkRouter.get(
         dailyPay: money(rates.dailyPay),
         extraHourPay: money(rates.extraHourPay),
         daysWorked: breakdown.daysWorked,
+        dayUnits: breakdown.dayUnits,
+        fullDays: breakdown.fullDays,
+        partialDays: breakdown.partialDays,
+        extraOnlyDays: breakdown.extraOnlyDays,
+        totalRegularHours: money(breakdown.totalRegularHours),
         totalExtraHours: money(breakdown.totalExtraHours),
         dayPayTotal: money(breakdown.dayPayTotal),
         extraPayTotal: money(breakdown.extraPayTotal),
