@@ -995,6 +995,12 @@ model InvProject {
   /// Share a sale shortfall by ownership instead of strict capital-first.
   shareLossesByOwnership Boolean @default(true)
   agreementNotes   String?
+  /// Purchase contract: seller, deed, registry, down payment, seller installments (JSON).
+  contractDetails  Json?
+  /// Latest valuation assumption for the land (what it is worth today).
+  estimatedValue     Decimal?       @db.Decimal(18, 3)
+  estimatedValueDate DateTime?      @db.Date
+  estimatedValueNote String?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   closedAt         DateTime?
@@ -1064,6 +1070,10 @@ model InvContribution {
   currency       String               @db.VarChar(3)
   contributedAt  DateTime             @db.Date
   description    String?
+  /// cash | bank_transfer | cheque | other
+  paymentMethod  String?
+  /// Transfer / cheque / receipt number.
+  paymentRef     String?
   /// Counts toward ownership equity pool.
   countsAsEquity Boolean              @default(true)
   approvalStatus InvApprovalStatus    @default(approved)
@@ -1098,6 +1108,10 @@ model InvExpense {
   approvedBy       String?
   approvedAt       DateTime?
   rejectedReason   String?
+  /// Who bears the cost: ownership (default) | equal | custom.
+  splitMode        String           @default("ownership")
+  /// custom: { investorId: percent } summing to 100.
+  splitShares      Json?
   createdBy        String?
   /// Maker id — cannot equal approvedBy (maker-checker).
   createdAt        DateTime         @default(now())

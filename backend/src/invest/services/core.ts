@@ -7,6 +7,7 @@ import {
 } from "../finance";
 import { dstr } from "../lib/moneyField";
 import { Decimal } from "../finance/decimal";
+import { allocateSplit, splitWeights } from "./expenseSplit";
 
 const DEFAULT_ORG_SLUG = "alshantaf";
 
@@ -64,6 +65,10 @@ export type ResolvedPartner = {
   expensesOutstanding: MoneyString;
   /** Pending (not yet approved) partner-paid expenses. */
   expensesPending: MoneyString;
+  /** Share this partner bears of approved expenses split equally / custom (not by ownership). */
+  expenseBurden: MoneyString;
+  /** Same for pending expenses (used by previews). */
+  expenseBurdenPending: MoneyString;
   ownershipMode: "capital" | "manual";
 };
 
@@ -87,8 +92,17 @@ export async function resolveProjectPartners(projectId: string): Promise<Resolve
   }
 
   const expenses = await prisma.invExpense.findMany({
-    where: { projectId, status: { in: ["approved", "pending"] } },
+    where: { projectId, status: { in: ["approved", "pending", "reimbursed"] } },
   });
+  const memberIds = memberships.map((m) => m.investorId);
+  const burden = new Map<string, Decimal>(memberIds.map((id) => [id, new Decimal(0)]));
+  const burdenPending = new Map<string, Decimal>(memberIds.map((id) => [id, new Decimal(0)]));
+  for (const e of expenses) {
+    const w = splitWeights(e.splitMode, e.splitShares, memberIds);
+    if (!w) continue;
+    const target = e.status === "pending" ? burdenPending : burden;
+    for (const [id, amt] of allocateSplit(dstr(e.amount), w)) target.set(id, target.get(id)!.plus(amt));
+  }
   const coord = memberships.find((m) => m.isCoordinator);
   const outstanding = new Map<string, Decimal>(memberships.map((m) => [m.investorId, new Decimal(0)]));
   const pending = new Map<string, Decimal>(memberships.map((m) => [m.investorId, new Decimal(0)]));
@@ -133,6 +147,8 @@ export async function resolveProjectPartners(projectId: string): Promise<Resolve
     ownershipPercent: percentByInvestor.get(m.investorId) ?? "0",
     expensesOutstanding: (outstanding.get(m.investorId) ?? new Decimal(0)).toFixed(3),
     expensesPending: (pending.get(m.investorId) ?? new Decimal(0)).toFixed(3),
+    expenseBurden: (burden.get(m.investorId) ?? new Decimal(0)).toFixed(3),
+    expenseBurdenPending: (burdenPending.get(m.investorId) ?? new Decimal(0)).toFixed(3),
     ownershipMode: hasExplicit ? "manual" : "capital",
   }));
 }

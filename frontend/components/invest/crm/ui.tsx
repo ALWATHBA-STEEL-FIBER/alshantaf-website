@@ -291,3 +291,16 @@ export function todayISO() {
   const off = d.getTimezoneOffset();
   return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
 }
+
+export const PAYMENT_METHOD_LABELS: Record<string, [string, string]> = {
+  cash: ["نقداً", "Cash"],
+  bank_transfer: ["حوالة بنكية", "Bank transfer"],
+  cheque: ["شيك", "Cheque"],
+  other: ["أخرى", "Other"],
+};
+
+export const SPLIT_MODE_LABELS: Record<string, [string, string, string, string]> = {
+  ownership: ["حسب نسب الملكية", "By ownership", "كل شريك يتحمل بنسبة حصته في الأرض", "Each partner carries it by ownership share"],
+  equal: ["بالتساوي", "Equally", "نفس المبلغ على كل شريك", "Same amount for every partner"],
+  custom: ["نسب مخصصة", "Custom %", "حدد نسبة كل شريك (مثلاً 100% على شريك واحد)", "Set each partner's % (e.g. 100% on one partner)"],
+};

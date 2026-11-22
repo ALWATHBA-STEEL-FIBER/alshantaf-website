@@ -60,6 +60,7 @@ export async function createAndPostSettlement(
       capitalContributed: p.capitalContributed,
       ownershipPercent: p.ownershipPercent,
       expensesOutstanding: p.expensesOutstanding,
+      expenseBurden: p.expenseBurden,
     })),
     commission: commissionRuleFor(cleanCommissionRule(project.commissionRule), partners),
     coordinatorParticipatesInProfit: project.coordinatorParticipatesInProfit,

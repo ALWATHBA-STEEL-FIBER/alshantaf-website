@@ -11,7 +11,9 @@ import {
   resolveProjectPartners,
   type ResolvedPartner,
 } from "./core";
-import { serializeExpense } from "./capitalExpenseService";
+import { serializeContribution, serializeExpense } from "./capitalExpenseService";
+import { cleanContract, contractProgress, readContract } from "./contract";
+import { allocateSplit, splitWeights } from "./expenseSplit";
 
 type Actor = { id?: string; email?: string };
 
@@ -318,6 +320,131 @@ export async function getProjectDetail(projectId: string) {
   const partners = await resolveProjectPartners(projectId);
   const stats = await projectStats(project, partners);
   const rule = cleanCommissionRule(project.commissionRule);
+  const contract = readContract(project.contractDetails);
+  const memberIds = partners.map((x) => x.investorId);
+  const ownershipW = new Map(partners.map((x) => [x.investorId, new Decimal(x.ownershipPercent || 0)]));
+  const ownershipSum = [...ownershipW.values()].reduce((a, b) => a.plus(b), new Decimal(0));
+  const ACTIVE_EXPENSE = ["pending", "approved", "reimbursed"];
+
+  /** Who carries each expense, in amount and %. */
+  function allocationOf(e: { amount: { toString(): string }; splitMode: string; splitShares: unknown }) {
+    const custom = splitWeights(e.splitMode, e.splitShares, memberIds);
+    const w = custom ?? (ownershipSum.gt(0) ? ownershipW : null);
+    if (!w) return [];
+    const total = [...w.values()].reduce((a, b) => a.plus(b), new Decimal(0));
+    const amounts = allocateSplit(dstr(e.amount), w);
+    return [...w.entries()].map(([investorId, wt]) => ({
+      investorId,
+      percent: wt.times(100).dividedBy(total).toFixed(4),
+      amount: (amounts.get(investorId) ?? new Decimal(0)).toFixed(3),
+    }));
+  }
+
+  const expenseRows = project.expenses.map((e) => ({
+    ...serializeExpense(e),
+    allocation: allocationOf(e),
+    splitFallback: e.splitMode !== "ownership" && !splitWeights(e.splitMode, e.splitShares, memberIds),
+  }));
+
+  // Cost breakdown: what the land + expenses cost, and each partner's share of it.
+  const byCategory = new Map<string, { amount: Decimal; count: number }>();
+  const shareOf = new Map<string, Decimal>(memberIds.map((id) => [id, new Decimal(0)]));
+  const paidBy = new Map<string, Decimal>(memberIds.map((id) => [id, new Decimal(0)]));
+  let expensesTotal = new Decimal(0);
+  for (const e of expenseRows) {
+    if (!ACTIVE_EXPENSE.includes(e.status)) continue;
+    const amt = new Decimal(dstr(e.amount.amount));
+    expensesTotal = expensesTotal.plus(amt);
+    const k = e.category || "other";
+    const row = byCategory.get(k) ?? { amount: new Decimal(0), count: 0 };
+    byCategory.set(k, { amount: row.amount.plus(amt), count: row.count + 1 });
+    for (const a of e.allocation) shareOf.set(a.investorId, (shareOf.get(a.investorId) ?? new Decimal(0)).plus(a.amount));
+    if (e.payerInvestorId && paidBy.has(e.payerInvestorId)) paidBy.set(e.payerInvestorId, paidBy.get(e.payerInvestorId)!.plus(amt));
+  }
+  const purchase = project.purchasePrice != null ? new Decimal(dstr(project.purchasePrice)) : new Decimal(0);
+  const totalCost = purchase.plus(expensesTotal);
+  const area = project.landAreaSqm != null ? Number(dstr(project.landAreaSqm)) : 0;
+  const costs = {
+    purchasePrice: purchase.toFixed(3),
+    expensesTotal: expensesTotal.toFixed(3),
+    totalCost: totalCost.toFixed(3),
+    costPerSqm: area > 0 ? totalCost.dividedBy(area).toFixed(3) : null,
+    byCategory: [...byCategory.entries()]
+      .map(([category, v]) => ({
+        category,
+        amount: v.amount.toFixed(3),
+        count: v.count,
+        percentOfCost: totalCost.gt(0) ? v.amount.times(100).dividedBy(totalCost).toFixed(2) : "0",
+      }))
+      .sort((a, b) => Number(b.amount) - Number(a.amount)),
+    perPartner: partners.map((x) => {
+      const own = ownershipSum.gt(0) ? new Decimal(x.ownershipPercent || 0).dividedBy(ownershipSum) : new Decimal(0);
+      const landShare = purchase.times(own);
+      const expShare = shareOf.get(x.investorId) ?? new Decimal(0);
+      const costShare = landShare.plus(expShare);
+      const put = new Decimal(x.capitalContributed).plus(paidBy.get(x.investorId) ?? 0);
+      return {
+        investorId: x.investorId,
+        name: x.label,
+        code: x.code,
+        isCoordinator: x.isCoordinator,
+        ownershipPercent: x.ownershipPercent,
+        capital: x.capitalContributed,
+        expensesPaid: (paidBy.get(x.investorId) ?? new Decimal(0)).toFixed(3),
+        landShare: landShare.toFixed(3),
+        expenseShare: expShare.toFixed(3),
+        expenseSharePercent: expensesTotal.gt(0) ? expShare.times(100).dividedBy(expensesTotal).toFixed(2) : "0",
+        costShare: costShare.toFixed(3),
+        costSharePercent: totalCost.gt(0) ? costShare.times(100).dividedBy(totalCost).toFixed(2) : "0",
+        /** Paid in (capital + expenses) minus their share of the cost: + means they fronted money for others. */
+        balance: put.minus(costShare).toFixed(3),
+      };
+    }),
+  };
+
+  // Valuation: what everyone would get if the land sold today at the assumed value.
+  type ValuationLine = { investorId: string; name: string; totalPayout: string; netGain: string; profitShare: string; roiPercent: string };
+  let valuation: null | {
+    value: string;
+    date: string | null;
+    note: string | null;
+    gain: string;
+    gainPercent: string | null;
+    perSqm: string | null;
+    lines: ValuationLine[];
+    error?: string;
+  } = null;
+  if (project.estimatedValue != null) {
+    const value = new Decimal(dstr(project.estimatedValue));
+    const gain = value.minus(totalCost);
+    let lines: ValuationLine[] = [];
+    let error: string | undefined;
+    if (partners.length) {
+      try {
+        const sim = await simulateProject(projectId, { saleProceeds: value.toFixed(3) });
+        lines = sim.lines.map((l) => ({
+          investorId: l.partnerId,
+          name: l.label,
+          totalPayout: l.totalPayout,
+          netGain: l.netGain,
+          profitShare: l.profitShare,
+          roiPercent: l.roiPercent,
+        }));
+      } catch (err) {
+        error = err instanceof Error ? err.message : "تعذّر الحساب";
+      }
+    }
+    valuation = {
+      value: value.toFixed(3),
+      date: project.estimatedValueDate?.toISOString().slice(0, 10) ?? null,
+      note: project.estimatedValueNote,
+      gain: gain.toFixed(3),
+      gainPercent: totalCost.gt(0) ? gain.times(100).dividedBy(totalCost).toFixed(1) : null,
+      perSqm: area > 0 ? value.dividedBy(area).toFixed(3) : null,
+      lines,
+      ...(error ? { error } : {}),
+    };
+  }
 
   return {
     ...serializeProjectSummary(project),
@@ -331,6 +458,13 @@ export async function getProjectDetail(projectId: string) {
     expectedSaleDate: project.expectedSaleDate?.toISOString().slice(0, 10) ?? null,
     actualSaleDate: project.actualSaleDate?.toISOString().slice(0, 10) ?? null,
     agreementNotes: project.agreementNotes,
+    contract,
+    contractProgress: contractProgress(contract, project.purchasePrice != null ? dstr(project.purchasePrice) : null),
+    estimatedValue: project.estimatedValue != null ? dstr(project.estimatedValue) : null,
+    estimatedValueDate: project.estimatedValueDate?.toISOString().slice(0, 10) ?? null,
+    estimatedValueNote: project.estimatedValueNote,
+    costs,
+    valuation,
     commissionRule: rule,
     coordinatorParticipatesInProfit: project.coordinatorParticipatesInProfit,
     shareLossesByOwnership: project.shareLossesByOwnership,
@@ -364,21 +498,12 @@ export async function getProjectDetail(projectId: string) {
       capital: p.capitalContributed,
       expensesOutstanding: p.expensesOutstanding,
       expensesPending: p.expensesPending,
+      expenseBurden: p.expenseBurden,
       notes: p.notes,
       joinedAt: p.joinedAt,
     })),
-    contributions: project.contributions.map((c) => ({
-      id: c.id,
-      investorId: c.investorId,
-      investorName: c.investor.displayName || c.investor.legalName,
-      investorCode: c.investor.code,
-      amount: moneyField(c.amount, { currency: c.currency, finalized: c.approvalStatus === "approved" }),
-      contributedAt: c.contributedAt.toISOString().slice(0, 10),
-      status: c.approvalStatus,
-      notes: c.description,
-      kind: c.kind,
-    })),
-    expenses: project.expenses.map(serializeExpense),
+    contributions: project.contributions.map(serializeContribution),
+    expenses: expenseRows,
     documents: project.documents.map((d) => ({
       id: d.id,
       name: d.name,
@@ -449,6 +574,10 @@ export async function updateProject(projectId: string, data: Record<string, unkn
       expectedSaleDate: has("expectedSaleDate") ? dateOrNull(data.expectedSaleDate) : undefined,
       actualSaleDate: has("actualSaleDate") ? dateOrNull(data.actualSaleDate) : undefined,
       agreementNotes: has("agreementNotes") ? str(data.agreementNotes) : undefined,
+      contractDetails: has("contract") ? (cleanContract(data.contract) as object) : undefined,
+      estimatedValue: has("estimatedValue") ? moneyOrNull(data.estimatedValue) : undefined,
+      estimatedValueDate: has("estimatedValueDate") ? dateOrNull(data.estimatedValueDate) : undefined,
+      estimatedValueNote: has("estimatedValueNote") ? str(data.estimatedValueNote)?.slice(0, 2000) ?? null : undefined,
       commissionRule: has("commissionRule") ? (cleanCommissionRule(data.commissionRule) as object) : undefined,
       coordinatorParticipatesInProfit: has("coordinatorParticipatesInProfit")
         ? Boolean(data.coordinatorParticipatesInProfit)
@@ -551,6 +680,10 @@ export async function simulateProject(projectId: string, body: Record<string, un
         body.includePending === false
           ? p.expensesOutstanding
           : new Decimal(p.expensesOutstanding).plus(p.expensesPending).toFixed(3),
+      expenseBurden:
+        body.includePending === false
+          ? p.expenseBurden
+          : new Decimal(p.expenseBurden).plus(p.expenseBurdenPending).toFixed(3),
     })),
     commission: commissionRuleFor(ruleRaw, partners),
     coordinatorParticipatesInProfit: project.coordinatorParticipatesInProfit,

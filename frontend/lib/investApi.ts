@@ -383,6 +383,7 @@ export type ProjectMember = {
   capital: string;
   expensesOutstanding: string;
   expensesPending: string;
+  expenseBurden?: string;
   notes: string | null;
   joinedAt: string;
 };
@@ -404,6 +405,12 @@ export type ProjectExpense = {
   payerName: string | null;
   payerCode: string | null;
   reimbursable: boolean;
+  splitMode: "ownership" | "equal" | "custom" | string;
+  splitShares: Record<string, string> | null;
+  /** Who carries this expense (amount + % per partner). */
+  allocation?: { investorId: string; percent: string; amount: string }[];
+  /** Custom split no longer matches any active partner → falls back to ownership. */
+  splitFallback?: boolean;
 };
 
 export type ProjectContribution = {
@@ -416,6 +423,85 @@ export type ProjectContribution = {
   status: string;
   notes: string | null;
   kind: string;
+  paymentMethod: string | null;
+  paymentRef: string | null;
+  edited?: boolean;
+};
+
+export type SellerInstallment = {
+  id: string;
+  label: string;
+  amount: string;
+  dueDate: string | null;
+  paidDate: string | null;
+  note: string | null;
+};
+
+export type ContractDetails = {
+  contractNo: string | null;
+  contractDate: string | null;
+  sellerName: string | null;
+  sellerIdNo: string | null;
+  sellerPhone: string | null;
+  registeredTo: string | null;
+  deedNo: string | null;
+  registryOffice: string | null;
+  village: string | null;
+  basin: string | null;
+  plotNo: string | null;
+  brokerName: string | null;
+  brokerFee: string | null;
+  contractPrice: string | null;
+  downPayment: string | null;
+  downPaymentDate: string | null;
+  paymentTerms: string | null;
+  transferDate: string | null;
+  notes: string | null;
+  installments: SellerInstallment[];
+};
+
+export type ContractProgress = {
+  price: string;
+  paid: string;
+  remaining: string;
+  scheduled: string;
+  unscheduled: string;
+  overdue: string;
+  paidPercent: string | null;
+};
+
+export type ProjectCosts = {
+  purchasePrice: string;
+  expensesTotal: string;
+  totalCost: string;
+  costPerSqm: string | null;
+  byCategory: { category: string; amount: string; count: number; percentOfCost: string }[];
+  perPartner: {
+    investorId: string;
+    name: string;
+    code: string | null;
+    isCoordinator: boolean;
+    ownershipPercent: string;
+    capital: string;
+    expensesPaid: string;
+    landShare: string;
+    expenseShare: string;
+    expenseSharePercent: string;
+    costShare: string;
+    costSharePercent: string;
+    balance: string;
+  }[];
+};
+
+export type ProjectValuation = {
+  value: string;
+  date: string | null;
+  note: string | null;
+  gain: string;
+  gainPercent: string | null;
+  perSqm: string | null;
+  lines: { investorId: string; name: string; totalPayout: string; netGain: string; profitShare: string; roiPercent: string }[];
+  error?: string;
 };
 
 export type ProjectFull = InvestProjectSummary & {
@@ -429,6 +515,13 @@ export type ProjectFull = InvestProjectSummary & {
   expectedSaleDate: string | null;
   actualSaleDate: string | null;
   agreementNotes: string | null;
+  contract: ContractDetails | null;
+  contractProgress: ContractProgress;
+  estimatedValue: string | null;
+  estimatedValueDate: string | null;
+  estimatedValueNote: string | null;
+  costs: ProjectCosts;
+  valuation: ProjectValuation | null;
   commissionRule: CommissionRule;
   coordinatorParticipatesInProfit: boolean;
   shareLossesByOwnership: boolean;
@@ -456,6 +549,7 @@ export type DistributionLine = {
   expensesPaid?: string;
   capitalReturned: string;
   expenseReimbursement: string;
+  expenseSplitAdjustment?: string;
   grossProfit: string;
   commissionPaid: string;
   commissionRatePercent?: string;
@@ -549,12 +643,20 @@ export const crmApi = {
     clientFetch<unknown>(`/invest/projects/${projectId}/contributions`, { method: "POST", body: JSON.stringify(data) }),
   reverseContribution: (id: string, reason?: string) =>
     clientFetch<unknown>(`/invest/contributions/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
+  updateContribution: (id: string, data: Record<string, unknown>) =>
+    clientFetch<ProjectContribution>(`/invest/contributions/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteContribution: (id: string, reason?: string) =>
+    clientFetch<unknown>(`/invest/contributions/${id}${qs({ reason })}`, { method: "DELETE" }),
 
   addExpense: (projectId: string, data: Record<string, unknown>) =>
     clientFetch<ProjectExpense>(`/invest/projects/${projectId}/expenses`, { method: "POST", body: JSON.stringify(data) }),
   approveExpense: (id: string) => clientFetch<unknown>(`/invest/expenses/${id}/approve`, { method: "POST", body: "{}" }),
   reverseExpense: (id: string, reason?: string) =>
     clientFetch<unknown>(`/invest/expenses/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
+  updateExpense: (id: string, data: Record<string, unknown>) =>
+    clientFetch<ProjectExpense>(`/invest/expenses/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteExpense: (id: string, reason?: string) =>
+    clientFetch<unknown>(`/invest/expenses/${id}${qs({ reason })}`, { method: "DELETE" }),
 
   preview: (data: Record<string, unknown>) =>
     clientFetch<DistributionResult>("/invest/preview", { method: "POST", body: JSON.stringify(data) }),

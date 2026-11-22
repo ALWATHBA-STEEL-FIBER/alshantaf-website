@@ -84,3 +84,45 @@ describe("loss shared by ownership", () => {
     expect(r.balanced).toBe(true);
   });
 });
+
+describe("custom expense split", () => {
+  it("ownership split (no burdens) matches the default result", () => {
+    const base = runSettlement({ saleProceeds: "960000", partners, commission: { basis: "investor_net_profit", percent: 10 } });
+    const owned = runSettlement({
+      saleProceeds: "960000",
+      partners: partners.map((p) => ({ ...p, expenseBurden: String(Number(p.ownershipPercent) * 1000) })),
+      commission: { basis: "investor_net_profit", percent: 10 },
+    });
+    expect(owned.partnerLines.map((l) => l.totalPayout)).toEqual(base.partnerLines.map((l) => l.totalPayout));
+  });
+
+  it("an expense carried 100% by the coordinator comes out of his profit only", () => {
+    const r = runSettlement({
+      saleProceeds: "960000",
+      partners: partners.map((p) => ({ ...p, expenseBurden: p.partnerId === "me" ? "100000" : "0" })),
+      commission: { basis: "investor_net_profit", percent: 0 },
+    });
+    const by = Object.fromEntries(r.partnerLines.map((l) => [l.partnerId, l]));
+    // Without the expense profit would be 460k → 92k / 184k / 184k; the coordinator carries the 100k.
+    expect(by.me.grossProfit).toBe("-8000.000");
+    expect(by.a.grossProfit).toBe("184000.000");
+    expect(by.b.grossProfit).toBe("184000.000");
+    expect(by.me.totalPayout).toBe("192000.000");
+    expect(sumMoney(r.partnerLines.map((l) => l.totalPayout), 3)).toBe("960000.000");
+    expect(r.balanced).toBe(true);
+  });
+
+  it("cut is charged on the adjusted profit", () => {
+    const r = runSettlement({
+      saleProceeds: "960000",
+      partners: partners.map((p) => ({ ...p, expenseBurden: p.partnerId === "a" ? "100000" : "0" })),
+      commission: { basis: "investor_net_profit", percent: 10 },
+    });
+    const by = Object.fromEntries(r.partnerLines.map((l) => [l.partnerId, l]));
+    // A: 40% of 460k = 184k − 100k = 84k gross, 8.4k cut.
+    expect(by.a.grossProfit).toBe("84000.000");
+    expect(by.a.commissionPaid).toBe("8400.000");
+    expect(sumMoney(r.partnerLines.map((l) => l.totalPayout), 3)).toBe("960000.000");
+    expect(r.balanced).toBe(true);
+  });
+});

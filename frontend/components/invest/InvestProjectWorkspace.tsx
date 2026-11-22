@@ -8,9 +8,15 @@ import {
   type CommissionRule,
   type DistributionResult,
   type PostedSettlement,
+  type ProjectContribution,
+  type ProjectExpense,
   type ProjectFull,
   type ProjectMember,
 } from "@/lib/investApi";
+import { ContractTab } from "./crm/ContractTab";
+import { CostsTab } from "./crm/CostsTab";
+import { ContributionEditModal, ExpenseEditModal, KIND_LABELS } from "./crm/EditModals";
+import { AllocationChips, SplitEditor, splitPayload, type SplitValue } from "./crm/SplitEditor";
 import { SkeletonBlock } from "@/components/admin/EmptyState";
 import { CommissionEditor } from "./crm/CommissionEditor";
 import { DistributionTable, WaterfallSummary } from "./crm/DistributionTable";
@@ -26,6 +32,8 @@ import {
   MANUAL_STATUSES,
   Modal,
   MoneyInput,
+  PAYMENT_METHOD_LABELS,
+  SPLIT_MODE_LABELS,
   STATUS_LABELS,
   StatusPill,
   btnGhost,
@@ -39,7 +47,7 @@ import {
   useT,
 } from "./crm/ui";
 
-type TabId = "overview" | "partners" | "capital" | "expenses" | "payout" | "details";
+type TabId = "overview" | "partners" | "capital" | "expenses" | "costs" | "contract" | "payout" | "details";
 
 export function InvestProjectWorkspace({ projectId }: { projectId: string }) {
   const { t } = useT();
@@ -90,6 +98,8 @@ export function InvestProjectWorkspace({ projectId }: { projectId: string }) {
     ["partners", t("الشركاء", "Partners"), String(p.members.length)],
     ["capital", t("رأس المال", "Capital")],
     ["expenses", t("المصاريف", "Expenses"), s.expensesPendingCount ? `${s.expensesPendingCount}!` : undefined],
+    ["costs", t("التكاليف والتقييم", "Costs & value")],
+    ["contract", t("العقد", "Contract")],
     ["payout", p.closed ? t("التوزيع النهائي", "Final payout") : t("البيع والتوزيع", "Sale & payout")],
     ["details", t("البيانات والسجل", "Details & log")],
   ];
@@ -160,6 +170,8 @@ export function InvestProjectWorkspace({ projectId }: { projectId: string }) {
       {tab === "partners" && <PartnersTab p={p} done={done} />}
       {tab === "capital" && <CapitalTab p={p} done={done} />}
       {tab === "expenses" && <ExpensesTab p={p} done={done} />}
+      {tab === "costs" && <CostsTab p={p} done={done} />}
+      {tab === "contract" && <ContractTab p={p} done={done} />}
       {tab === "payout" && <PayoutTab p={p} done={done} />}
       {tab === "details" && <DetailsTab p={p} done={done} />}
     </div>
@@ -504,14 +516,6 @@ function MemberModal({ p, m, onClose, done }: { p: ProjectFull; m: ProjectMember
 }
 
 // ── Capital ────────────────────────────────────────────────
-const KIND_LABELS: Record<string, [string, string]> = {
-  initial: ["دفعة أولى", "Initial"],
-  additional: ["دفعة إضافية", "Additional"],
-  capital_call: ["طلب تمويل", "Capital call"],
-  adjustment: ["تسوية", "Adjustment"],
-  withdrawal: ["سحب", "Withdrawal"],
-};
-
 function CapitalTab({ p, done }: TabProps) {
   const { t, lang } = useT();
   const [investorId, setInvestorId] = useState(p.members[0]?.investorId ?? "");
@@ -519,17 +523,22 @@ function CapitalTab({ p, done }: TabProps) {
   const [kind, setKind] = useState("additional");
   const [date, setDate] = useState(todayISO());
   const [notes, setNotes] = useState("");
+  const [method, setMethod] = useState("bank_transfer");
+  const [ref, setRef] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [editing, setEditing] = useState<ProjectContribution | null>(null);
+  const [who, setWho] = useState("all");
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
     try {
-      await crmApi.addContribution(p.id, { investorId, amount, kind, contributedAt: date, notes });
+      await crmApi.addContribution(p.id, { investorId, amount, kind, contributedAt: date, notes, paymentMethod: method || undefined, paymentRef: ref });
       setAmount("");
       setNotes("");
+      setRef("");
       await done(t("تم تسجيل الدفعة", "Payment recorded"));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed");
@@ -538,16 +547,23 @@ function CapitalTab({ p, done }: TabProps) {
     }
   }
 
-  async function reverse(id: string) {
-    const reason = prompt(t("سبب العكس؟", "Reason for reversal?"));
-    if (reason == null) return;
+  async function remove(c: ProjectContribution) {
+    setError("");
+    if (!confirm(t(`حذف دفعة ${fmt(c.amount)} لـ ${c.investorName}؟ سيُعكس قيدها وتتحدّث نسب الملكية.`, `Delete the ${fmt(c.amount)} payment of ${c.investorName}? Its entry is reversed and ownership updates.`))) return;
     try {
-      await crmApi.reverseContribution(id, reason);
-      await done(t("تم عكس الدفعة", "Payment reversed"));
+      await crmApi.deleteContribution(c.id);
+      await done(t("تم حذف الدفعة", "Payment deleted"));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed");
     }
   }
+
+  const rows = p.contributions.filter((c) => who === "all" || c.investorId === who);
+  const perPartner = p.members.map((m) => {
+    const mine = p.contributions.filter((c) => c.investorId === m.investorId && c.status === "approved");
+    const first = [...mine].filter((c) => c.kind !== "withdrawal").sort((a, b) => a.contributedAt.localeCompare(b.contributedAt))[0];
+    return { m, count: mine.length, first };
+  });
 
   return (
     <div className="space-y-4">
@@ -581,7 +597,20 @@ function CapitalTab({ p, done }: TabProps) {
             <button className={btnPrimary} disabled={busy || !amount}>
               {t("تسجيل", "Record")}
             </button>
-            <Field label={t("ملاحظة / رقم الحوالة", "Note / transfer ref")} className="sm:col-span-2 lg:col-span-5">
+            <Field label={t("طريقة الدفع", "Method")}>
+              <select className={inputCls} value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="">—</option>
+                {Object.entries(PAYMENT_METHOD_LABELS).map(([k, [ar, en]]) => (
+                  <option key={k} value={k}>
+                    {lang === "ar" ? ar : en}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t("رقم الحوالة / الشيك / الوصل", "Transfer / cheque / receipt no.")} className="lg:col-span-2">
+              <input className={inputCls} dir="ltr" value={ref} onChange={(e) => setRef(e.target.value)} />
+            </Field>
+            <Field label={t("ملاحظة", "Note")} className="sm:col-span-2 lg:col-span-2">
               <input className={inputCls} value={notes} onChange={(e) => setNotes(e.target.value)} />
             </Field>
           </form>
@@ -589,44 +618,96 @@ function CapitalTab({ p, done }: TabProps) {
         </Card>
       ) : null}
 
+      {p.closed ? <ErrorNote message={error} /> : null}
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {perPartner.map(({ m, count, first }) => (
+          <button
+            key={m.investorId}
+            type="button"
+            onClick={() => setWho(who === m.investorId ? "all" : m.investorId)}
+            className={`text-start rounded-2xl border p-3 ${who === m.investorId ? "border-gold bg-gold/10" : "border-line bg-white hover:bg-surface-2"}`}
+          >
+            <div className="flex items-center gap-2">
+              <Avatar name={m.investorName} coordinator={m.isCoordinator} />
+              <div className="min-w-0 flex-1">
+                <div className="font-bold text-sm truncate">{m.investorName}</div>
+                <div className="text-[11px] text-ink-soft">
+                  {count} {t("دفعة", "payments")} · {fmtPct(m.ownershipPercent)}
+                </div>
+              </div>
+              <div className="text-end">
+                <div className="font-extrabold tabular-nums">{fmt(m.capital, { decimals: 0 })}</div>
+                <div className="text-[10px] text-ink-soft">JOD</div>
+              </div>
+            </div>
+            {first ? (
+              <div className="text-[11px] text-ink-soft mt-2">
+                {t("الدفعة الأولى", "First payment")}: <b className="text-ink tabular-nums">{fmt(first.amount, { decimals: 0 })}</b> · <span dir="ltr">{first.contributedAt}</span>
+                {first.paymentMethod ? ` · ${PAYMENT_METHOD_LABELS[first.paymentMethod]?.[lang === "ar" ? 0 : 1] ?? ""}` : ""}
+              </div>
+            ) : (
+              <div className="text-[11px] text-amber-800 mt-2">{t("لم يدفع بعد", "Has not paid yet")}</div>
+            )}
+          </button>
+        ))}
+      </div>
+
       <div className="rounded-2xl border border-line bg-white overflow-x-auto">
-        <table className="w-full text-sm min-w-[640px]">
+        <table className="w-full text-sm min-w-[820px]">
           <thead className="bg-surface-2 text-[11px] text-ink-soft">
             <tr>
               <th className="px-3 py-2.5 text-start">{t("التاريخ", "Date")}</th>
               <th className="px-3 py-2.5 text-start">{t("الشريك", "Partner")}</th>
               <th className="px-3 py-2.5 text-start">{t("النوع", "Type")}</th>
               <th className="px-3 py-2.5 text-start">{t("المبلغ", "Amount")}</th>
+              <th className="px-3 py-2.5 text-start">{t("طريقة الدفع / المرجع", "Method / ref")}</th>
               <th className="px-3 py-2.5 text-start">{t("ملاحظة", "Note")}</th>
               <th className="px-3 py-2.5" />
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {p.contributions.map((c) => {
+            {rows.map((c) => {
               const reversed = c.status !== "approved";
               return (
                 <tr key={c.id} className={reversed ? "opacity-50" : ""}>
                   <td className="px-3 py-2.5 tabular-nums whitespace-nowrap">{c.contributedAt}</td>
-                  <td className="px-3 py-2.5 font-bold">{c.investorName}</td>
+                  <td className="px-3 py-2.5 font-bold">
+                    {c.investorName}
+                    {c.investorCode ? <span className="block text-[10px] text-ink-soft font-normal">{c.investorCode}</span> : null}
+                  </td>
                   <td className="px-3 py-2.5">{KIND_LABELS[c.kind]?.[lang === "ar" ? 0 : 1] ?? c.kind}</td>
                   <td className={`px-3 py-2.5 tabular-nums font-bold ${reversed ? "line-through" : ""} ${c.kind === "withdrawal" ? "text-red-700" : ""}`}>
                     {c.kind === "withdrawal" ? "−" : ""}
                     {fmt(c.amount)}
                   </td>
+                  <td className="px-3 py-2.5 text-xs">
+                    {c.paymentMethod ? PAYMENT_METHOD_LABELS[c.paymentMethod]?.[lang === "ar" ? 0 : 1] : "—"}
+                    {c.paymentRef ? (
+                      <span className="block text-[11px] text-ink-soft" dir="ltr">
+                        {c.paymentRef}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-2.5 text-ink-soft">{reversed ? t("معكوسة", "Reversed") : c.notes}</td>
-                  <td className="px-3 py-2.5 text-end">
+                  <td className="px-3 py-2.5 text-end whitespace-nowrap">
                     {!reversed && !p.closed ? (
-                      <button className="text-xs font-bold text-red-700" onClick={() => reverse(c.id)}>
-                        {t("عكس", "Reverse")}
+                      <button className="text-xs font-bold text-green px-2" onClick={() => setEditing(c)}>
+                        {t("تعديل", "Edit")}
+                      </button>
+                    ) : null}
+                    {!p.closed ? (
+                      <button className="text-xs font-bold text-red-700 px-2" onClick={() => remove(c)}>
+                        {t("حذف", "Delete")}
                       </button>
                     ) : null}
                   </td>
                 </tr>
               );
             })}
-            {!p.contributions.length ? (
+            {!rows.length ? (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-ink-soft">
+                <td colSpan={7} className="px-3 py-6 text-center text-ink-soft">
                   {t("لا دفعات بعد", "No payments yet")}
                 </td>
               </tr>
@@ -634,6 +715,7 @@ function CapitalTab({ p, done }: TabProps) {
           </tbody>
         </table>
       </div>
+      {editing ? <ContributionEditModal c={editing} members={p.members} onClose={() => setEditing(null)} onSaved={done} /> : null}
     </div>
   );
 }
@@ -650,6 +732,8 @@ function ExpensesTab({ p, done }: TabProps) {
   const [date, setDate] = useState(todayISO());
   const [description, setDescription] = useState("");
   const [approveNow, setApproveNow] = useState(true);
+  const [split, setSplit] = useState<SplitValue>({ mode: "ownership", shares: {} });
+  const [editing, setEditing] = useState<ProjectExpense | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
@@ -669,10 +753,12 @@ function ExpensesTab({ p, done }: TabProps) {
         expenseDate: date,
         description,
         approveNow,
+        ...splitPayload(split),
       });
       setTitle("");
       setAmount("");
       setDescription("");
+      setSplit({ mode: "ownership", shares: {} });
       await done(t("تمت إضافة المصروف", "Expense added"));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed");
@@ -681,16 +767,19 @@ function ExpensesTab({ p, done }: TabProps) {
     }
   }
 
-  async function act(id: string, action: "approve" | "void") {
+  async function act(id: string, action: "approve" | "void" | "delete") {
     setError("");
     try {
       if (action === "approve") await crmApi.approveExpense(id);
-      else {
+      else if (action === "delete") {
+        if (!confirm(t("حذف المصروف نهائياً؟ سيُعكس قيده المحاسبي.", "Delete this expense for good? Its entry is reversed."))) return;
+        await crmApi.deleteExpense(id);
+      } else {
         const reason = prompt(t("سبب الإلغاء؟", "Reason?"));
         if (reason == null) return;
         await crmApi.reverseExpense(id, reason);
       }
-      await done(action === "approve" ? t("تم الاعتماد", "Approved") : t("تم الإلغاء", "Voided"));
+      await done(action === "approve" ? t("تم الاعتماد", "Approved") : action === "delete" ? t("تم الحذف", "Deleted") : t("تم الإلغاء", "Voided"));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed");
     }
@@ -776,6 +865,7 @@ function ExpensesTab({ p, done }: TabProps) {
                 <input className={inputCls} value={description} onChange={(e) => setDescription(e.target.value)} />
               </Field>
             </div>
+            {p.members.length ? <SplitEditor members={p.members} amount={amount} value={split} onChange={setSplit} /> : null}
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-1.5 text-sm font-bold">
                 <input type="checkbox" checked={approveNow} onChange={(e) => setApproveNow(e.target.checked)} className="accent-[var(--color-green)]" />
@@ -839,6 +929,15 @@ function ExpensesTab({ p, done }: TabProps) {
                   <div className="font-bold">{e.title}</div>
                   {e.description ? <div className="text-[11px] text-ink-soft">{e.description}</div> : null}
                   {e.rejectedReason ? <div className="text-[11px] text-red-700">{e.rejectedReason}</div> : null}
+                  {["pending", "approved", "reimbursed"].includes(e.status) ? (
+                    <>
+                      <div className="text-[10px] text-ink-soft mt-1">
+                        {t("يتحمّله", "Carried")}: <b>{SPLIT_MODE_LABELS[e.splitFallback ? "ownership" : e.splitMode]?.[lang === "ar" ? 0 : 1] ?? e.splitMode}</b>
+                        {e.splitFallback ? ` (${t("الشركاء المحددون غادروا", "named partners left")})` : ""}
+                      </div>
+                      <AllocationChips allocation={e.allocation} members={p.members} />
+                    </>
+                  ) : null}
                 </td>
                 <td className="px-3 py-2.5 text-xs">{EXPENSE_CATEGORY_LABELS[e.category ?? ""]?.[lang === "ar" ? 0 : 1] ?? e.category ?? "—"}</td>
                 <td className="px-3 py-2.5 text-xs">
@@ -862,8 +961,18 @@ function ExpensesTab({ p, done }: TabProps) {
                     </button>
                   ) : null}
                   {!p.closed && ["pending", "approved"].includes(e.status) ? (
-                    <button className="text-xs font-bold text-red-700 px-2" onClick={() => act(e.id, "void")}>
-                      {t("إلغاء", "Void")}
+                    <>
+                      <button className="text-xs font-bold text-green px-2" onClick={() => setEditing(e)}>
+                        {t("تعديل", "Edit")}
+                      </button>
+                      <button className="text-xs font-bold text-amber-800 px-2" onClick={() => act(e.id, "void")}>
+                        {t("إلغاء", "Void")}
+                      </button>
+                    </>
+                  ) : null}
+                  {!p.closed && e.status !== "reimbursed" ? (
+                    <button className="text-xs font-bold text-red-700 px-2" onClick={() => act(e.id, "delete")}>
+                      {t("حذف", "Delete")}
                     </button>
                   ) : null}
                 </td>
@@ -879,6 +988,7 @@ function ExpensesTab({ p, done }: TabProps) {
           </tbody>
         </table>
       </div>
+      {editing ? <ExpenseEditModal e={editing} members={p.members} onClose={() => setEditing(null)} onSaved={done} /> : null}
     </div>
   );
 }

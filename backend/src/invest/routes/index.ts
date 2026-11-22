@@ -163,6 +163,32 @@ admin.post(
   })
 );
 
+admin.patch(
+  "/contributions/:id",
+  h(async (req) => capital.updateContribution(req.params.id, req.body ?? {}, actor(req)))
+);
+
+admin.delete(
+  "/contributions/:id",
+  h(async (req) => {
+    await capital.deleteContribution(req.params.id, actor(req), req.query.reason ? String(req.query.reason).slice(0, 500) : undefined);
+    return { ok: true };
+  })
+);
+
+admin.patch(
+  "/expenses/:id",
+  h(async (req) => capital.updateExpense(req.params.id, req.body ?? {}, actor(req)))
+);
+
+admin.delete(
+  "/expenses/:id",
+  h(async (req) => {
+    await capital.deleteExpense(req.params.id, actor(req), req.query.reason ? String(req.query.reason).slice(0, 500) : undefined);
+    return { ok: true };
+  })
+);
+
 admin.post(
   "/expenses/:id/reverse",
   h(async (req) => {

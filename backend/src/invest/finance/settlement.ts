@@ -34,6 +34,11 @@ export type PartnerSettlementInput = {
   ownershipPercent: MoneyString | string | number;
   /** Approved unreimbursed expenses paid by this partner. */
   expensesOutstanding: MoneyString | string | number;
+  /**
+   * This partner's share of the expenses that are NOT split by ownership (equal / custom split).
+   * Ownership-split expenses need no input: they already reduce everyone's profit pro-rata.
+   */
+  expenseBurden?: MoneyString | string | number;
 };
 
 export type SettlementInput = {
@@ -55,6 +60,8 @@ export type SettlementInput = {
    * capital-first waterfall. Default false here; projects opt in.
    */
   shareLossesByOwnership?: boolean;
+  /** Total of the expenses split equally / custom (sum of every partner's expenseBurden). */
+  customSplitExpenses?: MoneyString | string | number;
 };
 
 export type PartnerPayoutLine = {
@@ -67,6 +74,11 @@ export type PartnerPayoutLine = {
   expensesPaid: MoneyString;
   capitalReturned: MoneyString;
   expenseReimbursement: MoneyString;
+  /**
+   * Profit moved to/from this partner because some expenses are not split by ownership
+   * (positive = others bear more of the cost than their ownership share).
+   */
+  expenseSplitAdjustment: MoneyString;
   /** Share of distributable profit BEFORE the coordinator cut (negative = share of a loss). */
   grossProfit: MoneyString;
   /** Coordinator cut charged against this partner's profit. */
@@ -156,6 +168,28 @@ export function runSettlement(input: SettlementInput): SettlementResult {
   });
   const sumD = (xs: Decimal[]) => xs.reduce((a, b) => a.plus(b), zero());
 
+  // Custom / equal expense split: the pool already paid these out pro-rata to ownership, so each
+  // partner gets back their ownership share and is charged their agreed share instead.
+  const splitAdjust = mk();
+  const burdens = input.partners.map((p) => {
+    const b = dec(p.expenseBurden ?? 0, "expenseBurden");
+    assertNonNegative(b, "expenseBurden");
+    return b;
+  });
+  const customTotal = dec(input.customSplitExpenses ?? sumD(burdens), "customSplitExpenses");
+  if (customTotal.gt(0)) {
+    const owned = allocateProfitByOwnership({
+      profit: customTotal,
+      partners: input.partners,
+      coordinatorParticipates: input.coordinatorParticipatesInProfit !== false,
+      scale,
+    });
+    input.partners.forEach((p, i) =>
+      splitAdjust.set(p.partnerId, dec(owned.get(p.partnerId) ?? 0).minus(burdens[i]))
+    );
+  }
+  const withAdjust = (id: string, v: Decimal) => v.plus(splitAdjust.get(id) ?? 0);
+
   let available = sale;
   let netAfterCosts = sale;
   let totalCapital = zero();
@@ -201,8 +235,8 @@ export function runSettlement(input: SettlementInput): SettlementResult {
       input.partners.forEach((p, i) => {
         capitalReturned.set(p.partnerId, capitalIn[i]);
         expensePaid.set(p.partnerId, expensesIn[i]);
-        grossProfit.set(p.partnerId, dec(lossParts[i]).negated());
-        profitShare.set(p.partnerId, dec(lossParts[i]).negated());
+        grossProfit.set(p.partnerId, withAdjust(p.partnerId, dec(lossParts[i]).negated()));
+        profitShare.set(p.partnerId, withAdjust(p.partnerId, dec(lossParts[i]).negated()));
       });
       notes.push(`Shortfall ${money(shortfall, scale)} shared by ownership`);
     }
@@ -267,8 +301,9 @@ export function runSettlement(input: SettlementInput): SettlementResult {
             coordinatorParticipates,
             scale,
           });
-          for (const id of ids) grossProfit.set(id, dec(g.get(id) ?? 0));
+          for (const id of ids) grossProfit.set(id, withAdjust(id, dec(g.get(id) ?? 0)));
           grossComputed = true;
+          if (customTotal.gt(0)) notes.push(`Custom expense split applied on ${money(customTotal, scale)}`);
           notes.push(`Distributable profit before commission: ${money(distributableBefore, scale)}`);
           break;
         }
@@ -280,7 +315,7 @@ export function runSettlement(input: SettlementInput): SettlementResult {
               coordinatorParticipates,
               scale,
             });
-            for (const id of ids) grossProfit.set(id, dec(g.get(id) ?? 0));
+            for (const id of ids) grossProfit.set(id, withAdjust(id, dec(g.get(id) ?? 0)));
             distributableBefore = available;
             grossComputed = true;
           }
@@ -321,7 +356,8 @@ export function runSettlement(input: SettlementInput): SettlementResult {
             // Each partner keeps their gross share minus their own cut.
             let distributed = zero();
             for (const id of ids) {
-              const net = Decimal.max(0, (grossProfit.get(id) ?? zero()).minus(commissionPaid.get(id) ?? zero()));
+              // Gross can be negative when a partner carries more expenses than their share of profit.
+              const net = (grossProfit.get(id) ?? zero()).minus(commissionPaid.get(id) ?? zero());
               profitShare.set(id, net);
               distributed = distributed.plus(net);
             }
@@ -334,7 +370,7 @@ export function runSettlement(input: SettlementInput): SettlementResult {
               coordinatorParticipates,
               scale,
             });
-            for (const id of ids) profitShare.set(id, dec(shares.get(id) ?? 0));
+            for (const id of ids) profitShare.set(id, withAdjust(id, dec(shares.get(id) ?? 0)));
             const distributed = [...shares.values()].reduce((a, b) => a.plus(dec(b)), zero());
             available = available.minus(distributed);
             if (!grossComputed) {
@@ -384,6 +420,7 @@ export function runSettlement(input: SettlementInput): SettlementResult {
       expensesPaid: money(expensesIn[i], scale),
       capitalReturned: money(cap, scale),
       expenseReimbursement: money(exp, scale),
+      expenseSplitAdjustment: money(splitAdjust.get(p.partnerId) ?? 0, scale),
       grossProfit: money(gross, scale),
       commissionPaid: money(cut, scale),
       commissionRatePercent: gross.gt(0) ? pct(cut.times(100).dividedBy(gross), 4) : pct(0, 4),

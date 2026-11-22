@@ -66,3 +66,11 @@ Backup: [BACKUP-AND-RECOVERY.md](./BACKUP-AND-RECOVERY.md).
 - Default coordinator rule is `investor_net_profit`: X% is taken from each partner's gross profit share; the coordinator is never charged on his own share. Every settlement line stores gross profit (before cut), cut, net profit (after cut), cut earned, payout, ROI.
 - Losses are shared by ownership by default (`shareLossesByOwnership`).
 - Maker-checker for expenses is opt-in via `INVEST_STRICT_MAKER_CHECKER=1`.
+
+## Contract, cost split & valuation (v3, 2026-11-22)
+
+- **Capital tab** — each payment stores a method (cash / bank transfer / cheque) and a reference number. Payments can be **edited** (amount, type, partner, date) or **deleted** while the project is open: the old journal is reversed and a corrected one posted, ownership recalculates, and a partner's capital can never go negative.
+- **Expenses** — each expense has a cost split (`splitMode`): `ownership` (default), `equal`, or `custom` % per partner (must sum to 100; e.g. 100% on one partner). The table shows each partner's % and amount. Expenses can be edited (including amount/payer while not yet reimbursed; approved money changes re-post the journal) or deleted (blocked if reimbursed or it has attachments → void instead).
+- **Settlement** — the payer is still reimbursed off the top. For non-ownership splits the engine moves profit: each partner gets back their ownership share of the expense and is charged their agreed share (`expenseBurden` / `expenseSplitAdjustment`). The coordinator cut is taken on the adjusted profit.
+- **Costs & value tab** — total cost (land + expenses), cost per m², cost by category, per-partner division (land share, expense share, cost share, what they paid, balance), and the latest valuation assumption (`estimatedValue` + date + source) with what each stake is worth today.
+- **Contract tab** — contract no./date/price, seller, deed and registry, broker, deposit, and the payment schedule to the seller (due / paid dates, overdue highlighted). Stored as `InvProject.contractDetails` JSON.
