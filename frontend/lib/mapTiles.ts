@@ -14,8 +14,26 @@ export const SAT_MAX_NATIVE_ZOOM = 18;
 /** OSM has reliable coverage through this zoom. */
 export const OSM_MAX_NATIVE_ZOOM = 19;
 
-/** Prefer this when fitting a parcel so we stay on real satellite tiles. */
-export const PARCEL_FIT_MAX_ZOOM = SAT_MAX_NATIVE_ZOOM;
+/**
+ * Frame selected parcels tightly like DLS (fill width + height of the map
+ * stage). z19 overzooms native sat tiles slightly — acceptable for framing.
+ */
+export const PARCEL_FIT_MAX_ZOOM = MAP_MAX_ZOOM;
+
+/**
+ * Screen margin (y, x) when fitBounds-ing a parcel. Small padding = parcel
+ * reads screen-wide/long while neighbors stay visible for context.
+ */
+export const PARCEL_FIT_PADDING: [number, number] = [12, 12];
+
+/** Shared Leaflet fitBounds options for a selected cadastral parcel. */
+export function parcelFitBoundsOptions(animate = true) {
+  return {
+    padding: PARCEL_FIT_PADDING,
+    maxZoom: PARCEL_FIT_MAX_ZOOM,
+    animate,
+  } as const;
+}
 
 export const OSM_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 

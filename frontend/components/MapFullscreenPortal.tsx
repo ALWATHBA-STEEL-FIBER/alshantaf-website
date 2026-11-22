@@ -21,10 +21,12 @@ import {
   MAP_MAX_ZOOM,
   MEASURE_MAX_ZOOM,
   OSM_TILE_URL,
-  PARCEL_FIT_MAX_ZOOM,
+  parcelFitBoundsOptions,
   osmTileOptions,
   satTileOptions,
 } from "@/lib/mapTiles";
+import { dictionary } from "@/lib/dictionary";
+import { Logo } from "@/components/Logo";
 import type { AdjacentRoad, ContextParcel, ParcelRing } from "@/components/LocationInput";
 import "leaflet/dist/leaflet.css";
 
@@ -667,11 +669,7 @@ export function MapFullscreenPortal({
           };
           const bounds = boundsLayer?.getBounds?.();
           if (bounds) {
-            liveMap.fitBounds(bounds, {
-            padding: [40, 40],
-            maxZoom: PARCEL_FIT_MAX_ZOOM,
-            animate: true,
-          });
+            liveMap.fitBounds(bounds, parcelFitBoundsOptions(true));
           }
         } catch {
           /* ignore */
@@ -946,7 +944,7 @@ export function MapFullscreenPortal({
                 } | null;
                 const bounds = layer?.getBounds?.();
                 if (bounds?.isValid?.()) {
-                  map.fitBounds(bounds, { padding: [40, 40], maxZoom: PARCEL_FIT_MAX_ZOOM, animate: true });
+                  map.fitBounds(bounds, parcelFitBoundsOptions(true));
                   return;
                 }
               } catch {
@@ -1043,6 +1041,14 @@ export function MapFullscreenPortal({
                       </li>
                     )}
                   </ul>
+                  {/* Brand signature under أبعاد القطعة when a land is selected */}
+                  <div className="mt-2 flex items-center gap-1.5 border-t border-gold/20 pt-1.5">
+                    <Logo light className="h-5 w-auto shrink-0" />
+                    <span className="font-brand flex min-w-0 flex-col leading-tight text-[9px] font-bold tracking-wide text-gold sm:text-[10px]">
+                      <span className="truncate">{dictionary[lang].brand.line1}</span>
+                      <span className="truncate opacity-85">{dictionary[lang].brand.line2}</span>
+                    </span>
+                  </div>
                 </div>
               ) : null}
               {hasIdentity ? (

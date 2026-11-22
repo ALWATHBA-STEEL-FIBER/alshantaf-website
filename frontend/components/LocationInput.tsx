@@ -46,7 +46,7 @@ import {
   MAP_MAX_ZOOM,
   MEASURE_MAX_ZOOM,
   OSM_TILE_URL,
-  PARCEL_FIT_MAX_ZOOM,
+  parcelFitBoundsOptions,
   osmTileOptions,
   satTileOptions,
 } from "@/lib/mapTiles";
@@ -938,11 +938,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         polygonRef.current = layer;
 
         try {
-          map.fitBounds(layer.getBounds(), {
-            padding: [40, 40],
-            maxZoom: PARCEL_FIT_MAX_ZOOM,
-            animate: false,
-          });
+          map.fitBounds(layer.getBounds(), parcelFitBoundsOptions(false));
         } catch {
           /* ignore */
         }
@@ -1087,7 +1083,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       const layer = polygonRef.current as unknown as { getBounds?: () => import("leaflet").LatLngBounds } | null;
       const bounds = layer?.getBounds?.();
       if (bounds?.isValid?.()) {
-        map.fitBounds(bounds, { padding: [40, 40], maxZoom: PARCEL_FIT_MAX_ZOOM, animate: true });
+        map.fitBounds(bounds, parcelFitBoundsOptions(true));
         return;
       }
     } catch {

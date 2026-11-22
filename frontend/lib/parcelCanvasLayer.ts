@@ -153,9 +153,20 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
     }
   }
   for (const ring of rings) {
+    // Outer halo so the selected edge reads thicker against sat/OSM tiles.
+    L.polygon(ring.map(([lat, lng]) => L.latLng(lat, lng)), {
+      color: "#f5e6c8",
+      weight: 7.5,
+      opacity: 0.92,
+      fillOpacity: 0,
+      lineJoin: "round",
+      lineCap: "round",
+      interactive: false,
+      className: "parcel-dls-outline-halo",
+    }).addTo(layer._polys);
     L.polygon(ring.map(([lat, lng]) => L.latLng(lat, lng)), {
       color: "#0f342f",
-      weight: 2.5,
+      weight: 4.5,
       opacity: 1,
       fillColor: "#c8a064",
       fillOpacity: 0.22,
@@ -181,9 +192,9 @@ function syncGeometry(L: LeafletNS, layer: ParcelLayerInst) {
       seen.add(key);
       const isHard = hard.has(key);
       L.circleMarker([lat, lng], {
-        radius: isHard ? 5 : 3.5,
+        radius: isHard ? 5.5 : 4,
         color: "#f5e6c8",
-        weight: 1.5,
+        weight: 1.75,
         fillColor: "#caa064",
         fillOpacity: 1,
         opacity: 1,
