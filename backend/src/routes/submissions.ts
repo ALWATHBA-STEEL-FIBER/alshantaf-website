@@ -16,10 +16,12 @@ import { trackingEmail } from "../lib/emailTemplates";
 import { locationFieldsSchema, legacyCoordinates } from "../lib/location";
 import { lookupDlsAdministrativeValue, DlsLookupError } from "../lib/dlsAdministrativeValue";
 import {
+  lookupDlsAdminByBbox,
   lookupDlsParcelByPoint,
   lookupDlsParcelContextByPoint,
   lookupDlsParcelLocation,
   DlsParcelLocationError,
+  type DlsAdminLayer,
 } from "../lib/dlsParcelLocation";
 import { lookupAmmanZoning, AmmanZoningLookupError } from "../lib/ammanZoning";
 import { normalizeDecimalInput, toWesternDigits, westernDigitsString } from "../lib/arabicDigits";
@@ -88,6 +90,16 @@ const dlsLocationSchema = z.object({
 const dlsPointSchema = z.object({
   latitude: z.coerce.number().finite().gte(-90).lte(90),
   longitude: z.coerce.number().finite().gte(-180).lte(180),
+});
+
+const dlsAdminBboxSchema = z.object({
+  layer: z.enum(["governorates", "directorates", "basins"]),
+  west: z.coerce.number().finite().gte(-180).lte(180),
+  south: z.coerce.number().finite().gte(-90).lte(90),
+  east: z.coerce.number().finite().gte(-180).lte(180),
+  north: z.coerce.number().finite().gte(-90).lte(90),
+  maxAllowableOffset: z.coerce.number().finite().gte(0).lte(1).optional(),
+  resultRecordCount: z.coerce.number().int().finite().gte(1).lte(400).optional(),
 });
 
 const ammanZoningSchema = z
@@ -194,6 +206,32 @@ submissionsRouter.post(
     try {
       const result = await lookupDlsParcelContextByPoint(input);
       res.json({ parcels: result });
+    } catch (err) {
+      if (err instanceof DlsParcelLocationError) {
+        res.status(502).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
+  })
+);
+
+submissionsRouter.post(
+  "/dls-admin-by-bbox",
+  dlsLocationLimiter,
+  asyncHandler(async (req, res) => {
+    const input = dlsAdminBboxSchema.parse(req.body);
+    try {
+      const features = await lookupDlsAdminByBbox({
+        layer: input.layer as DlsAdminLayer,
+        west: input.west,
+        south: input.south,
+        east: input.east,
+        north: input.north,
+        maxAllowableOffset: input.maxAllowableOffset,
+        resultRecordCount: input.resultRecordCount,
+      });
+      res.json({ layer: input.layer, features });
     } catch (err) {
       if (err instanceof DlsParcelLocationError) {
         res.status(502).json({ error: err.message });

@@ -16,6 +16,13 @@ const PARCEL_LAYER_URL =
   "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service_STG/MapServer/3/query";
 const PARCEL_LINES_LAYER_URL =
   "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service_STG/MapServer/2/query";
+/** Progressive admin LOD — same layers DLS toggles by map scale. */
+const GOVERNORATE_LAYER_URL =
+  "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Layers_Service_STG/MapServer/16/query";
+const DIRECTORATE_LAYER_URL =
+  "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service_STG/MapServer/7/query";
+const BASIN_LAYER_URL =
+  "https://maps.dls.gov.jo/arcgis/rest/services/DLS_Cassini_Service_STG/MapServer/6/query";
 const SOURCE_URL = "https://maps.dls.gov.jo/dlsweb/";
 /** Public token issued by the DLS web map. Required since 2026-10-21 (ArcGIS 499). */
 const MAP_TOKEN_URL = "https://maps.dls.gov.jo/dlswebapi/api/DlsWebapi/gettoken";
@@ -25,6 +32,7 @@ const OVERPASS_ENDPOINTS = [
 ];
 const LOOKUP_TIMEOUT_MS = 12_000;
 const ROAD_LOOKUP_TIMEOUT_MS = 15_000;
+const ADMIN_LOOKUP_TIMEOUT_MS = 18_000;
 
 type RoadSide = "north" | "south" | "east" | "west";
 
@@ -63,9 +71,22 @@ export interface DlsContextParcel {
   isSubject: boolean;
 }
 
+/** DLS progressive boundaries: country silhouette → governorates → villages/lands → parcels. */
+export type DlsAdminLayer = "governorates" | "directorates" | "basins";
+
+export interface DlsAdminFeature {
+  id: string;
+  layer: DlsAdminLayer;
+  nameAr: string | null;
+  nameEn: string | null;
+  rings: [number, number][][];
+}
+
 export class DlsParcelLocationError extends Error {}
 
 let mapTokenCache: { token: string; expiresAt: number } | null = null;
+let governoratesCache: { at: number; features: DlsAdminFeature[] } | null = null;
+const GOVERNORATES_CACHE_MS = 6 * 60 * 60 * 1000;
 
 async function getDlsMapToken(signal: AbortSignal): Promise<string> {
   const now = Date.now();
@@ -105,6 +126,14 @@ type DlsFeature = {
     LAYER?: number | null;
     "SHAPE.AREA"?: number | null;
     "SHAPE.LEN"?: number | null;
+    GOVERNARATE_NAME_A?: string | null;
+    GOVERNARATE_NAME_E?: string | null;
+    GOV_ID?: number | null;
+    DIRECTORATE_NAME_A?: string | null;
+    DIRECTORATE_NAME_E?: string | null;
+    DIR_ID?: number | null;
+    HOD_NAME_A?: string | null;
+    HOD_NAME_E?: string | null;
   };
   geometry?: { rings?: number[][][] };
 };
@@ -245,6 +274,159 @@ function normalizeParcelNo(value: unknown): string | null {
   const n = Number(raw);
   if (Number.isFinite(n) && n > 0) return String(Math.trunc(n));
   return raw;
+}
+
+function ringsFromFeature(feature: DlsFeature): [number, number][][] {
+  return (feature.geometry?.rings ?? [])
+    .map((ring) =>
+      ring
+        .map(([lng, lat]) => [lat, lng] as [number, number])
+        .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng))
+    )
+    .filter((ring) => ring.length >= 3);
+}
+
+function adminEndpoint(layer: DlsAdminLayer): string {
+  if (layer === "governorates") return GOVERNORATE_LAYER_URL;
+  if (layer === "directorates") return DIRECTORATE_LAYER_URL;
+  return BASIN_LAYER_URL;
+}
+
+function adminOutFields(layer: DlsAdminLayer): string {
+  if (layer === "governorates") return "OBJECTID,GOV_ID,GOVERNARATE_NAME_A,GOVERNARATE_NAME_E";
+  if (layer === "directorates") return "OBJECTID,DIR_ID,DIRECTORATE_NAME_A,DIRECTORATE_NAME_E";
+  return "OBJECTID,VILL_CODE,HOD_CODE,HOD_NAME_A,HOD_NAME_E";
+}
+
+function featureToAdmin(layer: DlsAdminLayer, feature: DlsFeature): DlsAdminFeature | null {
+  const rings = ringsFromFeature(feature);
+  if (!rings.length) return null;
+  const attrs = feature.attributes ?? {};
+  if (layer === "governorates") {
+    const id = attrs.GOV_ID ?? attrs.OBJECTID;
+    if (id == null) return null;
+    return {
+      id: `gov-${id}`,
+      layer,
+      nameAr: (attrs.GOVERNARATE_NAME_A || "").trim() || null,
+      nameEn: (attrs.GOVERNARATE_NAME_E || "").trim() || null,
+      rings,
+    };
+  }
+  if (layer === "directorates") {
+    const id = attrs.DIR_ID ?? attrs.OBJECTID;
+    if (id == null) return null;
+    return {
+      id: `dir-${id}`,
+      layer,
+      nameAr: (attrs.DIRECTORATE_NAME_A || "").trim() || null,
+      nameEn: (attrs.DIRECTORATE_NAME_E || "").trim() || null,
+      rings,
+    };
+  }
+  const vill = (attrs.VILL_CODE || "").trim();
+  const hod = (attrs.HOD_CODE || "").trim();
+  const oid = attrs.OBJECTID;
+  const id = vill && hod ? `${vill}-${hod}` : oid != null ? String(oid) : null;
+  if (!id) return null;
+  return {
+    id: `basin-${id}`,
+    layer,
+    nameAr: (attrs.HOD_NAME_A || "").trim() || null,
+    nameEn: (attrs.HOD_NAME_E || "").trim() || null,
+    rings,
+  };
+}
+
+/**
+ * Progressive admin boundaries for DLS-style LOD.
+ * Governorates are cached (only ~15 polygons). Directorates/basins are
+ * viewport-bounded and geometry-simplified for phones.
+ */
+export async function lookupDlsAdminByBbox(params: {
+  layer: DlsAdminLayer;
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+  /** Degrees — larger = coarser shapes (friendlier on weak devices). */
+  maxAllowableOffset?: number;
+  resultRecordCount?: number;
+}): Promise<DlsAdminFeature[]> {
+  const layer = params.layer;
+  const west = Number(params.west);
+  const south = Number(params.south);
+  const east = Number(params.east);
+  const north = Number(params.north);
+  if (![west, south, east, north].every(Number.isFinite) || east <= west || north <= south) {
+    throw new DlsParcelLocationError("Invalid bbox for DLS admin lookup");
+  }
+
+  if (layer === "governorates" && governoratesCache && Date.now() - governoratesCache.at < GOVERNORATES_CACHE_MS) {
+    return governoratesCache.features;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ADMIN_LOOKUP_TIMEOUT_MS);
+  try {
+    const offset =
+      typeof params.maxAllowableOffset === "number" && Number.isFinite(params.maxAllowableOffset)
+        ? Math.max(0, params.maxAllowableOffset)
+        : layer === "governorates"
+          ? 0.008
+          : layer === "directorates"
+            ? 0.002
+            : 0.0008;
+    const limit =
+      typeof params.resultRecordCount === "number" && Number.isFinite(params.resultRecordCount)
+        ? Math.min(400, Math.max(1, Math.floor(params.resultRecordCount)))
+        : layer === "governorates"
+          ? 30
+          : layer === "directorates"
+            ? 80
+            : 120;
+
+    const query: Record<string, string | number | boolean> = {
+      where: "1=1",
+      outFields: adminOutFields(layer),
+      returnGeometry: true,
+      outSR: 4326,
+      maxAllowableOffset: offset,
+      resultRecordCount: limit,
+      f: "json",
+    };
+    if (layer !== "governorates") {
+      query.geometry = JSON.stringify({
+        xmin: west,
+        ymin: south,
+        xmax: east,
+        ymax: north,
+        spatialReference: { wkid: 4326 },
+      });
+      query.geometryType = "esriGeometryEnvelope";
+      query.inSR = 4326;
+      query.spatialRel = "esriSpatialRelIntersects";
+    }
+
+    const rows = await queryFeatures(query, controller.signal, adminEndpoint(layer));
+    const list: DlsAdminFeature[] = [];
+    for (const row of rows) {
+      const item = featureToAdmin(layer, row);
+      if (item) list.push(item);
+    }
+    if (layer === "governorates") {
+      governoratesCache = { at: Date.now(), features: list };
+    }
+    return list;
+  } catch (err) {
+    if (err instanceof DlsParcelLocationError) throw err;
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new DlsParcelLocationError("DLS admin boundary lookup timed out");
+    }
+    throw new DlsParcelLocationError(err instanceof Error ? err.message : "DLS admin boundary lookup failed");
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function lookupDlsParcelContextByPoint(params: {

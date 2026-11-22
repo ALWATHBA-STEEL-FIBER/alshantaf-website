@@ -25,6 +25,7 @@ import {
   osmTileOptions,
   satTileOptions,
 } from "@/lib/mapTiles";
+import { attachDlsLodController, DLS_LOD } from "@/lib/dlsMapLod";
 import { dictionary } from "@/lib/dictionary";
 import { Logo } from "@/components/Logo";
 import type { AdjacentRoad, ContextParcel, ParcelRing } from "@/components/LocationInput";
@@ -210,8 +211,11 @@ export function MapFullscreenPortal({
   const dimsRef = useRef<import("leaflet").LayerGroup | null>(null);
   const markerRef = useRef<import("leaflet").Marker | null>(null);
   const roadsLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
+  const lodRef = useRef<ReturnType<typeof attachDlsLodController> | null>(null);
   const measureToolRef = useRef<MeasureTool | null>(null);
   const [measureSnap, setMeasureSnap] = useState<MeasureSnapshot | null>(measureSnapshot ?? null);
+  const [parcelGridAllowed, setParcelGridAllowed] = useState(false);
+  const showContextGridEffective = showContextGrid && parcelGridAllowed;
   const basemapRef = useRef(basemap);
   basemapRef.current = basemap;
   const measureModeRef = useRef(measureMode);
@@ -461,6 +465,15 @@ export function MapFullscreenPortal({
       };
       map.on("click", clickHandler);
 
+      lodRef.current?.destroy();
+      lodRef.current = attachDlsLodController({
+        L,
+        map,
+        lang,
+        onParcelZoomChange: (show) => setParcelGridAllowed(show),
+      });
+      setParcelGridAllowed(map.getZoom() >= DLS_LOD.parcelsMinZoom);
+
       // Parcel outline is applied by the polygon sync effect once mapReady flips.
       if (selected && !(polygon && polygon.length > 0)) {
         upsertMarker(L, map, selected);
@@ -504,6 +517,8 @@ export function MapFullscreenPortal({
     return () => {
       cancelled = true;
       setMapReady(false);
+      lodRef.current?.destroy();
+      lodRef.current = null;
       if (map && clickHandler) map.off("click", clickHandler);
       measureToolRef.current?.destroy();
       measureToolRef.current = null;
@@ -628,11 +643,12 @@ export function MapFullscreenPortal({
         return;
       }
 
-      const canRepick = !lockedRef.current && measureModeRef.current === "off";
+      const canRepick =
+        !lockedRef.current && measureModeRef.current === "off" && showContextGridEffective;
       const opts: ParcelCanvasOpts = {
         rings: polygon as [number, number][][],
         contextParcels,
-        showContextGrid,
+        showContextGrid: showContextGridEffective,
         showDimensions: dimsOnCanvas,
         perimeterM,
         lang,
@@ -701,10 +717,14 @@ export function MapFullscreenPortal({
     parcelNumbers,
     parcelLabel,
     contextParcels,
-    showContextGrid,
+    showContextGridEffective,
     locked,
     measuring,
   ]);
+
+  useEffect(() => {
+    lodRef.current?.refresh();
+  }, [lang, open]);
 
   useEffect(() => {
     if (!open) appliedPolygonKeyRef.current = "";

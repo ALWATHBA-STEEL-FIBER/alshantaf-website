@@ -50,6 +50,7 @@ import {
   osmTileOptions,
   satTileOptions,
 } from "@/lib/mapTiles";
+import { attachDlsLodController, DLS_LOD } from "@/lib/dlsMapLod";
 import "leaflet/dist/leaflet.css";
 
 const DEFAULT_CENTER: [number, number] = [31.9539, 35.9106];
@@ -239,7 +240,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
 
       // Redraw parcel + edge dims in map screen space (reliable, no SVG CORS)
       if (ring && ring.length >= 3) {
-        if (showContextGrid) {
+        if (showContextGridEffective) {
           for (const parcel of contextParcels) {
             if (parcel.isSubject) continue;
             for (const ctxRing of parcel.rings ?? []) {
@@ -307,7 +308,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           }
         }
 
-        if (showContextGrid) {
+        if (showContextGridEffective) {
           for (const parcel of contextParcels) {
             if (parcel.isSubject || !parcel.parcelNo) continue;
             const ctxRing = parcel.rings?.[0];
@@ -403,6 +404,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const [lineColor, setLineColor] = useState(DEFAULT_MEASURE_LINE_COLOR);
   const [contextParcels, setContextParcels] = useState<ContextParcel[]>([]);
   const [showContextGrid, setShowContextGrid] = useState(true);
+  /** Parcel grid only after DLS-close zoom — admin LOD handles farther views. */
+  const [parcelGridAllowed, setParcelGridAllowed] = useState(false);
   const measureToolRef = useRef<MeasureTool | null>(null);
   const measureModeRef = useRef<MeasureMode>("off");
   measureModeRef.current = measureMode;
@@ -416,6 +419,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   const osmLayerRef = useRef<import("leaflet").TileLayer | null>(null);
   const satLayerRef = useRef<import("leaflet").TileLayer | null>(null);
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
+  const lodRef = useRef<ReturnType<typeof attachDlsLodController> | null>(null);
+  const showContextGridEffective = showContextGrid && parcelGridAllowed;
   const basemapRef = useRef<Basemap>(basemap);
   basemapRef.current = basemap;
   const prevSurfaceRef = useRef<SurfaceView>(surfaceView);
@@ -532,6 +537,15 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       };
       map.on("click", clickHandler);
 
+      lodRef.current?.destroy();
+      lodRef.current = attachDlsLodController({
+        L,
+        map,
+        lang,
+        onParcelZoomChange: (show) => setParcelGridAllowed(show),
+      });
+      setParcelGridAllowed(map.getZoom() >= DLS_LOD.parcelsMinZoom);
+
       // Extra invalidate passes after layout / fonts / sibling UI settle
       requestAnimationFrame(() => {
         map.invalidateSize({ animate: false });
@@ -553,6 +567,8 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       cancelled = true;
       setMapReady(false);
       onMapReadyChangeRef.current?.(false);
+      lodRef.current?.destroy();
+      lodRef.current = null;
       const map = mapRef.current;
       if (map && clickHandler) map.off("click", clickHandler);
       map?.remove();
@@ -863,42 +879,47 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
   }, [polygon]);
 
   useEffect(() => {
-    if (!showMap) {
-      setContextParcels([]);
+    if (!showMap || !showContextGrid || !parcelGridAllowed) {
+      if (!parcelGridAllowed || !showContextGrid) setContextParcels([]);
+      if (!showMap) setContextParcels([]);
       return;
     }
     let cancelled = false;
-    async function loadContextGrid() {
-      const fallbackFromRing = polygon?.[0]?.length
-        ? (() => {
-            const ring = polygon[0]!;
-            const sum = ring.reduce((acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }), { lat: 0, lng: 0 });
-            return { lat: sum.lat / ring.length, lng: sum.lng / ring.length };
-          })()
-        : null;
-      const coords = selected ?? parseCoords(value) ?? fallbackFromRing;
-      if (!coords) {
-        setContextParcels([]);
-        return;
+    // Delay parcel-grid fetch slightly so admin LOD can settle first on weak devices.
+    const delay = window.setTimeout(() => {
+      async function loadContextGrid() {
+        const fallbackFromRing = polygon?.[0]?.length
+          ? (() => {
+              const ring = polygon[0]!;
+              const sum = ring.reduce((acc, p) => ({ lat: acc.lat + p[0], lng: acc.lng + p[1] }), { lat: 0, lng: 0 });
+              return { lat: sum.lat / ring.length, lng: sum.lng / ring.length };
+            })()
+          : null;
+        const coords = selected ?? parseCoords(value) ?? fallbackFromRing;
+        if (!coords) {
+          setContextParcels([]);
+          return;
+        }
+        try {
+          const res = await fetch("/api/submissions/dls-context-by-point", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ latitude: coords.lat, longitude: coords.lng }),
+          });
+          if (!res.ok) throw new Error("grid-failed");
+          const body = (await res.json()) as { parcels?: ContextParcel[] };
+          if (!cancelled) setContextParcels(Array.isArray(body.parcels) ? body.parcels : []);
+        } catch {
+          if (!cancelled) setContextParcels([]);
+        }
       }
-      try {
-        const res = await fetch("/api/submissions/dls-context-by-point", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ latitude: coords.lat, longitude: coords.lng }),
-        });
-        if (!res.ok) throw new Error("grid-failed");
-        const body = (await res.json()) as { parcels?: ContextParcel[] };
-        if (!cancelled) setContextParcels(Array.isArray(body.parcels) ? body.parcels : []);
-      } catch {
-        if (!cancelled) setContextParcels([]);
-      }
-    }
-    void loadContextGrid();
+      void loadContextGrid();
+    }, DLS_LOD.debounceMs);
     return () => {
       cancelled = true;
+      window.clearTimeout(delay);
     };
-  }, [polygonKey, selected, value, showMap]);
+  }, [polygonKey, selected, value, showMap, showContextGrid, parcelGridAllowed]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
@@ -916,7 +937,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
         const opts: ParcelCanvasOpts = {
           rings: polygon as [number, number][][],
           contextParcels,
-          showContextGrid,
+          showContextGrid: showContextGridEffective,
           showDimensions: Boolean(
             drawDimensions && showDimensions && measureModeRef.current === "off"
           ),
@@ -925,7 +946,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           parcelNumber: blueprint?.parcel?.trim() || null,
           parcelNumbers: parcelNumbers && parcelNumbers.length ? parcelNumbers : null,
           parcelLabel: lp.blueprintParcel,
-          contextInteractive: canRepick,
+          contextInteractive: canRepick && showContextGridEffective,
           onContextParcelClick: canRepick
             ? (coords) => {
                 if (lockedRef.current || measureModeRef.current !== "off") return;
@@ -960,7 +981,7 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, polygonKey, locked, mapReady, contextParcels, showContextGrid]);
+  }, [selected, polygonKey, locked, mapReady, contextParcels, showContextGridEffective]);
 
   // Keep annotations in sync when only labels/toggle change (do not remount / fitBounds).
   useEffect(() => {
@@ -968,11 +989,11 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
       | (import("leaflet").Layer & { setParcelOptions?: (o: ParcelCanvasOpts) => void })
       | null;
     if (!layer?.setParcelOptions || !polygon?.[0]?.length) return;
-    const canRepick = !locked && !measuring;
+    const canRepick = !locked && !measuring && showContextGridEffective;
     layer.setParcelOptions({
       rings: polygon as [number, number][][],
       contextParcels,
-      showContextGrid,
+      showContextGrid: showContextGridEffective,
       showDimensions: dimsOnCanvas,
       perimeterM,
       lang,
@@ -992,7 +1013,27 @@ export const LocationInput = forwardRef<LocationInputHandle, Props>(function Loc
           }
         : undefined,
     });
-  }, [dimsOnCanvas, perimeterM, lang, blueprint?.parcel, parcelNumbers, polygon, lp.blueprintParcel, contextParcels, showContextGrid, locked, measuring]);
+  }, [dimsOnCanvas, perimeterM, lang, blueprint?.parcel, parcelNumbers, polygon, lp.blueprintParcel, contextParcels, showContextGridEffective, locked, measuring]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const L = leafletRef.current;
+    if (!map || !L || !mapReady) {
+      lodRef.current?.refresh();
+      return;
+    }
+    lodRef.current?.destroy();
+    lodRef.current = attachDlsLodController({
+      L,
+      map,
+      lang,
+      onParcelZoomChange: (show) => setParcelGridAllowed(show),
+    });
+    setParcelGridAllowed(map.getZoom() >= DLS_LOD.parcelsMinZoom);
+    return () => {
+      // Boot effect owns final teardown; only replace instance here.
+    };
+  }, [lang, mapReady]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
