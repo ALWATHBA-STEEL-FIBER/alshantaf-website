@@ -38,6 +38,7 @@ import {
   expenseInclude,
   expenseWhere,
   isCategory,
+  receiptAbsolutePath,
   isPaymentMethod,
   buildProjectCostSummary,
   laborCostByProject,
@@ -1814,6 +1815,17 @@ adminSiteWorkRouter.post(
       engineerId = adminEng.id;
     }
 
+    if (input.receiptFile) {
+      if (!receiptAbsolutePath(input.receiptFile)) {
+        res.status(400).json({ error: "ملف الإيصال غير موجود — أعد الرفع" });
+        return;
+      }
+      if (await prisma.siteExpense.findFirst({ where: { receiptFile: input.receiptFile } })) {
+        res.status(400).json({ error: "ملف الإيصال مستخدم مسبقاً" });
+        return;
+      }
+    }
+
     const created = await prisma.siteExpense.create({
       data: {
         scope: input.scope,
@@ -1827,7 +1839,7 @@ adminSiteWorkRouter.post(
         paymentMethod: input.paymentMethod || null,
         invoiceNo: input.invoiceNo || null,
         receiptFile: input.receiptFile || null,
-        receiptMime: input.receiptMime || null,
+        receiptMime: input.receiptFile ? (input.receiptFile.endsWith(".pdf") ? "application/pdf" : "image/webp") : null,
         notes: input.notes || null,
       },
       include: expenseInclude,

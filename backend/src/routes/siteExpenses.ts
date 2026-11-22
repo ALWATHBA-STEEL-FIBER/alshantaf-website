@@ -285,7 +285,7 @@ async function validateExpense(
       if (taken) return { error: "ملف الإيصال مستخدم مسبقاً" };
     }
     receiptFile = input.receiptFile;
-    receiptMime = input.receiptMime || null;
+    receiptMime = input.receiptFile.endsWith(".pdf") ? "application/pdf" : "image/webp";
   }
 
   return {
@@ -451,7 +451,24 @@ export function sendReceipt(
     res.status(404).json({ error: "لا يوجد إيصال" });
     return;
   }
-  res.setHeader("Content-Type", mime || (abs.endsWith(".pdf") ? "application/pdf" : "image/webp"));
+  // Never trust the stored/client MIME: derive it from our own file extension (prevents serving HTML).
+  void mime;
+  const ext = abs.slice(abs.lastIndexOf(".") + 1).toLowerCase();
+  const SAFE: Record<string, string> = {
+    pdf: "application/pdf",
+    webp: "image/webp",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    avif: "image/avif",
+  };
+  const type = SAFE[ext];
+  if (!type) {
+    res.status(404).json({ error: "لا يوجد إيصال" });
+    return;
+  }
+  res.setHeader("Content-Type", type);
+  res.setHeader("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
   res.setHeader("Cache-Control", "private, max-age=3600");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Content-Disposition", "inline");

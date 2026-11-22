@@ -18,11 +18,11 @@ export async function createAndPostSettlement(
   const existingPosted = await prisma.invSettlement.findFirst({
     where: { projectId, status: { in: ["posted", "paid"] }, hypothetical: false },
   });
-  if (existingPosted && body.force !== true) {
-    throw Object.assign(new Error("Project already has a posted settlement"), { status: 409 });
+  if (existingPosted) {
+    throw Object.assign(new Error("تمت تسوية هذا المشروع مسبقاً"), { status: 409 });
   }
 
-  if (["settled", "closed", "cancelled"].includes(project.status) && body.force !== true) {
+  if (["settled", "closed", "cancelled"].includes(project.status)) {
     throw Object.assign(new Error("المشروع مغلق أو تمت تسويته"), { status: 409 });
   }
   const partners = await resolveProjectPartners(projectId);
@@ -36,6 +36,12 @@ export async function createAndPostSettlement(
     });
   }
 
+  for (const k of ["saleProceeds", "closingCosts", "unpaidLiabilities"] as const) {
+    const v = body[k];
+    if (v != null && v !== "" && !(Number(v) >= 0)) {
+      throw Object.assign(new Error("قيمة مالية غير صالحة"), { status: 400 });
+    }
+  }
   const sale = body.saleProceeds ?? body.salePrice ?? project.actualSalePrice;
   if (sale == null || sale === "" || !(Number(sale) > 0)) {
     throw Object.assign(new Error("أدخل سعر البيع الفعلي"), { status: 400 });
@@ -72,8 +78,8 @@ export async function createAndPostSettlement(
     const again = await tx.invSettlement.findFirst({
       where: { projectId, status: { in: ["posted", "paid"] }, hypothetical: false },
     });
-    if (again && body.force !== true) {
-      throw Object.assign(new Error("Concurrent settlement blocked"), { status: 409 });
+    if (again) {
+      throw Object.assign(new Error("تمت تسوية هذا المشروع مسبقاً"), { status: 409 });
     }
 
     const s = await tx.invSettlement.create({
@@ -303,7 +309,11 @@ export async function markPayout(
   await prisma.invSettlementLine.update({
     where: { id: line.id },
     data: paid
-      ? { paidAmount: line.totalPayout, paidAt: body.paidAt ? new Date(String(body.paidAt)) : new Date(), paidRef: body.paidRef ? String(body.paidRef) : null }
+      ? {
+          paidAmount: line.totalPayout,
+          paidAt: body.paidAt && !Number.isNaN(new Date(String(body.paidAt)).getTime()) ? new Date(String(body.paidAt)) : new Date(),
+          paidRef: body.paidRef ? String(body.paidRef).slice(0, 200) : null,
+        }
       : { paidAmount: "0", paidAt: null, paidRef: null },
   });
   const lines = await prisma.invSettlementLine.findMany({ where: { settlementId } });

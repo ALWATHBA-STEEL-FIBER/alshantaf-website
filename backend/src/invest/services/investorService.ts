@@ -23,10 +23,25 @@ export function normalizePhone(v: unknown): string | null {
   return digits ? plus + digits : null;
 }
 
-function str(v: unknown): string | null {
+function str(v: unknown, max = 500): string | null {
   if (v == null) return null;
-  const s = String(v).trim();
+  const s = String(v).trim().slice(0, max);
   return s ? s : null;
+}
+
+async function setPortalLogin(investorId: string, emailRaw: unknown, passwordRaw: unknown) {
+  const email = String(emailRaw).toLowerCase().trim();
+  const password = String(passwordRaw);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw bad("بريد دخول البوابة غير صالح");
+  if (password.length < 8) throw bad("كلمة مرور البوابة يجب ألا تقل عن 8 أحرف");
+  const taken = await prisma.invPortalUser.findUnique({ where: { email } });
+  if (taken && taken.investorId !== investorId) throw bad("بريد الدخول مستخدم لشريك آخر", 409);
+  const passwordHash = await bcrypt.hash(password, 12);
+  await prisma.invPortalUser.upsert({
+    where: { investorId },
+    create: { investorId, email, passwordHash },
+    update: { email, passwordHash, active: true },
+  });
 }
 
 async function nextInvestorCode(organizationId: string): Promise<string> {
@@ -133,7 +148,7 @@ export async function listInvestors(opts: { q?: string; active?: string; limit?:
     where,
     include: listInclude,
     orderBy: [{ active: "desc" }, { legalName: "asc" }],
-    take: Math.min(Math.max(opts.limit ?? 500, 1), 1000),
+    take: Number.isFinite(opts.limit) ? Math.min(Math.max(Math.trunc(opts.limit as number), 1), 1000) : 500,
   });
   return rows.map(serializeListRow);
 }
@@ -167,6 +182,11 @@ export async function createInvestor(data: Record<string, unknown>, actor: Actor
   const email = str(data.email)?.toLowerCase() ?? null;
   const phone = normalizePhone(data.phone);
 
+  if (data.portalEmail && data.portalPassword) {
+    if (String(data.portalPassword).length < 8) throw bad("كلمة مرور البوابة يجب ألا تقل عن 8 أحرف");
+    const taken = await prisma.invPortalUser.findUnique({ where: { email: String(data.portalEmail).toLowerCase().trim() } });
+    if (taken) throw bad("بريد الدخول مستخدم لشريك آخر", 409);
+  }
   if (data.force !== true) {
     const dup = await findDuplicates({ phone, email, nationalId: nid });
     if (dup.length) {
@@ -196,7 +216,7 @@ export async function createInvestor(data: Record<string, unknown>, actor: Actor
           nationalIdLast4: nid ? normalizeNationalId(nid).slice(-4) : null,
           address: str(data.address),
           bankDetailsEnc: str(data.bankDetails) ? maybeEncrypt(String(data.bankDetails)) : null,
-          notes: str(data.notes),
+          notes: str(data.notes, 4000),
         },
       });
       break;
@@ -208,10 +228,7 @@ export async function createInvestor(data: Record<string, unknown>, actor: Actor
   if (!investor) throw bad("تعذّر إنشاء الشريك", 500);
 
   if (data.portalEmail && data.portalPassword) {
-    const passwordHash = await bcrypt.hash(String(data.portalPassword), 12);
-    await prisma.invPortalUser.create({
-      data: { investorId: investor.id, email: String(data.portalEmail).toLowerCase().trim(), passwordHash },
-    });
+    await setPortalLogin(investor.id, data.portalEmail, data.portalPassword);
   }
 
   await investAudit({
@@ -311,9 +328,12 @@ export async function getInvestor(id: string) {
     phone: r.phone,
     city: r.city,
     address: r.address,
-    nationalId: safeDecrypt(r.nationalIdEnc),
+    // Sensitive fields are only returned by revealInvestorPii (audited).
+    nationalId: null as string | null,
     nationalIdLast4: r.nationalIdLast4,
-    bankDetails: safeDecrypt(r.bankDetailsEnc),
+    hasNationalId: Boolean(r.nationalIdEnc),
+    bankDetails: null as string | null,
+    hasBankDetails: Boolean(r.bankDetailsEnc),
     notes: r.notes,
     active: r.active,
     createdAt: r.createdAt.toISOString(),
@@ -353,6 +373,20 @@ export async function getInvestor(id: string) {
   };
 }
 
+/** Decrypt national ID / bank details on explicit request, and log who looked. */
+export async function revealInvestorPii(id: string, actor: Actor) {
+  const r = await prisma.invInvestor.findUnique({ where: { id }, select: { nationalIdEnc: true, bankDetailsEnc: true } });
+  if (!r) throw bad("الشريك غير موجود", 404);
+  await investAudit({
+    actorId: actor.id,
+    actorEmail: actor.email,
+    action: "investor.pii.reveal",
+    entityType: "InvInvestor",
+    entityId: id,
+  });
+  return { nationalId: safeDecrypt(r.nationalIdEnc), bankDetails: safeDecrypt(r.bankDetailsEnc) };
+}
+
 export async function updateInvestor(id: string, data: Record<string, unknown>, actor: Actor) {
   const existing = await prisma.invInvestor.findUnique({ where: { id } });
   if (!existing) throw bad("الشريك غير موجود", 404);
@@ -385,7 +419,7 @@ export async function updateInvestor(id: string, data: Record<string, unknown>, 
       phone: has("phone") ? normalizePhone(data.phone) : undefined,
       city: has("city") ? str(data.city) : undefined,
       address: has("address") ? str(data.address) : undefined,
-      notes: has("notes") ? str(data.notes) : undefined,
+      notes: has("notes") ? str(data.notes, 4000) : undefined,
       active: has("active") ? Boolean(data.active) : undefined,
       ...(nid !== undefined
         ? {
@@ -399,13 +433,7 @@ export async function updateInvestor(id: string, data: Record<string, unknown>, 
   });
 
   if (data.portalEmail && data.portalPassword) {
-    const email = String(data.portalEmail).toLowerCase().trim();
-    const passwordHash = await bcrypt.hash(String(data.portalPassword), 12);
-    await prisma.invPortalUser.upsert({
-      where: { investorId: id },
-      create: { investorId: id, email, passwordHash },
-      update: { email, passwordHash, active: true },
-    });
+    await setPortalLogin(id, data.portalEmail, data.portalPassword);
   }
 
   await investAudit({
@@ -443,16 +471,16 @@ export async function addProjectMember(projectId: string, data: Record<string, u
         projectId,
         investorId,
         isCoordinator,
-        ownershipPercent: data.ownershipPercent != null && data.ownershipPercent !== "" ? String(data.ownershipPercent) : null,
+        ownershipPercent: parsePercentOrNull(data.ownershipPercent) ?? null,
         commissionPercent: commissionPercent ?? null,
-        notes: str(data.notes),
+        notes: str(data.notes, 4000),
         roleLabel: isCoordinator ? "coordinator" : "investor",
         active: true,
       },
       update: {
         isCoordinator,
         commissionPercent: commissionPercent === undefined ? undefined : commissionPercent,
-        notes: data.notes !== undefined ? str(data.notes) : undefined,
+        notes: data.notes !== undefined ? str(data.notes, 4000) : undefined,
         active: true,
         leftAt: null,
       },
@@ -504,8 +532,12 @@ export function parsePercentOrNull(v: unknown): string | null | undefined {
 }
 
 export async function updateProjectMember(projectId: string, investorId: string, data: Record<string, unknown>, actor: Actor) {
-  const m = await prisma.invMembership.findUnique({ where: { projectId_investorId: { projectId, investorId } } });
+  const m = await prisma.invMembership.findUnique({
+    where: { projectId_investorId: { projectId, investorId } },
+    include: { project: { select: { status: true } } },
+  });
   if (!m || !m.active) throw bad("الشريك ليس عضواً في المشروع", 404);
+  if (["settled", "closed", "cancelled"].includes(m.project.status)) throw bad("المشروع مغلق");
   const commissionPercent = parsePercentOrNull(data.commissionPercent);
   await prisma.$transaction(async (tx) => {
     if (data.isCoordinator === true) {
@@ -517,7 +549,7 @@ export async function updateProjectMember(projectId: string, investorId: string,
         isCoordinator: data.isCoordinator != null ? Boolean(data.isCoordinator) : undefined,
         roleLabel: data.isCoordinator != null ? (data.isCoordinator ? "coordinator" : "investor") : undefined,
         commissionPercent,
-        notes: data.notes !== undefined ? str(data.notes) : undefined,
+        notes: data.notes !== undefined ? str(data.notes, 4000) : undefined,
       },
     });
   });
@@ -533,8 +565,12 @@ export async function updateProjectMember(projectId: string, investorId: string,
 }
 
 export async function removeProjectMember(projectId: string, investorId: string, actor: Actor) {
-  const m = await prisma.invMembership.findUnique({ where: { projectId_investorId: { projectId, investorId } } });
+  const m = await prisma.invMembership.findUnique({
+    where: { projectId_investorId: { projectId, investorId } },
+    include: { project: { select: { status: true } } },
+  });
   if (!m || !m.active) throw bad("الشريك ليس عضواً في المشروع", 404);
+  if (["settled", "closed", "cancelled"].includes(m.project.status)) throw bad("المشروع مغلق");
   const [contribs, expenses] = await Promise.all([
     prisma.invContribution.count({ where: { projectId, investorId, approvalStatus: "approved" } }),
     prisma.invExpense.count({ where: { projectId, payerInvestorId: investorId, status: { in: ["pending", "approved"] } } }),

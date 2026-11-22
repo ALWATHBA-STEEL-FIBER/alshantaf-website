@@ -1035,15 +1035,19 @@ function PayoutTab({ p, done }: TabProps) {
             rule={rule}
             onChange={setRuleDraft}
             shareLosses={p.shareLossesByOwnership}
-            onShareLosses={async (v) => {
-              await crmApi.updateProject(p.id, { shareLossesByOwnership: v });
-              await done(t("تم الحفظ", "Saved"));
-            }}
+            onShareLosses={(v) =>
+              crmApi
+                .updateProject(p.id, { shareLossesByOwnership: v })
+                .then(() => done(t("تم الحفظ", "Saved")))
+                .catch((err) => setError(err instanceof ApiError ? err.message : "Failed"))
+            }
             coordinatorParticipates={p.coordinatorParticipatesInProfit}
-            onCoordinatorParticipates={async (v) => {
-              await crmApi.updateProject(p.id, { coordinatorParticipatesInProfit: v });
-              await done(t("تم الحفظ", "Saved"));
-            }}
+            onCoordinatorParticipates={(v) =>
+              crmApi
+                .updateProject(p.id, { coordinatorParticipatesInProfit: v })
+                .then(() => done(t("تم الحفظ", "Saved")))
+                .catch((err) => setError(err instanceof ApiError ? err.message : "Failed"))
+            }
           />
           {ruleDraft ? (
             <div className="flex gap-2">

@@ -78,10 +78,11 @@ export function PartnerFormModal({
       city: d.city,
       address: d.address,
       notes: d.notes,
-      bankDetails: d.bankDetails,
       force,
     };
-    if (!partner || d.nationalId !== (partner.nationalId ?? "")) payload.nationalId = d.nationalId;
+    // National ID / bank are write-only on edit: empty means "keep what is stored".
+    if (!partner || d.nationalId.trim()) payload.nationalId = d.nationalId;
+    if (!partner || d.bankDetails.trim()) payload.bankDetails = d.bankDetails;
     if (d.portalEmail && d.portalPassword) {
       payload.portalEmail = d.portalEmail;
       payload.portalPassword = d.portalPassword;
@@ -136,7 +137,11 @@ export function PartnerFormModal({
           </Field>
           <Field
             label={d.kind === "company" ? t("الرقم الوطني للمنشأة", "Company national no.") : t("الرقم الوطني / الجواز", "National ID / passport")}
-            hint={t("مشفّر، ويمكن البحث به", "Encrypted, still searchable")}
+            hint={
+              partner?.hasNationalId
+                ? t(`محفوظ (…${partner.nationalIdLast4 ?? ""}) — اتركه فارغاً للإبقاء عليه`, `Saved (…${partner.nationalIdLast4 ?? ""}) — leave empty to keep`)
+                : t("مشفّر، ويمكن البحث به", "Encrypted, still searchable")
+            }
           >
             <input className={inputCls} dir="ltr" value={d.nationalId} onChange={set("nationalId")} />
           </Field>
@@ -159,7 +164,10 @@ export function PartnerFormModal({
             <Field label={t("العنوان", "Address")}>
               <input className={inputCls} value={d.address} onChange={set("address")} />
             </Field>
-            <Field label={t("الحساب البنكي / IBAN", "Bank account / IBAN")} hint={t("مشفّر", "Encrypted")}>
+            <Field
+              label={t("الحساب البنكي / IBAN", "Bank account / IBAN")}
+              hint={partner?.hasBankDetails ? t("محفوظ — اتركه فارغاً للإبقاء عليه", "Saved — leave empty to keep") : t("مشفّر", "Encrypted")}
+            >
               <input className={inputCls} dir="ltr" value={d.bankDetails} onChange={set("bankDetails")} />
             </Field>
             <Field label={t("ملاحظات", "Notes")}>

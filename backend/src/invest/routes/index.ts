@@ -286,6 +286,11 @@ admin.get(
 );
 
 admin.post(
+  "/investors/:id/reveal",
+  h(async (req) => investors.revealInvestorPii(req.params.id, actor(req)))
+);
+
+admin.post(
   "/investors/duplicates",
   h(async (req) => investors.findDuplicates(req.body ?? {}, req.body?.excludeId ? String(req.body.excludeId) : undefined))
 );

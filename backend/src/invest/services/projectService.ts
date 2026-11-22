@@ -221,6 +221,10 @@ export async function createProject(data: Record<string, unknown>, actor: Actor)
     if (p.capital != null && p.capital !== "" && !(Number(p.capital) >= 0)) throw bad("رأس مال غير صالح");
   }
   if (partners.length > 50) throw bad("الحد الأقصى 50 شريكاً للمشروع");
+  {
+    const { parsePercentOrNull } = await import("./investorService");
+    for (const p of partners) parsePercentOrNull(p.commissionPercent); // throws before anything is written
+  }
   if (partners.filter((p) => p.isCoordinator).length > 1) throw bad("منسق واحد فقط لكل مشروع");
   if (partners.length) {
     const found = await prisma.invInvestor.count({ where: { id: { in: [...seen] }, organizationId: org.id } });
@@ -562,6 +566,7 @@ export async function simulateProject(projectId: string, body: Record<string, un
 export function previewDistribution(body: Record<string, unknown>) {
   const rows = Array.isArray(body.partners) ? (body.partners as Record<string, unknown>[]) : [];
   if (!rows.length) throw bad("أضف شركاء");
+  if (rows.length > 100) throw bad("عدد الشركاء كبير جداً");
   const ownership = computeOwnershipFromCapital(
     rows.map((r, i) => ({ partnerId: String(r.id ?? i), equityCapital: dstr(moneyOrNull(r.capital) ?? 0) }))
   );

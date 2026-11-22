@@ -91,7 +91,9 @@ export async function createContribution(
   const investorId = String(data.investorId || "").trim();
   if (!investorId) throw Object.assign(new Error("investorId is required"), { status: 400 });
   const amount = dstr(data.amount as string | number | null | undefined);
-  if (!amount || Number(amount) <= 0) throw Object.assign(new Error("amount must be positive"), { status: 400 });
+  if (!(Number(amount) > 0) || Number(amount) > 1e12) {
+    throw Object.assign(new Error("المبلغ يجب أن يكون أكبر من صفر"), { status: 400 });
+  }
 
   const membership = await prisma.invMembership.findUnique({
     where: { projectId_investorId: { projectId, investorId } },
@@ -108,6 +110,13 @@ export async function createContribution(
     : "additional";
   const contributedAt = parseDate(data.contributedAt);
   const withdrawal = kind === "withdrawal";
+  if (withdrawal) {
+    const { resolveProjectPartners } = await import("./core");
+    const me = (await resolveProjectPartners(projectId)).find((p) => p.investorId === investorId);
+    if (!me || Number(me.capitalContributed) < Number(amount)) {
+      throw Object.assign(new Error(`لا يمكن سحب أكثر من رأس مال الشريك (${me?.capitalContributed ?? "0"})`), { status: 400 });
+    }
+  }
 
   const journal = await postBalancedJournal({
     organizationId: project.organizationId,
@@ -382,7 +391,9 @@ export async function createExpense(
   const title = String(data.title || "").trim();
   if (!title) throw Object.assign(new Error("وصف المصروف مطلوب"), { status: 400 });
   const amount = dstr(data.amount as string | number | null | undefined);
-  if (!amount || !(Number(amount) > 0)) throw Object.assign(new Error("المبلغ يجب أن يكون أكبر من صفر"), { status: 400 });
+  if (!(Number(amount) > 0) || Number(amount) > 1e12) {
+    throw Object.assign(new Error("المبلغ يجب أن يكون أكبر من صفر"), { status: 400 });
+  }
 
   const fundedBy = data.fundedBy === "project" ? "project" : "partner";
   let payerInvestorId: string | null = null;
@@ -402,9 +413,9 @@ export async function createExpense(
   const row = await prisma.invExpense.create({
     data: {
       projectId,
-      title,
-      category: data.category ? String(data.category) : null,
-      description: data.description ? String(data.description) : null,
+      title: title.slice(0, 300),
+      category: data.category && (EXPENSE_CATEGORIES as readonly string[]).includes(String(data.category)) ? String(data.category) : "other",
+      description: data.description ? String(data.description).slice(0, 2000) : null,
       amount,
       currency: project.currency,
       expenseDate: parseDate(data.expenseDate),
@@ -450,7 +461,10 @@ export async function approveExpense(
   });
   if (!expense) throw Object.assign(new Error("Expense not found"), { status: 404 });
   if (expense.status !== "pending") {
-    throw Object.assign(new Error("Expense is not pending"), { status: 400 });
+    throw Object.assign(new Error("المصروف ليس بانتظار الاعتماد"), { status: 400 });
+  }
+  if (["settled", "closed", "cancelled"].includes(expense.project.status)) {
+    throw Object.assign(new Error("المشروع مغلق"), { status: 400 });
   }
   // Maker-checker: creator cannot approve
   // Maker-checker is opt-in (INVEST_STRICT_MAKER_CHECKER=1): a single-admin office must be able to

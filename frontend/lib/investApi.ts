@@ -317,6 +317,8 @@ export type PartnerFull = Omit<PartnerRow, "projectCount" | "openProjectCount" |
   address: string | null;
   nationalId: string | null;
   bankDetails: string | null;
+  hasNationalId?: boolean;
+  hasBankDetails?: boolean;
   projects: PartnerProjectRow[];
   contributions: {
     id: string;
@@ -516,6 +518,11 @@ export const crmApi = {
     clientFetch<PartnerRow>("/invest/investors", { method: "POST", body: JSON.stringify(data) }),
   updatePartner: (id: string, data: Record<string, unknown>) =>
     clientFetch<PartnerFull>(`/invest/investors/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  revealPartner: (id: string) =>
+    clientFetch<{ nationalId: string | null; bankDetails: string | null }>(`/invest/investors/${id}/reveal`, {
+      method: "POST",
+      body: "{}",
+    }),
   duplicates: (data: Record<string, unknown>) =>
     clientFetch<PartnerRow[]>("/invest/investors/duplicates", { method: "POST", body: JSON.stringify(data) }),
 

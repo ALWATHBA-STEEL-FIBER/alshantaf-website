@@ -13,7 +13,16 @@ export function InvestInvestorDetail({ investorId }: { investorId: string }) {
   const [p, setP] = useState<PartnerFull | null>(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
-  const [showId, setShowId] = useState(false);
+  const [pii, setPii] = useState<{ nationalId: string | null; bankDetails: string | null } | null>(null);
+  const showId = Boolean(pii);
+  async function togglePii() {
+    if (pii) return setPii(null);
+    try {
+      setPii(await crmApi.revealPartner(investorId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed");
+    }
+  }
 
   const load = useCallback(
     () =>
@@ -88,9 +97,9 @@ export function InvestInvestorDetail({ investorId }: { investorId: string }) {
             <div className="flex justify-between gap-2">
               <dt className="text-ink-soft">{t("الرقم الوطني", "National ID")}</dt>
               <dd className="font-medium tabular-nums" dir="ltr">
-                {p.nationalId ? (showId ? p.nationalId : `••••${p.nationalIdLast4 ?? ""}`) : "—"}
-                {p.nationalId ? (
-                  <button className="ms-2 text-[11px] text-green font-bold" onClick={() => setShowId((s) => !s)}>
+                {p.hasNationalId ? (showId ? pii?.nationalId ?? "—" : `••••${p.nationalIdLast4 ?? ""}`) : "—"}
+                {p.hasNationalId || p.hasBankDetails ? (
+                  <button className="ms-2 text-[11px] text-green font-bold" onClick={togglePii}>
                     {showId ? t("إخفاء", "Hide") : t("إظهار", "Show")}
                   </button>
                 ) : null}
@@ -98,7 +107,7 @@ export function InvestInvestorDetail({ investorId }: { investorId: string }) {
             </div>
             <div className="flex justify-between gap-2">
               <dt className="text-ink-soft">{t("الحساب البنكي", "Bank")}</dt>
-              <dd className="font-medium tabular-nums" dir="ltr">{p.bankDetails ? (showId ? p.bankDetails : "••••") : "—"}</dd>
+              <dd className="font-medium tabular-nums" dir="ltr">{p.hasBankDetails ? (showId ? pii?.bankDetails ?? "—" : "••••") : "—"}</dd>
             </div>
             <div className="flex justify-between gap-2">
               <dt className="text-ink-soft">{t("بوابة المستثمر", "Portal")}</dt>
@@ -222,6 +231,7 @@ export function InvestInvestorDetail({ investorId }: { investorId: string }) {
           onClose={() => setEditing(false)}
           onSaved={() => {
             setEditing(false);
+            setPii(null);
             void load();
           }}
         />
